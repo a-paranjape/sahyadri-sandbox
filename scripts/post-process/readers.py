@@ -14,7 +14,6 @@ class HaloReader(object,Paths,Utilities):
 
         Paths.__init__(self)
         Utilities.__init__(self)
-        Constants.__init__(self)
         
         self.sim_stem = sim_stem
         self.logfile = logfile
