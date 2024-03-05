@@ -7,7 +7,7 @@ from utilities import Utilities,Constants,Paths
 # Reader for (ROCKSTAR) halo catalog. 
 ########################################################
 
-class HaloReader(object,Paths,Utilities,Constants):
+class HaloReader(object,Paths,Utilities):
     """ Reader for (ROCKSTAR) halo catalog. """
 
     def __init__(self,sim_stem='scm1024',logfile=None,verbose=True):
