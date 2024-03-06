@@ -7,7 +7,7 @@ from utilities import Utilities,Constants,Paths
 # Reader for (ROCKSTAR) halo catalog. 
 ########################################################
 
-class HaloReader(object,Paths,Utilities):
+class HaloReader(Utilities,Paths):
     """ Reader for (ROCKSTAR) halo catalog. """
 
     def __init__(self,sim_stem='scm1024',logfile=None,verbose=True):
@@ -19,14 +19,15 @@ class HaloReader(object,Paths,Utilities):
         self.logfile = logfile
         self.verbose = verbose
 
-        self.halodatatype = {'Scale':float,'ID':long,'descScale':float,'descID':long,'numProg':int,
+        self.halodatatype = {'Scale':float,'ID':'int64','descScale':float,'descID':'int64','numProg':int,
                              'pid':int,'upid':int,'descpid':int,'phantom':int,'sam_mvir':float,
                              'mbnd_vir':float,'rvir':float,'rs':float,'vrms':float,'mmp':int,
                              'ScaleLastMM':float,'vmax':float,
                              'x':float,'y':float,'z':float,'vx':float,'vy':float,'vz':float,
                              'Jx':float,'Jy':float,'Jz':float,'spin':float,
-                             'BreadthFirstID':long,'DepthFirstID':long,'TreeRootID':long,'OrigHaloID':long,
-                             'snapnum':int,'NextCoprogDepthFirstID':long,'LastProgDepthFirstID':long,
+                             'BreadthFirstID':'int64','DepthFirstID':'int64','TreeRootID':'int64','OrigHaloID':'int64',
+                             'snapnum':int,'NextCoprogDepthFirstID':'int64','LastProgDepthFirstID':'int64',
+                             'LastMainLeafDepthFirstID':float,'TidalForce':float,'TidalID':float, # new cols
                              'rs_klypin':float,
                              'mvir':float,'m200b':float,'m200c':float,'mCustom2':float,'mCustom':float,
                              'Xoff':float,'Voff':float,'spin_bullock':float,
@@ -35,9 +36,14 @@ class HaloReader(object,Paths,Utilities):
                              'TbyU':float,'Mpe_Behroozi':float,'Mpe_Diemer':float,'halfmassradius':float,
                              'macc':float,'mpeak':float,'vacc':float,'vpeak':float,'halfmassscale':float,
                              'accrate_inst':float,'accrate_100Myr':float,'accrate_1tdyn':float,
-                             'accrate_2tdyn':float,'accrate_mpeak':float,'mpeakscale':float,
+                             'accrate_2tdyn':float,'accrate_mpeak':float,
+                             'acc_logvmax_inst':float,'acc_logvmax_1tdyn':float, # new cols
+                             'mpeakscale':float,
                              'accscale':float,'firstaccscale':float,'firstaccmvir':float,
-                             'firstaccvmax':float,'vmaxAtmpeak':float}
+                             'firstaccvmax':float,'vmaxAtmpeak':float,
+                             'TidalForce_tdyn':float, 'log(vmax/vmax_max(tdyn,tmpeak))':float,
+                             'time_futmerg':float,'futmerg_mmpid':float,'spin_mpeakscale':float # new cols
+                             }
         
         self.halodatanames = ['Scale','ID','descScale','descID','numProg',
                               'pid','upid','descpid','phantom','sam_mvir',
@@ -47,6 +53,7 @@ class HaloReader(object,Paths,Utilities):
                               'Jx','Jy','Jz','spin',
                               'BreadthFirstID','DepthFirstID','TreeRootID','OrigHaloID',
                               'snapnum','NextCoprogDepthFirstID','LastProgDepthFirstID',
+                              'LastMainLeafDepthFirstID','TidalForce','TidalID', # new cols
                               'rs_klypin',
                               'mvir','m200b','m200c','mCustom2','mCustom',
                               'Xoff','Voff','spin_bullock',
@@ -55,11 +62,15 @@ class HaloReader(object,Paths,Utilities):
                               'TbyU','Mpe_Behroozi','Mpe_Diemer','halfmassradius',
                               'macc','mpeak','vacc','vpeak','halfmassscale',
                               'accrate_inst','accrate_100Myr','accrate_1tdyn',
-                              'accrate_2tdyn','accrate_mpeak','mpeakscale',
+                              'accrate_2tdyn','accrate_mpeak',
+                              'acc_logvmax_inst','acc_logvmax_1tdyn', # new cols
+                              'mpeakscale',
                               'accscale','firstaccscale','firstaccmvir',
-                              'firstaccvmax','vmaxAtmpeak']
+                              'firstaccvmax','vmaxAtmpeak',
+                              'TidalForce_tdyn', 'log(vmax/vmax_max(tdyn,tmpeak))','time_futmerg','futmerg_mmpid','spin_mpeakscale' # new cols
+                              ]
         
-        self.vadatatype = {'ID':long,
+        self.vadatatype = {'ID':'int64',
                            'lam1_R2R200b':float,'lam2_R2R200b':float,'lam3_R2R200b':float,
                            'lam1_R4R200b':float,'lam2_R4R200b':float,'lam3_R4R200b':float,
                            'lam1_R6R200b':float,'lam2_R6R200b':float,'lam3_R6R200b':float,

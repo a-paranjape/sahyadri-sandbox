@@ -13,9 +13,9 @@ class Paths(object):
         self.python_path = self.home_path + 'scripts/post-process/'
 
         self.scratch_path = self.home_path + 'Test/' # '/scratch/aseem/'
-        self.sim_path = scratch_path + 'sims/'
-        self.halo_path = scratch_path + 'halos/'
-        self.gal_path = scratch_path + 'galaxies/'
+        self.sim_path = self.scratch_path + 'sims/'
+        self.halo_path = self.scratch_path + 'halos/'
+        self.gal_path = self.scratch_path + 'galaxies/'
 
         self.config_path = self.home_path + 'Test/' # 'config/'
         self.config_transfer_path = self.config_path + 'transfer/'
