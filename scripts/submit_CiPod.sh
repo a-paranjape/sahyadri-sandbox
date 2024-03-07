@@ -7,7 +7,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 # general setup
-SCF=$HOME/config/submit/$1
+SCF=$HOME/config/submit/$1  # change path so that this script can find the config file
 SIM_NAME=`awk '$1=="SIM_NAME" {print $3}' $SCF`
 SIM_NPART=`awk '$1=="SIM_NPART" {print $3}' $SCF`
 SIM_REAL=`awk '$1=="SIM_REAL" {print $3}' $SCF`
