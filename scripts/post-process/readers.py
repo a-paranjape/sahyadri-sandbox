@@ -32,7 +32,7 @@ class SnapshotReader(Utilities,Paths):
             self.snapshot_file += '.0.hdf5'
         else:
             raise Exception('File not found!')
-        
+
         if self.verbose:
             self.print_this('Snapshot Reader:\n... preparing to read file: '+self.snapshot_file,self.logfile)
             
