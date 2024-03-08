@@ -2,7 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 import gc
-from utilities import Utilities,Constants,Paths
+from utilities import Utilities,Paths
 import h5py
 
 ########################################################
@@ -10,6 +10,7 @@ import h5py
 ########################################################
 class SnapshotReader(Utilities,Paths):
     """ Reader for HDF5 Gadget-4 snapshot. Reads single snapshot for one particle type. """
+    ###############################################
     def __init__(self,sim_stem='scm1024',real=1,snap=200,ptype=1,logfile=None,verbose=True):
         # code below inspired by Pylians (https://github.com/franciscovillaescusa/Pylians3/blob/master/library/readgadget.py)
         # and simplified to focus on Gadget-4 HDF5 snapshots.
@@ -58,8 +59,10 @@ class SnapshotReader(Utilities,Paths):
             self.print_this('... loaded header and parameters',self.logfile)
 
         f.close()
+    ###############################################
 
-    def read_block(self,block='pos'):
+    ###############################################
+    def read_block(self,block='pos',down_to=0,seed=None):
         """ Read positions, velocities or IDs of one complete snapshot. """
         if block not in ['pos','vel','ids']:
             raise ValueError("block should be one of ['pos','vel','ids'] in read_block().")
@@ -94,24 +97,38 @@ class SnapshotReader(Utilities,Paths):
             out = out_part.copy()
 
         del out_part
-        gc.collect()
+
+        if down_to**3 > self.npart:
+            if self.verbose:
+                self.print_this('Not enough particles! Using original sample...',self.logfile)
+            down_to = 0
             
-        return out
+        if down_to > 0:
+            if self.verbose:
+                self.print_this('... downsampling to {0:d}^3'.format(down_to),self.logfile)
+            rng = np.random.RandomState(seed)
+            n_sample = int(down_to**3)
+            
+            ind = rng.choice(self.npart,size=n_sample,replace=False)
+            out = out[ind]
+            del ind
+            
+        gc.collect()
+        
+        return out if block == 'ids' else out.T # notice transpose
+    ###############################################
 
 ########################################################
 # Reader for (ROCKSTAR) halo catalog. 
 ########################################################
-class HaloReader(Utilities,Paths):
+class HaloReader(SnapshotReader):
     """ Reader for (ROCKSTAR) halo catalog. """
+    ###############################################
+    def __init__(self,sim_stem='scm1024',real=1,snap=200,logfile=None,verbose=True):
 
-    def __init__(self,sim_stem='scm1024',logfile=None,verbose=True):
+        SnapshotReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose)
 
-        Paths.__init__(self)
-        Utilities.__init__(self)
-        
-        self.sim_stem = sim_stem
-        self.logfile = logfile
-        self.verbose = verbose
+        self.halocat_stem = self.sim_stem + '/r'+str(self.real)+'/' + 'out_' + str(self.snap)        
 
         self.halodatatype = {'Scale':float,'ID':'int64','descScale':float,'descID':'int64','numProg':int,
                              'pid':int,'upid':int,'descpid':int,'phantom':int,'sam_mvir':float,
@@ -190,29 +207,89 @@ class HaloReader(Utilities,Paths):
         self.scalefile = self.halo_path + sim_stem + '/scales.txt'
         self.SCALES = np.loadtxt(self.scalefile,dtype=[('snapnum','i'),('scale','f')])
         self.REDSHIFT = 1.0/self.SCALES['scale'] - 1.0
+    ###############################################
 
 
-    def read_this(self,real,snap,VA=False,GRID=512):
+    ###############################################
+    def read_this(self,va=False):
         """ Read (value added) halo catalog for snapshot number 'snap' from realisation 'real'.
             Returns structured array.
         """
-
-        halocat = self.sim_stem + '/r'+str(real)+'/' + 'out_' + str(snap)
-        if not VA:
-            halocat += '.trees'
+        if not va:
+            halocat = self.halocat_stem + '.trees'
         else:
-            if GRID != 512:
-                halocat += '_'+str(GRID)
-            halocat += '.vahc'
+            halocat = self.halocat_stem + '.vahc'
 
         if self.verbose:
-            print_string = '... using file: '+ halocat
-            self.print_this(print_string,self.logfile)
+            self.print_this('... using file: '+ halocat,self.logfile)
         halocat = self.halo_path + halocat
 
-        hdtype = self.halodatatype if not VA else self.vadatatype
-        hnames = self.halodatanames if not VA else self.vadatanames
-        halos = pd.read_csv(halocat,dtype=hdtype,names=hnames,
-                            comment='#',delim_whitespace=True,header=None).to_records()
+        hdtype = self.halodatatype if not va else self.vadatatype
+        hnames = self.halodatanames if not va else self.vadatanames
+        halos = pd.read_csv(halocat,dtype=hdtype,names=hnames,comment='#',delim_whitespace=True,header=None).to_records()
 
         return halos
+    ###############################################
+
+    
+    ###############################################
+    def prep_halos(self,va=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
+        """ Reads halo (+ vahc) catalogs for given realisation and snapshot. 
+             Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
+             where QE > 0 (default QE=0.5; Bett+07).
+             Selects objects with at least Npmin particles for given massdef.
+             Optionally removes subhalos (set keep_subhalos=False).
+             Returns array of shape (3,Ndata) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
+             Halos will be sorted by (increasing) massdef.
+        """ 
+
+        if self.verbose:
+            self.print_this("... preparing halo data",self.logfile)
+        halos = self.read_this()
+        Nhalos_all = halos.size
+        mmin = self.mpart*Npmin
+        cond_clean = (halos[massdef] >= mmin)
+        TbyU_max = 0.5*(1+QE)
+        TbyU_min = np.max([0.0,0.5*(1-QE)])
+        cond_clean = cond_clean & ((halos['TbyU'] < TbyU_max) & (TbyU_min < halos['TbyU']))
+        if not keep_subhalos:
+            cond_clean = cond_clean & (halos['pid'] == -1)
+        if self.verbose:
+            self.print_this("... ... using mass definition " + massdef + " > {0:.3e} Msun/h".format(mmin),self.logfile)
+            self.print_this("... ... only relaxed objects retained with {0:.2f} < 2T/|U| < {1:.2f}"
+                            .format(2*TbyU_min,2*TbyU_max),self.logfile)
+            if not keep_subhalos:
+                self.print_this("... ... discarding subhalos",self.logfile)
+
+        halos = halos[cond_clean]
+        if self.verbose:
+            self.print_this("... ... kept {0:d} of {1:d} objects in catalog".format(halos.size,Nhalos_all),self.logfile)
+
+        pos = np.array([halos['x'],halos['y'],halos['z']])
+        # if (self.RSD) & (halos.size > 0):
+        #     if self.verbose:
+        #         self.print_this("... ... applying redshift space displacement",self.logfile)
+        #     pos[2] = pos[2] + 0.01*halos['vz']*(1+self.redshift)/self.EHub(self.redshift)
+        if va:
+            vahc = self.read_this(va=True)
+            vahc = vahc[cond_clean]
+
+        pos = pos % self.Lbox
+        pos = pos.T  # shape (Ntrc,3)
+
+        del cond_clean
+        gc.collect()
+
+        if self.verbose:
+            self.print_this("... ... sorting by "+massdef,self.logfile)
+        sorter = halos[massdef].argsort()
+        halos = halos[sorter]
+        pos = pos[sorter]
+        if va:
+            vahc = vahc[sorter]
+
+        del sorter
+        gc.collect()
+
+        return (pos.T,halos,vahc) if va else (pos.T,halos)
+    ###############################################
