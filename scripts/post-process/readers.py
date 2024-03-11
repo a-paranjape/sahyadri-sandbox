@@ -191,7 +191,7 @@ class HaloReader(SnapshotReader):
                            'lam1_R5Mpch':float,'lam2_R5Mpch':float,'lam3_R5Mpch':float,
                            'lamH1_R3Mpch':float,'lamH2_R3Mpch':float,'lamH3_R3Mpch':float,
                            'lamH1_R5Mpch':float,'lamH2_R5Mpch':float,'lamH3_R5Mpch':float,
-                           'b1':float,'b1wtd':float}
+                           'b1':float} # deleted old 'b1', renamed old 'b1wtd' as new 'b1'
         self.vadatanames = ['ID',
                             'lam1_R2R200b','lam2_R2R200b','lam3_R2R200b',
                             'lam1_R4R200b','lam2_R4R200b','lam3_R4R200b',
@@ -202,11 +202,28 @@ class HaloReader(SnapshotReader):
                             'lam1_R5Mpch','lam2_R5Mpch','lam3_R5Mpch',
                             'lamH1_R3Mpch','lamH2_R3Mpch','lamH3_R3Mpch',
                             'lamH1_R5Mpch','lamH2_R5Mpch','lamH3_R5Mpch',
-                            'b1','b1wtd']
+                            'b1'] # deleted old 'b1', renamed old 'b1wtd' as new 'b1'
+        self.vadtypelist = [('ID','i8'),
+                            ('lam1_R2R200b','f'),('lam2_R2R200b','f'),('lam3_R2R200b','f'),
+                            ('lam1_R4R200b','f'),('lam2_R4R200b','f'),('lam3_R4R200b','f'),
+                            ('lam1_R6R200b','f'),('lam2_R6R200b','f'),('lam3_R6R200b','f'),
+                            ('lam1_R8R200b','f'),('lam2_R8R200b','f'),('lam3_R8R200b','f'),
+                            ('lam1_R2Mpch','f'),('lam2_R2Mpch','f'),('lam3_R2Mpch','f'),
+                            ('lam1_R3Mpch','f'),('lam2_R3Mpch','f'),('lam3_R3Mpch','f'),
+                            ('lam1_R5Mpch','f'),('lam2_R5Mpch','f'),('lam3_R5Mpch','f'),
+                            ('lamH1_R3Mpch','f'),('lamH2_R3Mpch','f'),('lamH3_R3Mpch','f'),
+                            ('lamH1_R5Mpch','f'),('lamH2_R5Mpch','f'),('lamH3_R5Mpch','f'),
+                            ('b1','f')] # deleted old 'b1', renamed old 'b1wtd' as new 'b1'
+        
+        self.scale_strings = ['R2R200b','R4R200b','R6R200b','R8R200b','R2Mpch','R3Mpch','R5Mpch']
 
         self.scalefile = self.halo_path + sim_stem + '/scales.txt'
         self.SCALES = np.loadtxt(self.scalefile,dtype=[('snapnum','i'),('scale','f')])
         self.REDSHIFT = 1.0/self.SCALES['scale'] - 1.0
+        
+        # number of grid cells enclosed inside 2*R_200b. needed for calc_Npmin_default()
+        self.NENCL_2R200B = 0.2 # 0.2
+        self.MHALO_MAX = 3e15
     ###############################################
 
 
@@ -236,10 +253,10 @@ class HaloReader(SnapshotReader):
     def prep_halos(self,va=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
         """ Reads halo (+ vahc) catalogs for given realisation and snapshot. 
              Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
-             where QE > 0 (default QE=0.5; Bett+07).
+             where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
              Selects objects with at least Npmin particles for given massdef.
              Optionally removes subhalos (set keep_subhalos=False).
-             Returns array of shape (3,Ndata) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
+             Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
              Halos will be sorted by (increasing) massdef.
         """ 
 
@@ -249,15 +266,19 @@ class HaloReader(SnapshotReader):
         Nhalos_all = halos.size
         mmin = self.mpart*Npmin
         cond_clean = (halos[massdef] >= mmin)
-        TbyU_max = 0.5*(1+QE)
-        TbyU_min = np.max([0.0,0.5*(1-QE)])
-        cond_clean = cond_clean & ((halos['TbyU'] < TbyU_max) & (TbyU_min < halos['TbyU']))
+        if QE is not None:
+            TbyU_max = 0.5*(1+QE)
+            TbyU_min = np.max([0.0,0.5*(1-QE)])
+            cond_clean = cond_clean & ((halos['TbyU'] < TbyU_max) & (TbyU_min < halos['TbyU']))
         if not keep_subhalos:
             cond_clean = cond_clean & (halos['pid'] == -1)
         if self.verbose:
             self.print_this("... ... using mass definition " + massdef + " > {0:.3e} Msun/h".format(mmin),self.logfile)
-            self.print_this("... ... only relaxed objects retained with {0:.2f} < 2T/|U| < {1:.2f}"
-                            .format(2*TbyU_min,2*TbyU_max),self.logfile)
+            if QE is not None:
+                self.print_this("... ... only relaxed objects retained with {0:.2f} < 2T/|U| < {1:.2f}"
+                                .format(2*TbyU_min,2*TbyU_max),self.logfile)
+            else:
+                self.print_this("... ... skipping relaxation cleaning",self.logfile)
             if not keep_subhalos:
                 self.print_this("... ... discarding subhalos",self.logfile)
 
@@ -265,17 +286,17 @@ class HaloReader(SnapshotReader):
         if self.verbose:
             self.print_this("... ... kept {0:d} of {1:d} objects in catalog".format(halos.size,Nhalos_all),self.logfile)
 
-        pos = np.array([halos['x'],halos['y'],halos['z']])
+        hpos = np.array([halos['x'],halos['y'],halos['z']])
         # if (self.RSD) & (halos.size > 0):
         #     if self.verbose:
         #         self.print_this("... ... applying redshift space displacement",self.logfile)
-        #     pos[2] = pos[2] + 0.01*halos['vz']*(1+self.redshift)/self.EHub(self.redshift)
+        #     hpos[2] = hpos[2] + 0.01*halos['vz']*(1+self.redshift)/self.EHub(self.redshift)
         if va:
             vahc = self.read_this(va=True)
             vahc = vahc[cond_clean]
 
-        pos = pos % self.Lbox
-        pos = pos.T  # shape (Ntrc,3)
+        hpos = hpos % self.Lbox
+        hpos = hpos.T  # shape (Ntrc,3)
 
         del cond_clean
         gc.collect()
@@ -284,12 +305,19 @@ class HaloReader(SnapshotReader):
             self.print_this("... ... sorting by "+massdef,self.logfile)
         sorter = halos[massdef].argsort()
         halos = halos[sorter]
-        pos = pos[sorter]
+        hpos = hpos[sorter]
         if va:
             vahc = vahc[sorter]
 
         del sorter
         gc.collect()
 
-        return (pos.T,halos,vahc) if va else (pos.T,halos)
+        return (hpos,halos,vahc) if va else (hpos,halos)
+    ###############################################
+
+    
+    ###############################################
+    def calc_Npmin_default(self,grid):
+        Npmin = 200*self.NENCL_2R200B*(self.npart/1024**3.)*(512./grid)**3
+        return Npmin
     ###############################################

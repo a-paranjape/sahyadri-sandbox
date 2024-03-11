@@ -47,7 +47,8 @@ class PowerSpectrum(Utilities,Paths,Constants):
             
         self.cell_size = self.Lbox/self.grid
         self.Delta_k = 2*np.pi/self.Lbox
-
+        self.grid_inv = 2*np.pi/self.grid
+        
         self.kmin = 1.0*self.Delta_k
         self.kNy = np.pi/self.cell_size # don't change this!
         if self.lgbin:
@@ -132,7 +133,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
             (See Kravtsov's notes at
              http://background.uchicago.edu/~whu/Courses/Ast321_11/pm.pdf
              for a nice exposition.)
-            Assumes pos is numpy array with pos.shape = (dim,ndata)
+            Assumes pos is numpy array with pos.shape = (3,ndata)
             Assumes position range along each dimension is (0,Lbox)
             Returns density (contrast) [shape (self.grid,self.grid,self.grid)]
         """
@@ -275,9 +276,9 @@ class PowerSpectrum(Utilities,Paths,Constants):
         if self.verbose:
             self.print_this('... calculating tidal tensor',self.logfile)
 
-        sinK1 = np.sin(2*np.pi*self.K1/self.grid)
-        sinK2 = np.sin(2*np.pi*self.K2/self.grid)
-        sinK3 = np.sin(2*np.pi*self.K3/self.grid)
+        sinK1 = np.sin(self.grid_inv*self.K1)
+        sinK2 = np.sin(self.grid_inv*self.K2)
+        sinK3 = np.sin(self.grid_inv*self.K3)
         sinKK = sinK1**2 + sinK2**2 + sinK3**2
         # shape (~grid,~grid,~grid)
         
@@ -347,9 +348,9 @@ class PowerSpectrum(Utilities,Paths,Constants):
         if self.verbose:
             self.print_this('... calculating density Hessian',self.logfile)
 
-        sinK1 = np.sin(2*np.pi*self.K1/self.grid)
-        sinK2 = np.sin(2*np.pi*self.K2/self.grid)
-        sinK3 = np.sin(2*np.pi*self.K3/self.grid)
+        sinK1 = np.sin(self.grid_inv*self.K1)
+        sinK2 = np.sin(self.grid_inv*self.K2)
+        sinK3 = np.sin(self.grid_inv*self.K3)
         # shape (~grid,~grid,~grid)
         
         if self.verbose:
@@ -447,3 +448,221 @@ class PowerSpectrum(Utilities,Paths,Constants):
         
         return Pk
     ###############################################
+
+
+    ############################################################
+    def halobyhalo_b1(self,input_array,hpos,kmax=0.1,ret_Pk=False,input_is_density=False,input_is_FTdensity=False,CIC=True):
+        """ Halo-by-halo linear bias. Given input_array containing either
+             matter density estimate of shape (grid,grid,grid) [input_is_density=True] 
+             or dark matter positions of shape (3,Npart) [input_is_density=False] 
+             and halo positions hpos of shape (Ntrc,3), estimates linear bias b1 for each halo.
+             kmax: largest k value (h/Mpc) to use in calculating b1 (default 0.1 h/Mpc)
+             Returns 1. b1_trc: 1 array of shape (Ntrc,)
+                     2. b1_k,ktab[krange]: 2 arrays of shape (krange.size,)
+                     3. (optionally) Pk_matter,ktab: 2 arrays of shape (ktab.size,)
+        """
+
+        if self.verbose:
+            self.print_this("... Halo-by-halo linear bias",self.logfile)
+
+        if len(hpos.shape) != 2:
+            raise TypeError("Incompatible shape for position data. Need (Ntrc,3), detected (" 
+                            + ','.join(['%d' % (i,) for i in hpos.shape]) +').')
+
+        if hpos.shape[1] != 3:
+            dim = 'dimension'
+            if hpos.shape[1] > 1:
+                dim += 's'
+            raise TypeError("Only 3-d data sets supported. Detected {0:d} ".format(hpos.shape[1]) + dim + '.')
+
+        if input_is_density | input_is_FTdensity:
+            if len(input_array.shape) != 3:
+                raise TypeError("Incompatible shape for input_array when input_is_density=True."
+                                +" Need (grid,grid,grid), detected (" 
+                                + ','.join(['%d' % (i,) for i in input_array.shape]) +').')
+            if input_array.shape[0] != self.grid:
+                raise TypeError("Incompatible shape for input_array when input_is_density=True."
+                                +" Need ({0:d},{0:d},{0:d}), detected (".format(self.grid) 
+                                + ','.join(['%d' % (i,) for i in input_array.shape]) +').')
+            if self.verbose:
+                self.print_this("... ... using supplied density field",self.logfile)
+            if input_is_FTdensity:
+                delta_matter = input_array.copy()
+            else:
+                delta_grid = input_array.copy()
+        else:
+            if (len(input_array.shape) != 2) | (input_array.shape[0]!=3):
+                raise TypeError("Incompatible shape for input_array when input_is_density=True."
+                                +" Need (Npart,3), detected (" 
+                                + ','.join(['%d' % (i,) for i in input_array.shape]) +').')
+            if self.verbose:
+                self.print_this("... ... calculating CIC density field",self.logfile)
+            delta_grid = self.density_field(input_array)
+
+        KMAX = np.min([np.where(self.ktab <= kmax)[0][-1],self.nbin/2])
+
+        Ntrc = hpos.shape[0]
+
+        hpos_grid = hpos*self.grid/self.Lbox
+        hgrid = np.fmod(hpos_grid,self.grid).astype('int')
+        # shape(Ntrc,3)
+        # hgrid contains integer vectors identifying the cell (floor) corresponding to each halo: used by CIC
+
+        if not input_is_FTdensity:
+            if self.verbose:
+                self.print_this("... ... Fourier transforming matter density",self.logfile)
+            delta_matter = self.fourier_transform_density(delta_grid,CIC=CIC)
+            del delta_grid
+
+        Pk_matter = self.Pk_grid(delta_matter,input_is_FTdensity=1,CIC=CIC)
+            
+        cond_posPk = (Pk_matter > 0.0)
+        ind_posPk = np.where(cond_posPk)[0]
+        if ind_posPk.size:
+            KMIN = ind_posPk[0]
+            if KMIN >= KMAX:
+                raise ValueError("Incompatible Pk detected in haloByhalo_b1. Try again with finer grid.")
+        else:
+            raise ValueError("Pk = 0 detected at all k in haloByhalo_b1. Try again with finer grid.")
+
+        if self.verbose:
+            self.print_this("... ... setting up index arrays",self.logfile)
+        krange = np.arange(KMIN,KMAX,dtype=int)
+
+        ind = [[]]
+        k1_array = [[]]
+        k2_array = [[]]
+        k3_array = [[]]
+        for k in range(krange.size-1):
+            ind.append([])
+            k1_array.append([])
+            k2_array.append([])
+            k3_array.append([])
+
+        i_size = np.zeros(krange.size,dtype=int)
+        for k in range(krange.size):
+            cond = ((self.KK >= self.k2_compare[krange[k]]) 
+                    & (self.KK < self.k2_compare[krange[k]+1]))
+            ind[k] = np.where(cond) # indices of cells contributing to bin
+            i_size[k] = ind[k][0].size # number of cells contributing to bin
+            k1_array[k] = self.K1[ind[k][0],:,:].flatten()*self.grid_inv # 2pi/self.grid is for later convenience
+            k2_array[k] = self.K2[:,ind[k][1],:].flatten()*self.grid_inv
+            k3_array[k] = self.K3[:,:,ind[k][2]].flatten()*self.grid_inv
+            del cond
+
+        i_size_max = np.max(i_size)
+        K_ARRAY = np.zeros((krange.size,i_size_max,3),dtype=float) # create enough storage space as numpy array
+        for k in range(krange.size):
+            K_ARRAY[k,:i_size[k],0] = k1_array[k]
+            K_ARRAY[k,:i_size[k],1] = k2_array[k]
+            K_ARRAY[k,:i_size[k],2] = k3_array[k]
+
+        del k1_array,k2_array,k3_array
+        gc.collect()
+
+        nmodes_k = 1.0*i_size
+        nmodes_k[~cond_posPk[krange]] = 0.0 # don't use bins where Pk=0
+
+        if self.verbose:
+            self.print_this("... ... trimming matter modes",self.logfile)
+        delta_k = np.zeros((krange.size,i_size_max),dtype=complex)
+        for k in range(krange.size):
+            delta_k[k,:i_size[k]] = delta_matter[ind[k]]
+
+        del delta_matter,ind
+        gc.collect()
+
+        # For use in CIC weights
+        cp1 = (hgrid + 1) % self.grid
+
+        cic_d = np.absolute(hpos_grid - np.floor(hpos_grid))# - 0.5) # incorrect -0.5, but makes no practical difference
+        # shape (Ntrc,3)
+        cic_d = cic_d.T
+        cic_t = 1.0 - cic_d
+        # shape (3,Ntrc)
+
+        del hpos_grid
+        gc.collect()
+
+        cic_ttt = cic_t[0]*cic_t[1]*cic_t[2]
+        cic_dtt = cic_d[0]*cic_t[1]*cic_t[2]
+        cic_tdt = cic_t[0]*cic_d[1]*cic_t[2]
+        cic_ttd = cic_t[0]*cic_t[1]*cic_d[2]
+        cic_ddt = cic_d[0]*cic_d[1]*cic_t[2]
+        cic_dtd = cic_d[0]*cic_t[1]*cic_d[2]
+        cic_tdd = cic_t[0]*cic_d[1]*cic_d[2]
+        cic_ddd = cic_d[0]*cic_d[1]*cic_d[2]
+        # shape (Ntrc,)
+
+        del cic_d,cic_t
+        gc.collect()
+
+        if self.verbose:
+            self.print_this("... ... calculating bias",self.logfile)
+
+        hgrid = hgrid.T
+        cp1 = cp1.T
+        # shape (3,Ntrc)
+
+        if self.verbose:
+            self.print_this("... ... ... cic ttt",self.logfile)
+        tmp_phase = np.tensordot(K_ARRAY,hgrid,axes=1).astype('complex')
+        halo_phase = cic_ttt*np.exp(-1.j*tmp_phase)
+        if self.verbose:
+            self.print_this("... ... ... cic dtt",self.logfile)
+        tmp_phase = np.tensordot(K_ARRAY,np.array([cp1[0],hgrid[1],hgrid[2]]),axes=1).astype('complex')
+        halo_phase += cic_dtt*np.exp(-1.j*tmp_phase)
+        if self.verbose:
+            self.print_this("... ... ... cic tdt",self.logfile)
+        tmp_phase = np.tensordot(K_ARRAY,np.array([hgrid[0],cp1[1],hgrid[2]]),axes=1).astype('complex')
+        halo_phase += cic_tdt*np.exp(-1.j*tmp_phase)
+        if self.verbose:
+            self.print_this("... ... ... cic ttd",self.logfile)
+        tmp_phase = np.tensordot(K_ARRAY,np.array([hgrid[0],hgrid[1],cp1[2]]),axes=1).astype('complex')
+        halo_phase += cic_ttd*np.exp(-1.j*tmp_phase)
+        if self.verbose:
+            self.print_this("... ... ... cic ddt",self.logfile)
+        tmp_phase = np.tensordot(K_ARRAY,np.array([cp1[0],cp1[1],hgrid[2]]),axes=1).astype('complex')
+        halo_phase += cic_ddt*np.exp(-1.j*tmp_phase)
+        if self.verbose:
+            self.print_this("... ... ... cic dtd",self.logfile)
+        tmp_phase = np.tensordot(K_ARRAY,np.array([cp1[0],hgrid[1],cp1[2]]),axes=1).astype('complex')
+        halo_phase += cic_dtd*np.exp(-1.j*tmp_phase)
+        if self.verbose:
+            self.print_this("... ... ... cic tdd",self.logfile)
+        tmp_phase = np.tensordot(K_ARRAY,np.array([hgrid[0],cp1[1],cp1[2]]),axes=1).astype('complex')
+        halo_phase += cic_tdd*np.exp(-1.j*tmp_phase)
+        if self.verbose:
+            self.print_this("... ... ... cic ddd",self.logfile)
+        tmp_phase = np.tensordot(K_ARRAY,cp1,axes=1).astype('complex')
+        halo_phase += cic_ddd*np.exp(-1.j*tmp_phase)
+        ###############
+        # shape (krange,i_size_max,Ntrc)
+        halo_phase = np.transpose(halo_phase,(2,0,1))
+        # shape (Ntrc,krange,i_size_max)
+        bias_k = np.sum(halo_phase*delta_k,axis=2)/(i_size + self.TINY) # zeros in delta_k ensure this is actually mean
+        # shape (Ntrc,krange)
+
+        del tmp_phase,halo_phase
+        gc.collect()
+
+        del cp1,hgrid,delta_k,K_ARRAY
+        del cic_ttt,cic_dtt,cic_tdt,cic_ttd,cic_ddt,cic_dtd,cic_tdd,cic_ddd
+        gc.collect()
+
+        bias_k *= self.Lbox**3
+        bias_k = bias_k.real/(Pk_matter[krange]+self.TINY)
+
+        if self.verbose:
+            self.print_this("... ... reporting mode-weighted sum of b1(k)",self.logfile)
+        wts_k = 1.0*nmodes_k*(Pk_matter[krange]+self.TINY) # see notes for multiplication by P_mm
+        wts_k = wts_k/np.sum(wts_k)
+        b1 = np.sum(wts_k*bias_k,axis=1)
+            
+        bias_k = np.mean(bias_k,axis=0)
+
+        return ((b1,bias_k,self.ktab[krange]) 
+                if not ret_Pk else 
+                (b1,bias_k,self.ktab[krange],Pk_matter,self.ktab))
+
+    ############################################################
