@@ -88,7 +88,7 @@ CLASS_TEMPLATE=$CLASS_OUT_DIR/class_template_sig8.ini # adjust later for non-sta
 CLASS_CONFIG_FILE=$CLASS_OUT_DIR/class_$SIM_STUB.ini
 
 # setup GADGET
-GADGET_OUT_DIR=$SCRATCH/sims/$SIM_STUB/r$SIM_REAL
+GADGET_OUT_DIR=$SCRATCH_DIR/sims/$SIM_STUB/r$SIM_REAL
 GADGET_CONFIG_FILE=$CONFIG_DIR/sims/run.param.$SIM_STUB.r$SIM_REAL
 GADGET_EXEC=$CODE_HOME/scripts/gadget/run\_gadget.sh 
 GADGET_TEMPLATE=$CONFIG_DIR/sims/run.param.template
@@ -119,7 +119,7 @@ fi
 # setup Rockstar
 ROCKSTAR_STUB=$SIM_STUB
 ROCKSTAR_CONFIG_FILE=$CONFIG_DIR/halos/rockstar\_$ROCKSTAR_STUB\_r$SIM_REAL.cfg
-AUTO_ROCKSTAR_DIR=$SCRATCH/halos/$ROCKSTAR_STUB/r$SIM_REAL
+AUTO_ROCKSTAR_DIR=$SCRATCH_DIR/halos/$ROCKSTAR_STUB/r$SIM_REAL
 ROCKSTAR_EXEC=$CODE_HOME/scripts/rockstar/run\_rockstar.sh
 ROCKSTAR_TEMPLATE=$CONFIG_DIR/halos/rockstar\_template.cfg
 
@@ -143,8 +143,8 @@ if [ ! -d $GADGET_OUT_DIR ]; then
   mkdir $GADGET_OUT_DIR/logs
 fi
 
-echo "copying outputs file to: $SCRATCH/sims/$SIM_STUB"
-cp -t $SCRATCH/sims/$SIM_STUB $OUTPUTS_TXT 
+echo "copying outputs file to: $SCRATCH_DIR/sims/$SIM_STUB"
+cp -t $SCRATCH_DIR/sims/$SIM_STUB $OUTPUTS_TXT 
 
 if [ ! -d $AUTO_ROCKSTAR_DIR ]; then
   echo "making directory: $AUTO_ROCKSTAR_DIR"
