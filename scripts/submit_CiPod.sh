@@ -7,7 +7,14 @@ if [ "$#" -ne 1 ]; then
 fi
 
 # general setup
-SCF=$HOME/config/submit/$1  # change path so that this script can find the config file
+############# USER TO EDIT TWO LINES BELOW #################
+CONFIG_DIR=$HOME/config # change path to local (writable) config folder
+SCRATCH_DIR=$SCRATCH # change this to top-level (writable) output folder for snapshots, catalogs etc.
+############################################################
+#
+SCF=$CONFIG_DIR/submit/$1 # main config file input to the script must sit in $CONFIG_DIR/submit
+CODE_HOME=/mnt/home/faculty/caseem # hard-coding for now, will fix when resolving paths.machine_name Issue
+
 SIM_NAME=`awk '$1=="SIM_NAME" {print $3}' $SCF`
 SIM_NPART=`awk '$1=="SIM_NPART" {print $3}' $SCF`
 SIM_REAL=`awk '$1=="SIM_REAL" {print $3}' $SCF`
@@ -28,7 +35,7 @@ RUN_SIM=`awk '$1=="RUN_SIM" {print $3}' $SCF`
 RUN_CLASS=`awk '$1=="RUN_CLASS" {print $3}' $SCF`
 RESTART=`awk '$1=="RESTART" {print $3}' $SCF`
 
-CLASS_OUT_DIR=$HOME/config/transfer # always needed
+CLASS_OUT_DIR=$CONFIG_DIR/transfer # always needed
 CLASS_TRANSFER_ROOT=$CLASS_OUT_DIR/class_$SIM_STUB
 CLASS_TRANSFER=$CLASS_TRANSFER_ROOT\_pk.txt
 CLASS_TRANSFER_RAW=$CLASS_TRANSFER_ROOT\_pk.dat
@@ -71,20 +78,20 @@ esac
 NCPU_TOT=$(( NCPU * NNODE ))
 
 # setup dummy job and janitor
-DUMMY_EXEC=$HOME/scripts/assist/dummy.sh
-JANITOR=$HOME/scripts/assist/janitor.sh
+DUMMY_EXEC=$CODE_HOME/scripts/assist/dummy.sh
+JANITOR=$CODE_HOME/scripts/assist/janitor.sh
 
 # setup CLASS run and Python
-PREP_TRANSFER=$HOME/scripts/assist/prep\_transfer.sh
+PREP_TRANSFER=$CODE_HOME/scripts/assist/prep\_transfer.sh
 PYTHON_EXEC=/mnt/csoft/tools/anaconda3/bin/python
 CLASS_TEMPLATE=$CLASS_OUT_DIR/class_template_sig8.ini # adjust later for non-standard CDM
 CLASS_CONFIG_FILE=$CLASS_OUT_DIR/class_$SIM_STUB.ini
 
 # setup GADGET
 GADGET_OUT_DIR=$SCRATCH/sims/$SIM_STUB/r$SIM_REAL
-GADGET_CONFIG_FILE=$HOME/config/sims/run.param.$SIM_STUB.r$SIM_REAL
-GADGET_EXEC=$HOME/scripts/gadget/run\_gadget.sh 
-GADGET_TEMPLATE=$HOME/config/sims/run.param.template
+GADGET_CONFIG_FILE=$CONFIG_DIR/sims/run.param.$SIM_STUB.r$SIM_REAL
+GADGET_EXEC=$CODE_HOME/scripts/gadget/run\_gadget.sh 
+GADGET_TEMPLATE=$CONFIG_DIR/sims/run.param.template
 
 # setup NGenIC 
 if [ $RESTART == 6 ]; then
@@ -111,13 +118,13 @@ fi
 
 # setup Rockstar
 ROCKSTAR_STUB=$SIM_STUB
-ROCKSTAR_CONFIG_FILE=$HOME/config/halos/rockstar\_$ROCKSTAR_STUB\_r$SIM_REAL.cfg
+ROCKSTAR_CONFIG_FILE=$CONFIG_DIR/halos/rockstar\_$ROCKSTAR_STUB\_r$SIM_REAL.cfg
 AUTO_ROCKSTAR_DIR=$SCRATCH/halos/$ROCKSTAR_STUB/r$SIM_REAL
-ROCKSTAR_EXEC=$HOME/scripts/rockstar/run\_rockstar.sh
-ROCKSTAR_TEMPLATE=$HOME/config/halos/rockstar\_template.cfg
+ROCKSTAR_EXEC=$CODE_HOME/scripts/rockstar/run\_rockstar.sh
+ROCKSTAR_TEMPLATE=$CONFIG_DIR/halos/rockstar\_template.cfg
 
 # setup analysis script
-GADGET_LITE_EXEC=$HOME/scripts/util/gadget-lite.sh
+GADGET_LITE_EXEC=$CODE_HOME/scripts/util/gadget-lite.sh
 
 # setup perl
 PERL_EXEC=/usr/bin/perl
@@ -234,7 +241,7 @@ if [ $RUN_CLASS == 1 ]; then
     CLASS_JOB=`qsub -V -N $CLASS_RUN -k oe -l walltime=01:00:00 -l select=1:ncpus=16 -- $PREP_TRANSFER $CLASS_CONFIG_FILE $CLASS_TRANSFER_RAW $PYTHON_EXEC`
 else
     echo "transfer function not requested"
-    cd $HOME
+    cd $HOME # this is user home
     CLASS_JOB=`qsub -N dummy -k oe  -- $DUMMY_EXEC`
 fi
 
@@ -245,7 +252,7 @@ if [ $RUN_SIM == 1 ]; then
     GADGET_JOB=`qsub -V -N $GADGET_RUN -k oe -W depend=afterok:$CLASS_JOB -l walltime=$NHRS:$NMIN:00 -l select=$NNODE:ncpus=$NCPU:mpiprocs=$NCPU -l place=pack:exclhost -- $GADGET_EXEC $GADGET_CONFIG_FILE $SIM_NPART $NCPU_TOT $NGENIC $RESTART`
 else
     echo "simulation not requested"
-    cd $HOME
+    cd $HOME # this is user home
     GADGET_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLASS_JOB  -- $DUMMY_EXEC`
 fi
 
@@ -258,14 +265,14 @@ if [ $HALOS == 1 ]; then
 
     # run ConsistentTrees if requested
     if [ $TREES ==  1 ]; then
-      CONSISTENT_TREES_GENCFG=$HOME/code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/scripts/gen\_merger\_cfg.pl
+      CONSISTENT_TREES_GENCFG=$CODE_HOME/code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/scripts/gen\_merger\_cfg.pl
       GEN_CFG=ctrees\_cfg
       GEN_TREES=ctrees\_trees
       GEN_CAT=ctrees\_cat
       cd $AUTO_ROCKSTAR_DIR
       echo "submitting consistent trees job"
       GEN_CFG_JOB=`qsub -V -N $GEN_CFG -k oe -W depend=afterok:$ROCKSTAR_SERV_JOB -l walltime=00:10:00 -- $PERL_EXEC $CONSISTENT_TREES_GENCFG $ROCKSTAR_CONFIG_FILE`
-      CONSISTENT_TREES_DIR=$HOME/code/ConsistentTrees/consistent-trees
+      CONSISTENT_TREES_DIR=$CODE_HOME/code/ConsistentTrees/consistent-trees
       CONSISTENT_TREES_CONFIG_FILE=$AUTO_ROCKSTAR_DIR/outputs/merger\_tree.cfg
       TREES_EXEC=$CONSISTENT_TREES_DIR/do\_merger\_tree.pl
       CATALOG_EXEC=$CONSISTENT_TREES_DIR/halo\_trees\_to\_catalog.pl
@@ -273,13 +280,13 @@ if [ $HALOS == 1 ]; then
       GEN_TREES_JOB=`qsub -V -N $GEN_TREES -k oe -W depend=afterok:$GEN_CFG_JOB -l walltime=05:00:00 -l select=ncpus=$NWRITER -- $PERL_EXEC $TREES_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
       GEN_CAT_JOB=`qsub -V -N $GEN_CAT -k oe -W depend=afterok:$GEN_TREES_JOB -l walltime=00:30:00 -- $PERL_EXEC $CATALOG_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
 
-      CLEAN_TREE_EXEC=$HOME/scripts/assist/clean\_trees.pl
+      CLEAN_TREE_EXEC=$CODE_HOME/scripts/assist/clean\_trees.pl
       CLEAN_TREE_JOB=`qsub -V -N clean\_trees -k oe -W depend=afterok:$GEN_CAT_JOB -l walltime=00:10:00 -- $PERL_EXEC $CLEAN_TREE_EXEC $AUTO_ROCKSTAR_DIR`
       ROCKSTAR_SERV_JOB=$CLEAN_TREE_JOB
     fi
     # #################
 
-    cd $HOME
+    cd $HOME # this is user home
     clean=halo_cleanup.sh
     str=$'#!/usr/bin/bash\n\n'
     str="${str}sleep 2; rm -rf $AUTO_ROCKSTAR_DIR/profiling/ $AUTO_ROCKSTAR_DIR/*.ascii $AUTO_ROCKSTAR_DIR/*.bin; "
@@ -290,10 +297,10 @@ if [ $HALOS == 1 ]; then
     chmod +x $clean
     HALO_CLEANUP_JOB=`qsub -N halo_cleanup -W depend=afterok:$ROCKSTAR_SERV_JOB -- $clean`
 
-    cd $HOME
+    cd $HOME # this is user home
     qsub -N janitor -k oe -W depend=afterok:$HALO_CLEANUP_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
 else
     echo halos not requested
-    cd $HOME
+    cd $HOME # this is user home
     qsub -N janitor -k oe -W depend=afterok:$GADGET_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
 fi
