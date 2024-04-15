@@ -42,11 +42,13 @@ CLASS_TRANSFER_RAW=$CLASS_TRANSFER_ROOT\_pk.dat
 
 # Cosmology
 OMEGA_M=`awk '$1=="OMEGA_M" {print $3}' $SCF`
-OMEGA_L=`awk '$1=="OMEGA_L" {print $3}' $SCF`
 OMEGA_K=`awk '$1=="OMEGA_K" {print $3}' $SCF`
+OMEGA_L=$(echo "$OMEGA_M $OMEGA_K" | awk '{printf "%.8f", 1 - $1 - $2}')
+#OMEGA_L=`awk '$1=="OMEGA_L" {print $3}' $SCF`
 OMEGA_B=`awk '$1=="OMEGA_B" {print $3}' $SCF`
 HUBBLE=`awk '$1=="HUBBLE" {print $3}' $SCF`
-H0=`awk '$1=="H0" {print $3}' $SCF`
+H0=$(echo $HUBBLE*100 | bc)
+#H0=`awk '$1=="H0" {print $3}' $SCF`
 SIGMA8=`awk '$1=="SIGMA8" {print $3}' $SCF`
 NS=`awk '$1=="NS" {print $3}' $SCF`
 
