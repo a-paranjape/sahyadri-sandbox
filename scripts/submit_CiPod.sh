@@ -61,6 +61,7 @@ NNODE=1
 LGNPART=6
 NFILE=1
 NWRITER=16
+# hard-coded NNODE / NCPU values below will be updated after scaling study
 case $SIM_NPART in
   128)
     NHRS=05; NMIN=00; NCPU=16; LGNPART=7; NWRITER=8
@@ -73,6 +74,9 @@ case $SIM_NPART in
     ;;
   1024)
     NNODE=8; LGNPART=10; NFILE=8
+    ;;
+  2048)
+    NNODE=16; LGNPART=11; NFILE=8
     ;;
 esac
 NCPU_TOT=$(( NCPU * NNODE ))
