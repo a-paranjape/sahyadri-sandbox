@@ -18,6 +18,7 @@ mv class_run.* $CLASS_OUT_DIR/logs/.
 mv gadget_run.* $GADGET2_OUT_DIR/logs/.
 mv rockstar_*.* $AUTO_ROCKSTAR_DIR/logs/.
 mv clean_trees.* $AUTO_ROCKSTAR_DIR/logs/.
+mv postproc_run.* $AUTO_ROCKSTAR_DIR/logs/.
 
 echo ... removing excess files
 rm ics_cleanup.* dummy.* halo_cleanup.*

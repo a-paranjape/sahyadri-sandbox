@@ -32,9 +32,10 @@ OUTPUTS_TXT=`awk '$1=="OUTPUTS_TXT" {print $3}' $SCF`
 TRANSFER_CODE=`awk '$1=="TRANSFER_CODE" {print $3}' $SCF`
 NGENIC=`awk '$1=="NGENIC" {print $3}' $SCF`
 RUN_SIM=`awk '$1=="RUN_SIM" {print $3}' $SCF`
-RUN_CLASS=`awk '$1=="RUN_CLASS" {print $3}' $SCF`
 RESTART=`awk '$1=="RESTART" {print $3}' $SCF`
 
+# Transfer function
+RUN_CLASS=`awk '$1=="RUN_CLASS" {print $3}' $SCF`
 CLASS_OUT_DIR=$CONFIG_DIR/transfer # always needed
 CLASS_TRANSFER_ROOT=$CLASS_OUT_DIR/class_$SIM_STUB
 CLASS_TRANSFER=$CLASS_TRANSFER_ROOT\_pk.txt
@@ -56,29 +57,32 @@ NS=`awk '$1=="NS" {print $3}' $SCF`
 HALOS=`awk '$1=="HALOS" {print $3}' $SCF`
 TREES=`awk '$1=="TREES" {print $3}' $SCF`
 
+# Post-processing
+POSTPROCESS=`awk '$1=="POSTPROCESS" {print $3}' $SCF`
+PP_GRID=`awk '$1=="PP_GRID" {print $3}' $SCF`
+
 NHRS=192
 NMIN=00
 NCPU=32
 NNODE=1
-LGNPART=6
 NFILE=1
 NWRITER=16
 # hard-coded NNODE / NCPU values below will be updated after scaling study
 case $SIM_NPART in
   128)
-    NHRS=05; NMIN=00; NCPU=16; LGNPART=7; NWRITER=8
+    NHRS=05; NMIN=00; NCPU=16; NWRITER=8
     ;;
   256)
-    NHRS=12; NNODE=2; LGNPART=8
+    NHRS=12; NNODE=2
     ;;
   512)
-    NHRS=24; NNODE=4; LGNPART=9
+    NHRS=24; NNODE=4
     ;;
   1024)
-    NNODE=8; LGNPART=10; NFILE=8
+    NNODE=8; NFILE=8
     ;;
   2048)
-    NNODE=16; LGNPART=11; NFILE=8
+    NNODE=16; NFILE=8
     ;;
 esac
 NCPU_TOT=$(( NCPU * NNODE ))
@@ -130,7 +134,7 @@ ROCKSTAR_EXEC=$CODE_HOME/scripts/rockstar/run\_rockstar.sh
 ROCKSTAR_TEMPLATE=$CONFIG_DIR/halos/rockstar\_template.cfg
 
 # setup analysis script
-GADGET_LITE_EXEC=$CODE_HOME/scripts/util/gadget-lite.sh
+POSTPROC_EXEC=$CODE_HOME/scripts/post-process/postprocess.py
 
 # setup perl
 PERL_EXEC=/usr/bin/perl
@@ -140,6 +144,7 @@ CLASS_RUN=class_run
 GADGET_RUN=gadget\_run
 ROCKSTAR_SERV=rockstar\_serv
 ROCKSTAR_PROC=rockstar\_proc
+POSTPROC_RUN=postproc\_run
 
 #################
 echo 'checking that output directories exist'
@@ -302,11 +307,26 @@ if [ $HALOS == 1 ]; then
     echo "$str" > $clean
     chmod +x $clean
     HALO_CLEANUP_JOB=`qsub -N halo_cleanup -W depend=afterok:$ROCKSTAR_SERV_JOB -- $clean`
-
-    cd $HOME # this is user home
-    qsub -N janitor -k oe -W depend=afterok:$HALO_CLEANUP_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
 else
-    echo halos not requested
-    cd $HOME # this is user home
-    qsub -N janitor -k oe -W depend=afterok:$GADGET_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
+    echo "halos not requested"
+    HALO_CLEANUP_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLASS_JOB  -- $DUMMY_EXEC`
 fi
+
+cd $HOME # this is user home
+
+# post processing
+if [ $POSTPROCESS == 1 ]; then
+    echo "submitting post-processing job"
+    ###########################
+    # below could be ported to separate shell script
+    DOWN_SAMP=$(( SIM_NPART > 512 ? 512 : 0 )) # if particle count exceeds 512^3 then downsample to 512^3.
+    N_OUT=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
+    SNAP_START=`awk 'NR==1{print $1; exit}' $AUTO_ROCKSTAR_DIR/../scales.txt`
+    ###########################
+    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$HALO_CLEANUP_JOB -l walltime=05:00:00 -l select=ncpus=1 -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_STUB $SNAP_START $N_OUT $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX`
+else
+    echo "post-processing not requested"
+    POSTPROC_JOB=`qsub -N dummy -k oe -W depend=afterok:$HALO_CLEANUP_JOB  -- $DUMMY_EXEC`
+fi
+
+qsub -N janitor -k oe -W depend=afterok:$POSTPROC_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
