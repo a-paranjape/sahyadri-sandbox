@@ -157,30 +157,6 @@ class HaloReader(SnapshotReader):
                              }
         
         self.halodatanames = list(self.halodatatype.keys())
-                              # ['Scale','ID','descScale','descID','numProg',
-                              # 'pid','upid','descpid','phantom','sam_mvir',
-                              # 'mbnd_vir','rvir','rs','vrms','mmp',
-                              # 'ScaleLastMM','vmax',
-                              # 'x','y','z','vx','vy','vz',
-                              # 'Jx','Jy','Jz','spin',
-                              # 'BreadthFirstID','DepthFirstID','TreeRootID','OrigHaloID',
-                              # 'snapnum','NextCoprogDepthFirstID','LastProgDepthFirstID',
-                              # 'LastMainLeafDepthFirstID','TidalForce','TidalID', # new cols
-                              # 'rs_klypin',
-                              # 'mvir','m200b','m200c','mCustom2','mCustom',
-                              # 'Xoff','Voff','spin_bullock',
-                              # 'b_to_a','c_to_a','Ax','Ay','Az',
-                              # 'b_to_a_500c','c_to_a_500c','Ax_500c','Ay_500c','Az_500c',
-                              # 'TbyU','Mpe_Behroozi','Mpe_Diemer','halfmassradius',
-                              # 'macc','mpeak','vacc','vpeak','halfmassscale',
-                              # 'accrate_inst','accrate_100Myr','accrate_1tdyn',
-                              # 'accrate_2tdyn','accrate_mpeak',
-                              # 'acc_logvmax_inst','acc_logvmax_1tdyn', # new cols
-                              # 'mpeakscale',
-                              # 'accscale','firstaccscale','firstaccmvir',
-                              # 'firstaccvmax','vmaxAtmpeak',
-                              # 'TidalForce_tdyn', 'log(vmax/vmax_max(tdyn,tmpeak))','time_futmerg','futmerg_mmpid','spin_mpeakscale' # new cols
-                              # ]
         
         self.vadatatype = {'ID':'int64',
                            'lam1_R2R200b':float,'lam2_R2R200b':float,'lam3_R2R200b':float,
@@ -193,18 +169,8 @@ class HaloReader(SnapshotReader):
                            'lamH1_R3Mpch':float,'lamH2_R3Mpch':float,'lamH3_R3Mpch':float,
                            'lamH1_R5Mpch':float,'lamH2_R5Mpch':float,'lamH3_R5Mpch':float,
                            'b1':float} # deleted old 'b1', renamed old 'b1wtd' as new 'b1'
+        
         self.vadatanames = list(self.vadatatype.keys())
-        #                     ['ID',
-        #                     'lam1_R2R200b','lam2_R2R200b','lam3_R2R200b',
-        #                     'lam1_R4R200b','lam2_R4R200b','lam3_R4R200b',
-        #                     'lam1_R6R200b','lam2_R6R200b','lam3_R6R200b',
-        #                     'lam1_R8R200b','lam2_R8R200b','lam3_R8R200b',
-        #                     'lam1_R2Mpch','lam2_R2Mpch','lam3_R2Mpch',
-        #                     'lam1_R3Mpch','lam2_R3Mpch','lam3_R3Mpch',
-        #                     'lam1_R5Mpch','lam2_R5Mpch','lam3_R5Mpch',
-        #                     'lamH1_R3Mpch','lamH2_R3Mpch','lamH3_R3Mpch',
-        #                     'lamH1_R5Mpch','lamH2_R5Mpch','lamH3_R5Mpch',
-        #                     'b1'] # deleted old 'b1', renamed old 'b1wtd' as new 'b1'
 
         # needed for AddValue
         self.vadtypelist = [('ID','i8'),
