@@ -99,7 +99,7 @@ Including `anaconda3` ensures that the command `python` links to Python3.
       make clean $CODE_HOME/code/Gadget-4/mesh1024-NGenIC
       make $CODE_HOME/code/Gadget-4/mesh1024-NGenIC
       ```
-
+    The script [here](/scripts/gadget/makeallgrids.sh) automates the compilation of binaries for mesh sizes 128<sup>3</sup> to 4096<sup>3</sup>, with and without `NGen-IC` support, assuming the required folders and `Config.sh` files exist. It can be run from the folder `Gadget-4/gadget4/`. Executing `./makeallgrids.sh clean` will pass the `clean` flag to all compilations, while `./makeallgrids.sh` will compile the binaries. 
 
 ### Under construction ###
 
