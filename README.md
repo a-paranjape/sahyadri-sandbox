@@ -101,15 +101,20 @@ Including `anaconda3` ensures that the command `python` links to Python3.
       ```
     The script [here](/scripts/gadget/makeallgrids.sh) automates the compilation of binaries for mesh sizes 128<sup>3</sup> to 4096<sup>3</sup>, with and without `NGen-IC` support, assuming the required folders and `Config.sh` files exist. It can be run from the folder `Gadget-4/gadget4/`. Executing `./makeallgrids.sh clean` will pass the `clean` flag to all compilations, while `./makeallgrids.sh` will compile the binaries. 
 
-### Installing `ROCKSTAR` and `CONSISTENT-TREES` ###
+### Installing `ROCKSTAR` ###
 We use `ROCKSTAR` version `36ce9eea36ee` with some custom modifications to enable
 * reading `GADGET-4` HDF5 output snapshots
 * support for non-zero `Omega_k`
-The modifications are described in [this file]().
+The modifications are described in [this file](/scripts/rockstar/readme_aseem.txt).
+
+`ROCKSTAR` can be installed with `GADGET-4` HDF5 support by simply typing `make' at the command prompt in the install folder after making all changes mentioned in the file above.
 
 Contact Aseem Paranjape for help installing this modified version.
 
+### Installing `CONSISTENT-TREES` ###
+1. Clone into the `CONSISTENT-TREES` repository [here](https://bitbucket.org/pbehroozi/consistent-trees).
+2. Type `make` at the command prompt in the install folder.
 
-### Under construction ###
-
+## Contact ##
+Aseem Paranjape: aseem_at_iucaa_dot_in
 
