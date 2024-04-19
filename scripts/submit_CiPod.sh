@@ -134,7 +134,7 @@ ROCKSTAR_EXEC=$CODE_HOME/scripts/rockstar/run\_rockstar.sh
 ROCKSTAR_TEMPLATE=$CONFIG_DIR/halos/rockstar\_template.cfg
 
 # setup analysis script
-POSTPROC_EXEC=$CODE_HOME/scripts/post-process/postprocess.py
+POSTPROC_EXEC=$HOME/scripts/post-process/postprocess.py # use local user version
 
 # setup perl
 PERL_EXEC=/usr/bin/perl
