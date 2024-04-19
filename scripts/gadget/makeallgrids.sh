@@ -2,7 +2,7 @@
 
 clean=$1
 
-for n in {7..11};
+for n in {7..12};
 do
 	MESH=$(( 2**n ))
 	#echo $MESH
