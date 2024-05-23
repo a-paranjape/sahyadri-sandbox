@@ -15,7 +15,7 @@ TimeLimitCPU              691200   % 192h, in seconds
 CpuTimeBetRestartFile     7200    % 2h,  in seconds
 
 %----- Memory alloction
-MaxMemSize                10000    % in MByte
+MaxMemSize                5000    % in MByte
 
 %---- Caracteristics of run
 TimeBegin                 0.02   % Begin of the simulation, z = 49
