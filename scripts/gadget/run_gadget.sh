@@ -20,14 +20,18 @@ CODE_HOME=/mnt/home/faculty/caseem
 #mpirun -np $NCPU_TOT -envall $HOME/code/Gadget-2/Gadget-2.0.7-mesh$NMESH/Gadget2/Gadget2 $GADGET2_CONFIG_FILE $RESTART
 if [ $NGENIC == 1 ]; then
     if [ $RESTART == 0 ]; then
-        mpiexec -np $NCPU_TOT $CODE_HOME/code/Gadget-4/mesh$NMESH-NGenIC/Gadget4 $GADGET2_CONFIG_FILE 
+        mpirun -np $NCPU_TOT -machinefile $PBS_NODEFILE $CODE_HOME/code/Gadget-4/mesh$NMESH-NGenIC/Gadget4 $GADGET2_CONFIG_FILE 
+        # mpiexec -np $NCPU_TOT $CODE_HOME/code/Gadget-4/mesh$NMESH-NGenIC/Gadget4 $GADGET2_CONFIG_FILE 
     else
-        mpiexec -np $NCPU_TOT $CODE_HOME/code/Gadget-4/mesh$NMESH-NGenIC/Gadget4 $GADGET2_CONFIG_FILE $RESTART
+        mpirun -np $NCPU_TOT -machinefile $PBS_NODEFILE $CODE_HOME/code/Gadget-4/mesh$NMESH-NGenIC/Gadget4 $GADGET2_CONFIG_FILE $RESTART
+        #mpiexec -np $NCPU_TOT $CODE_HOME/code/Gadget-4/mesh$NMESH-NGenIC/Gadget4 $GADGET2_CONFIG_FILE $RESTART
     fi
 else
     if [ $RESTART == 0 ]; then
-        mpiexec -np $NCPU_TOT $CODE_HOME/code/Gadget-4/mesh$NMESH/Gadget4 $GADGET2_CONFIG_FILE
+        mpirun -np $NCPU_TOT -machinefile $PBS_NODEFILE $CODE_HOME/code/Gadget-4/mesh$NMESH/Gadget4 $GADGET2_CONFIG_FILE
+        #mpiexec -np $NCPU_TOT $CODE_HOME/code/Gadget-4/mesh$NMESH/Gadget4 $GADGET2_CONFIG_FILE
     else
-        mpiexec -np $NCPU_TOT $CODE_HOME/code/Gadget-4/mesh$NMESH/Gadget4 $GADGET2_CONFIG_FILE $RESTART
+        mpirun -np $NCPU_TOT -machinefile $PBS_NODEFILE $CODE_HOME/code/Gadget-4/mesh$NMESH/Gadget4 $GADGET2_CONFIG_FILE $RESTART
+        #mpiexec -np $NCPU_TOT $CODE_HOME/code/Gadget-4/mesh$NMESH/Gadget4 $GADGET2_CONFIG_FILE $RESTART
     fi
 fi
