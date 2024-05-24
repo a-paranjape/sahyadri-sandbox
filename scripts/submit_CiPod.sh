@@ -260,7 +260,8 @@ fi
 if [ $RUN_SIM == 1 ]; then
     echo "submitting gadget job"
     cd $GADGET_OUT_DIR
-    GADGET_JOB=`qsub -V -N $GADGET_RUN -k oe -W depend=afterok:$CLASS_JOB -l walltime=$NHRS:$NMIN:00 -l select=$NNODE:ncpus=$NCPU:mpiprocs=$NCPU -l place=pack:exclhost -- $GADGET_EXEC $GADGET_CONFIG_FILE $SIM_NPART $NCPU_TOT $NGENIC $RESTART`
+    # removed -l place=pack:exclhost
+    GADGET_JOB=`qsub -V -N $GADGET_RUN -k oe -W depend=afterok:$CLASS_JOB -l walltime=$NHRS:$NMIN:00 -l select=$NNODE:ncpus=$NCPU:mpiprocs=$NCPU -- $GADGET_EXEC $GADGET_CONFIG_FILE $SIM_NPART $NCPU_TOT $NGENIC $RESTART`
 else
     echo "simulation not requested"
     cd $HOME # this is user home
