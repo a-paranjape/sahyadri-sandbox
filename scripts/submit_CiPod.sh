@@ -310,7 +310,7 @@ if [ $HALOS == 1 ]; then
     HALO_CLEANUP_JOB=`qsub -N halo_cleanup -W depend=afterok:$ROCKSTAR_SERV_JOB -- $clean`
 else
     echo "halos not requested"
-    HALO_CLEANUP_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLASS_JOB  -- $DUMMY_EXEC`
+    HALO_CLEANUP_JOB=`qsub -N dummy -k oe -W depend=afterok:$GADGET_JOB  -- $DUMMY_EXEC`
 fi
 
 cd $HOME # this is user home
