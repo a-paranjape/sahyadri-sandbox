@@ -15,6 +15,7 @@ SCRATCH_DIR=$SCRATCH # change this to top-level (writable) output folder for sna
 SCF=$CONFIG_DIR/submit/$1 # main config file input to the script must sit in $CONFIG_DIR/submit
 CODE_HOME=/mnt/home/faculty/caseem # hard-coding for now, will fix when resolving paths.machine_name Issue
 
+SIM_FOLDER=`awk '$1=="SIM_FOLDER" {print $3}' $SCF`
 SIM_NAME=`awk '$1=="SIM_NAME" {print $3}' $SCF`
 SIM_NPART=`awk '$1=="SIM_NPART" {print $3}' $SCF`
 SIM_REAL=`awk '$1=="SIM_REAL" {print $3}' $SCF`
@@ -36,7 +37,7 @@ RESTART=`awk '$1=="RESTART" {print $3}' $SCF`
 
 # Transfer function
 RUN_CLASS=`awk '$1=="RUN_CLASS" {print $3}' $SCF`
-CLASS_OUT_DIR=$CONFIG_DIR/transfer # always needed
+CLASS_OUT_DIR=$CONFIG_DIR/transfer/$SIM_FOLDER # always needed
 CLASS_TRANSFER_ROOT=$CLASS_OUT_DIR/class_$SIM_STUB
 CLASS_TRANSFER=$CLASS_TRANSFER_ROOT\_pk.txt
 CLASS_TRANSFER_RAW=$CLASS_TRANSFER_ROOT\_pk.dat
@@ -97,8 +98,8 @@ CLASS_TEMPLATE=$CLASS_OUT_DIR/class_template_As.ini #sig8.ini # adjust later for
 CLASS_CONFIG_FILE=$CLASS_OUT_DIR/class_$SIM_STUB.ini
 
 # setup GADGET
-GADGET_OUT_DIR=$SCRATCH_DIR/sims/$SIM_STUB/r$SIM_REAL
-GADGET_CONFIG_FILE=$CONFIG_DIR/sims/run.param.$SIM_STUB.r$SIM_REAL
+GADGET_OUT_DIR=$SCRATCH_DIR/sims/$SIM_FOLDER/$SIM_STUB/r$SIM_REAL
+GADGET_CONFIG_FILE=$CONFIG_DIR/sims/$SIM_FOLDER/run.param.$SIM_STUB.r$SIM_REAL
 GADGET_EXEC=$CODE_HOME/scripts/gadget/run\_gadget.sh 
 GADGET_TEMPLATE=$CONFIG_DIR/sims/run.param.template
 
@@ -127,8 +128,8 @@ fi
 
 # setup Rockstar
 ROCKSTAR_STUB=$SIM_STUB
-ROCKSTAR_CONFIG_FILE=$CONFIG_DIR/halos/rockstar\_$ROCKSTAR_STUB\_r$SIM_REAL.cfg
-AUTO_ROCKSTAR_DIR=$SCRATCH_DIR/halos/$ROCKSTAR_STUB/r$SIM_REAL
+ROCKSTAR_CONFIG_FILE=$CONFIG_DIR/halos/$SIM_FOLDER/rockstar\_$ROCKSTAR_STUB\_r$SIM_REAL.cfg
+AUTO_ROCKSTAR_DIR=$SCRATCH_DIR/halos/$SIM_FOLDER/$ROCKSTAR_STUB/r$SIM_REAL
 ROCKSTAR_EXEC=$CODE_HOME/scripts/rockstar/run\_rockstar.sh
 ROCKSTAR_TEMPLATE=$CONFIG_DIR/halos/rockstar\_template.cfg
 
@@ -153,8 +154,8 @@ if [ ! -d $GADGET_OUT_DIR ]; then
   mkdir $GADGET_OUT_DIR/logs
 fi
 
-echo "copying outputs file to: $SCRATCH_DIR/sims/$SIM_STUB"
-cp -t $SCRATCH_DIR/sims/$SIM_STUB $OUTPUTS_TXT 
+echo "copying outputs file to: $SCRATCH_DIR/sims/$SIM_FOLDER/$SIM_STUB"
+cp -t $SCRATCH_DIR/sims/$SIM_FOLDER/$SIM_STUB $OUTPUTS_TXT 
 
 if [ ! -d $AUTO_ROCKSTAR_DIR ]; then
   echo "making directory: $AUTO_ROCKSTAR_DIR"
@@ -327,7 +328,7 @@ if [ $POSTPROCESS == 1 ]; then
     N_OUT=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
     SNAP_START=`awk 'NR==1{print $1; exit}' $AUTO_ROCKSTAR_DIR/../scales.txt`
     ###########################
-    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$HALO_CLEANUP_JOB -l walltime=05:00:00 -l select=ncpus=1 -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_STUB $SNAP_START $N_OUT $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX`
+    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$HALO_CLEANUP_JOB -l walltime=05:00:00 -l select=ncpus=1 -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_FOLDER/$SIM_STUB $SNAP_START $N_OUT $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX`
 else
     echo "post-processing not requested"
     POSTPROC_JOB=`qsub -N dummy -k oe -W depend=afterok:$HALO_CLEANUP_JOB  -- $DUMMY_EXEC`
