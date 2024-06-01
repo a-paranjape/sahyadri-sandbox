@@ -148,6 +148,11 @@ POSTPROC_RUN=postproc\_run
 
 #################
 echo 'checking that output directories exist'
+if [ ! -d $CLASS_OUT_DIR ]; then
+  echo "making directory: $CLASS_OUT_DIR"
+  mkdir -p $CLASS_OUT_DIR
+fi
+
 if [ ! -d $GADGET_OUT_DIR ]; then
   echo "making directory: $GADGET_OUT_DIR"
   mkdir -p $GADGET_OUT_DIR
