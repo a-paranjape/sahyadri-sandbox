@@ -343,6 +343,9 @@ if [ $POSTPROCESS == 1 ]; then
     DOWN_SAMP=$(( SIM_NPART > 512 ? 512 : 0 )) # if particle count exceeds 512^3 then downsample to 512^3.
     N_OUT=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
     SNAP_START=`awk 'NR==1{print $1; exit}' $AUTO_ROCKSTAR_DIR/../scales.txt`
+    if [ ! -f out_$SNAP_START.trees ]; then
+	SNAP_START=$(( SNAP_START + 1 )) # hack to avoid rockstar behaviour where scales.txt and existing files don't match.
+    fi
     ###########################
     POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$HALO_CLEANUP_JOB -l walltime=05:00:00 -l select=ncpus=1 -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_FOLDER/$SIM_STUB $SNAP_START $N_OUT $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX`
 else
