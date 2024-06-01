@@ -154,6 +154,11 @@ if [ ! -d $GADGET_OUT_DIR ]; then
   mkdir $GADGET_OUT_DIR/logs
 fi
 
+if [ ! -d $CONFIG_DIR/sims/$SIM_FOLDER ]; then
+  echo "making directory: $CONFIG_DIR/sims/$SIM_FOLDER"
+  mkdir -p $CONFIG_DIR/sims/$SIM_FOLDER
+fi
+
 echo "copying outputs file to: $SCRATCH_DIR/sims/$SIM_FOLDER/$SIM_STUB"
 cp -t $SCRATCH_DIR/sims/$SIM_FOLDER/$SIM_STUB $OUTPUTS_TXT 
 
@@ -161,6 +166,11 @@ if [ ! -d $AUTO_ROCKSTAR_DIR ]; then
   echo "making directory: $AUTO_ROCKSTAR_DIR"
   mkdir -p $AUTO_ROCKSTAR_DIR
   mkdir $AUTO_ROCKSTAR_DIR/logs
+fi
+
+if [ ! -d $CONFIG_DIR/halos/$SIM_FOLDER ]; then
+  echo "making directory: $CONFIG_DIR/halos/$SIM_FOLDER"
+  mkdir -p $CONFIG_DIR/halos/$SIM_FOLDER
 fi
 
 N_OUT=`awk 'END {print FNR}' $OUTPUTS_TXT`
