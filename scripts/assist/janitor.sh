@@ -21,6 +21,6 @@ mv clean_trees.* $AUTO_ROCKSTAR_DIR/logs/.
 mv postproc_run.* $AUTO_ROCKSTAR_DIR/logs/.
 
 echo ... removing excess files
-rm ics_cleanup.* dummy.* halo_cleanup.*
+rm ics_cleanup.* dummy.* halo_cleanup.* class_output*parameters*
 
 echo ... cleanup complete
