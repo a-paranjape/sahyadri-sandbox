@@ -37,8 +37,8 @@ RESTART=`awk '$1=="RESTART" {print $3}' $SCF`
 
 # Transfer function
 RUN_CLASS=`awk '$1=="RUN_CLASS" {print $3}' $SCF`
-CLASS_OUT_DIR=$CONFIG_DIR/transfer/$SIM_FOLDER # always needed
-CLASS_TRANSFER_ROOT=$CLASS_OUT_DIR/class_$SIM_STUB
+CLASS_OUT_DIR=$CONFIG_DIR/transfer # always needed
+CLASS_TRANSFER_ROOT=$CLASS_OUT_DIR/$SIM_FOLDER/class_$SIM_STUB
 CLASS_TRANSFER=$CLASS_TRANSFER_ROOT\_pk.txt
 CLASS_TRANSFER_RAW=$CLASS_TRANSFER_ROOT\_pk.dat
 
@@ -95,7 +95,7 @@ JANITOR=$CODE_HOME/scripts/assist/janitor.sh
 PREP_TRANSFER=$CODE_HOME/scripts/assist/prep\_transfer.sh
 PYTHON_EXEC=/mnt/csoft/tools/anaconda3/bin/python
 CLASS_TEMPLATE=$CLASS_OUT_DIR/class_template_As.ini #sig8.ini # adjust later for non-standard CDM
-CLASS_CONFIG_FILE=$CLASS_OUT_DIR/class_$SIM_STUB.ini
+CLASS_CONFIG_FILE=$CLASS_OUT_DIR/$SIM_FOLDER/class_$SIM_STUB.ini
 
 # setup GADGET
 GADGET_OUT_DIR=$SCRATCH_DIR/sims/$SIM_FOLDER/$SIM_STUB/r$SIM_REAL
@@ -148,9 +148,9 @@ POSTPROC_RUN=postproc\_run
 
 #################
 echo 'checking that output directories exist'
-if [ ! -d $CLASS_OUT_DIR ]; then
-  echo "making directory: $CLASS_OUT_DIR"
-  mkdir -p $CLASS_OUT_DIR
+if [ ! -d $CLASS_OUT_DIR/$SIM_FOLDER ]; then
+  echo "making directory: $CLASS_OUT_DIR/$SIM_FOLDER"
+  mkdir -p $CLASS_OUT_DIR/$SIM_FOLDER
 fi
 
 if [ ! -d $GADGET_OUT_DIR ]; then
@@ -349,4 +349,4 @@ else
     POSTPROC_JOB=`qsub -N dummy -k oe -W depend=afterok:$HALO_CLEANUP_JOB  -- $DUMMY_EXEC`
 fi
 
-qsub -N janitor -k oe -W depend=afterok:$POSTPROC_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
+qsub -N janitor -k oe -W depend=afterok:$POSTPROC_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR/$SIM_FOLDER $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
