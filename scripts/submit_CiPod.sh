@@ -45,13 +45,12 @@ CLASS_TRANSFER_RAW=$CLASS_TRANSFER_ROOT\_pk.dat
 OMEGA_M=`awk '$1=="OMEGA_M" {print $3}' $SCF`
 OMEGA_K=`awk '$1=="OMEGA_K" {print $3}' $SCF`
 OMEGA_L=$(echo "$OMEGA_M $OMEGA_K" | awk '{printf "%.8f", 1 - $1 - $2}')
-#OMEGA_L=`awk '$1=="OMEGA_L" {print $3}' $SCF`
 OMEGA_B=`awk '$1=="OMEGA_B" {print $3}' $SCF`
 HUBBLE=`awk '$1=="HUBBLE" {print $3}' $SCF`
 H0=$(echo $HUBBLE*100 | bc)
-#H0=`awk '$1=="H0" {print $3}' $SCF`
-SIGMA8=`awk '$1=="SIGMA8" {print $3}' $SCF`
+# SIGMA8=`awk '$1=="SIGMA8" {print $3}' $SCF`
 NS=`awk '$1=="NS" {print $3}' $SCF`
+AS=`awk '$1=="AS" {print $3}' $SCF`
 
 # Run Rockstar / consistent trees?
 HALOS=`awk '$1=="HALOS" {print $3}' $SCF`
@@ -70,10 +69,10 @@ NWRITER=16
 # hard-coded NNODE / NCPU values below will be updated after scaling study
 case $SIM_NPART in
   128)
-    NHRS=05; NMIN=00; NCPU=16; NWRITER=8
+    NHRS=05; NMIN=00 #; NCPU=16; NWRITER=8
     ;;
   256)
-    NHRS=12; NNODE=2
+    NHRS=12; NNODE=4
     ;;
   512)
     NHRS=24; NNODE=4
@@ -94,7 +93,7 @@ JANITOR=$CODE_HOME/scripts/assist/janitor.sh
 # setup CLASS run and Python
 PREP_TRANSFER=$CODE_HOME/scripts/assist/prep\_transfer.sh
 PYTHON_EXEC=/mnt/csoft/tools/anaconda3/bin/python
-CLASS_TEMPLATE=$CLASS_OUT_DIR/class_template_sig8.ini # adjust later for non-standard CDM
+CLASS_TEMPLATE=$CLASS_OUT_DIR/class_template_As.ini #sig8.ini # adjust later for non-standard CDM
 CLASS_CONFIG_FILE=$CLASS_OUT_DIR/class_$SIM_STUB.ini
 
 # setup GADGET
@@ -173,7 +172,8 @@ sed -i -e "s#^H0.*#H0\t= $H0#" "$CLASS_CONFIG_FILE"
 sed -i -e "s#^Omega_b.*#Omega_b = $OMEGA_B#" "$CLASS_CONFIG_FILE"
 sed -i -e "s#^Omega_m.*#Omega_m = $OMEGA_M#" "$CLASS_CONFIG_FILE"
 sed -i -e "s#^Omega_k.*#Omega_k = $OMEGA_K#" "$CLASS_CONFIG_FILE"
-sed -i -e "s#^sigma8.*#sigma8 = $SIGMA8#" "$CLASS_CONFIG_FILE"
+sed -i -e "s#^A_s.*#A_s = $AS#" "$CLASS_CONFIG_FILE"
+# sed -i -e "s#^sigma8.*#sigma8 = $SIGMA8#" "$CLASS_CONFIG_FILE"
 sed -i -e "s#^n_s.*#n_s = $NS#" "$CLASS_CONFIG_FILE"
 sed -i -e "s#^z_pk.*#z_pk = $Z_START#" "$CLASS_CONFIG_FILE"
 
@@ -205,6 +205,7 @@ if [ $NGENIC == 1 ]; then
 	PK_TYPE=1
 	SPEC_INDEX=$NS
 	R_PS=1
+	SIGMA8=0.815 # hack to allow eisenstein transfer in NGenIC
     fi
     sed -i -e "s/^NSample .*/NSample\t $SIM_NPART/" "$GADGET_CONFIG_FILE"
     sed -i -e "s/^GridSize .*/GridSize\t $SIM_NPART/" "$GADGET_CONFIG_FILE"
@@ -214,7 +215,9 @@ if [ $NGENIC == 1 ]; then
     sed -i -e "s/^ReNormalizeInputSpectrum .*/ReNormalizeInputSpectrum\t $R_PS /" "$GADGET_CONFIG_FILE"
     sed -i -e "s/^PrimordialIndex .*/PrimordialIndex\t $SPEC_INDEX /" "$GADGET_CONFIG_FILE"
     sed -i -e "s#^PowerSpectrumFile.*#PowerSpectrumFile\t $CLASS_TRANSFER#" "$GADGET_CONFIG_FILE"
-    sed -i -e "s/^Sigma8 .*/Sigma8\t $SIGMA8 /" "$GADGET_CONFIG_FILE" # redundant for class transfer, needed for eisenstein
+    if [ $TRANSFER_CODE == eisenstein ]; then
+	sed -i -e "s/^Sigma8 .*/Sigma8\t $SIGMA8 /" "$GADGET_CONFIG_FILE" # redundant for class transfer, needed for eisenstein
+    fi
 else
     sed -i -e "s#InitCondFile.*#InitCondFile\t $NGENIC_OUT_FILE#" "$GADGET_CONFIG_FILE"
     sed -i -e "s/^NSample .*/\t /" "$GADGET_CONFIG_FILE"
