@@ -151,6 +151,7 @@ echo 'checking that output directories exist'
 if [ ! -d $CLASS_OUT_DIR/$SIM_FOLDER ]; then
   echo "making directory: $CLASS_OUT_DIR/$SIM_FOLDER"
   mkdir -p $CLASS_OUT_DIR/$SIM_FOLDER
+  mkdir $CLASS_OUT_DIR/$SIM_FOLDER/logs
 fi
 
 if [ ! -d $GADGET_OUT_DIR ]; then
