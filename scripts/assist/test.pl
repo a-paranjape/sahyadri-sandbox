@@ -27,13 +27,13 @@ foreach my $scale ( @scale_values_right )
 system("echo instead, do this:");
 foreach my $scale ( @scale_values_wrong )
 {
-    my $scale = substr("$scale",0,6);
+    my $scale = substr("$scale",0,5);
     my $hlist = "hlist_" . $scale . "*.list";
     system("echo $hlist");
 }
 foreach my $scale ( @scale_values_right )
 {
-    my $scale = substr("$scale",0,6);
+    my $scale = substr("$scale",0,5);
     my $hlist = "hlist_" . $scale . "*.list";
     system("echo $hlist");
 }
