@@ -14,9 +14,12 @@ close $handle;
 foreach ( @scale_values )
 {
 	my ( $snap, $scale ) = split;
-	$scale = sprintf("%.5f", $scale);
 	my $out_tree = "out_" . $snap . ".trees";
-	my $hlist = "hlist_" . $scale . ".list";
+	$scale = substr("$scale",0,6);
+	my $hlist = "hlist_" . $scale . "*.list";
+	# old version affected by fundamentally buggy rounding in sprintf
+	# $scale = sprintf("%.5f", $scale+1e-8);
+	# my $hlist = "hlist_" . $scale . ".list";
 	system("cp $trees/$hlist $halos/$out_tree");
 }
 
