@@ -61,6 +61,13 @@ TREES=`awk '$1=="TREES" {print $3}' $SCF`
 POSTPROCESS=`awk '$1=="POSTPROCESS" {print $3}' $SCF`
 PP_GRID=`awk '$1=="PP_GRID" {print $3}' $SCF`
 
+if [ $POSTPROCESS == 1 ]; then
+    if [ $RUN_SIM == 1 ] || [ $HALOS == 1 ] || [ $TREES == 1 ]; then
+	echo cannot submit postprocessing with sims/halos/trees. switch off those flags and try again. rest will be submitted.
+	POSTPROCESS=0
+    fi
+fi
+
 NHRS=192
 NMIN=00
 NCPU=32
