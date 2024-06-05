@@ -11,8 +11,8 @@ Here we summarize the sampling strategies and parameter choices for the 1-parame
 * $A_{\rm s}$: 2.098903e-09
 * $w_0$ : -1.0
 
-## *Sinhagad* simulations (pilot study)
-The *Sinhagad* suite uses linear variations of each parameter $\theta$ with step-size $\Delta\theta$ to facilitate Fisher formalism studies. In addition to the common fiducial set $\theta=\theta_{\rm fid}$, samples are produced at
+## **Sinhagad** simulations (pilot study)
+The **Sinhagad** suite uses linear variations of each parameter $\theta$ with step-size $\Delta\theta$ to facilitate Fisher formalism studies. In addition to the common fiducial set $\theta=\theta_{\rm fid}$, samples are produced at
 $\theta_{\rm fid}-2\Delta\theta,\theta_{\rm fid}-\Delta\theta,\theta_{\rm fid}+\Delta\theta,\theta_{\rm fid}+2\Delta\theta$. Each realisation of the suite therefore contains $1 + 4\times 6 = 25$ simulations.
 
 The values of $\Delta\Theta$ for each parameter are as follows
@@ -25,6 +25,6 @@ The values of $\Delta\Theta$ for each parameter are as follows
 * $\Delta A_{\rm s}$: $?? \times A_{\rm s,fid}$
 * $\Delta w_0$ : ??
 
-## *Sahyadri* simulations
-** In progress **
+## **Sahyadri** simulations
+**In progress**
 
