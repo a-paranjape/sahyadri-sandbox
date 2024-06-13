@@ -227,6 +227,33 @@ class HaloReader(SnapshotReader):
 
     
     ###############################################
+    def convert_halos_fits(self):
+        #example of how to execute this function to convert to halo catalog
+        #import the library
+        import ConvertToFITS as Cfits
+
+        #input directory for halo catalog
+        #self.halocat_stem = sr.sim_stem + '/r'+str(sr.real)+'/' + 'out_' + str(sr.snap)
+        indir=self.halo_path+self.sim_stem+ '/r'+str(self.real)+'/'
+        #root name for the halo catalog assuming in input directory .trees and .vahc files
+        rootin='out_' + str(self.snap)
+
+        #output directory: set this to None if want to use input directory for output
+        outdir=None
+        #outdir=None
+
+        #list of output to be written
+        #basic: file contain only the most used information about the halos
+        #extended: file contains all information in .trees except what is included in basic
+        #vahc: write the tidal information from vahc
+        #To do: include the tidal ranks
+        #you can chose any combination of output_type and corresponding files will be written
+        list_output_type=['basic','extended','vahc']
+        Cfits.convert_fits(indir=indir,rootin=rootin,outdir=outdir,list_output_type=list_output_type)
+    ###############################################
+
+    
+    ###############################################
     def prep_halos(self,va=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
         """ Reads halo (+ vahc) catalogs for given realisation and snapshot. 
              Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
