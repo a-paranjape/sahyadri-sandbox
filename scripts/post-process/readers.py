@@ -11,7 +11,7 @@ import h5py
 class SnapshotReader(Utilities,Paths):
     """ Reader for HDF5 Gadget-4 snapshot. Reads single snapshot for one particle type. """
     ###############################################
-    def __init__(self,sim_stem='scm1024',real=1,snap=200,ptype=1,logfile=None,verbose=True):
+    def __init__(self,sim_stem='scm1024',real=1,snap=200,ptype=1,logfile=None,verbose=True,read_header=True):
         # code below inspired by Pylians (https://github.com/franciscovillaescusa/Pylians3/blob/master/library/readgadget.py)
         # and simplified to focus on Gadget-4 HDF5 snapshots.
         
@@ -39,6 +39,12 @@ class SnapshotReader(Utilities,Paths):
             
         self.snapshot_file = self.sim_path + self.snapshot_file
 
+        #read header only if this is set to true, just so that even if snapshot is not available then we should be able to use this function for rest of the file path defintions
+        self.read_header=read_header
+        if(self.read_header):
+            self.read_snapshot_header()
+
+    def read_snapshot_header(self):
         f = h5py.File(self.snapshot_file,'r')
         self.scale    = f['Header'].attrs[u'Time']
         self.redshift = f['Header'].attrs[u'Redshift']
