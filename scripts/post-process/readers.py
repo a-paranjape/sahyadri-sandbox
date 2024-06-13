@@ -31,7 +31,8 @@ class SnapshotReader(Utilities,Paths):
         elif os.path.exists(self.sim_path + self.snapshot_file+'.0.hdf5'):
             self.snapshot_file += '.0.hdf5'
         else:
-            raise Exception('File not found!')
+            raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
+                self.sim_path,self.snapshot_file))
 
         if self.verbose:
             self.print_this('Snapshot Reader:\n... preparing to read file: '+self.snapshot_file,self.logfile)
