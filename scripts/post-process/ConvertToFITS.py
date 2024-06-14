@@ -46,7 +46,8 @@ def get_header_dic(file_name):
 def out_column_list(col_dic,output_type='basic'):
     '''gives the list of columns to write given the file type'''
 
-    basic_cols=['x','y','z','vx','vy','vz','mvir','rvir','rs','vrms','id','pid']
+    basic_cols=['x','y','z','vx','vy','vz','Mvir','Mvir_all','M200b','M200c','M500c','M2500c',
+                'rvir','rs','vrms','id','pid','T/|U|']
 
     if(output_type=='basic'):#only one of include or exclude should be filled
         out_column={'include':basic_cols}
@@ -180,3 +181,53 @@ def convert_fits(indir='',rootin='',outdir=None,list_output_type=['basic','exten
         Fdic_out['fhandle'].close() 
 
     return 0
+
+
+def fits_to_record(fhandle,index,list_sel_col=None):
+    '''converts a fits file to record array kepping only the index
+    You can keep only selected fields by giving a list as list_sel_col
+    If the columns needed is spread over mutiple files then fhandle can be a list of fits handels'''
+
+    if(type(fhandle)!=type([])):
+        fhandle=[fhandle]
+
+
+    #combined list of columns available in all fits file and organize the datatype
+    list_col_dic={}
+    dtype_dic={}
+    for ii in range(0,len(fhandle)):
+        list_col_dic[ii]=fhandle[ii][1][0].dtype.names
+        dtype_dic[ii]=fhandle[ii][1][0].dtype
+
+        if(ii==0):
+            list_col=list_col_dic[ii]
+        else:
+            list_col=list_col+list_col_dic[ii]
+
+
+    if(list_sel_col is None):
+        list_sel_col=list_col
+
+    dtype_rec=[]
+    for ii in range(0,len(fhandle)):
+        for jj in range(0,len(dtype_dic[ii])):
+            if(list_col_dic[ii][jj] in list_sel_col):
+                 dtype_rec.append((list_col_dic[ii][jj],dtype_dic[ii][jj]))
+
+    #declare the record array to hold the variables
+    rec_array=np.recarray((index.size),dtype=dtype_rec)
+    col_missing=np.ones(len(list_sel_col),dtype=bool)
+    for cc,cname in enumerate(list_sel_col):
+        for ii in range(0,len(fhandle)):
+            if(cname in list_col_dic[ii]):
+                rec_array[cname]=fhandle[ii][1][cname][index]
+                col_missing[cc]=False
+                break
+
+    if(np.sum(col_missing)>0):
+        print('*** Warning *** \n Following field were requested but not found in the files')
+        for ii in range(0,col_missing.size):
+            if(col_missing[ii]):
+                print(ii,list_sel_col[ii])
+
+    return rec_array
