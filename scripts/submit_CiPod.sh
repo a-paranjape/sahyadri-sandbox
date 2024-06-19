@@ -192,7 +192,7 @@ N_OUT=$(( N_OUT + 1 ))
 echo 'writing config files'
 echo '... class'
 cp $CLASS_TEMPLATE $CLASS_CONFIG_FILE
-sed -i -e "s#^H0.*#h = $HUBBLE#" "$CLASS_CONFIG_FILE"
+sed -i -e "s#^H0.*#H0 = $H0#" "$CLASS_CONFIG_FILE"
 sed -i -e "s#^Omega_b.*#Omega_b = $OMEGA_B#" "$CLASS_CONFIG_FILE"
 sed -i -e "s#^Omega_m.*#Omega_m = $OMEGA_M#" "$CLASS_CONFIG_FILE"
 sed -i -e "s#^Omega_k.*#Omega_k = $OMEGA_K#" "$CLASS_CONFIG_FILE"
