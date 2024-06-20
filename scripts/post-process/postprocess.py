@@ -115,22 +115,15 @@ for snap in range(snap_start,snap_end+1):
         sr.write_to_file(outfile_mf,mlist)
 
 
-    # more inclusive catalog for .vahc file
-    hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True)
-    av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
-                  ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
-    va = av.add_value(write_vahc=True)
-
-    # # test VA
-    # hpos_read,halos_read,va_read = hr.prep_halos(massdef=massdef,QE=QE,Npmin=Npmin,va=True)
-    # bias = va_read['b1']
-    # print('Halo-by-halo bias (min/max/mean): {0:.3f},{1:.3f},{2:.3f}'.format(bias.min(),bias.max(),bias.mean()))
-    # bias_k = Pk_hm/Pk_mm
-    # print('<Phm/Pmm>: ',bias_k[ps.ktab <= kmax].mean())
+    # # more inclusive catalog for .vahc file
+    # hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True)
+    # av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
+    #               ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
+    # va = av.add_value(write_vahc=True)
 
     del pos#,vel,ids
     del delta_dm, FT_delta_dm,delta_h,FT_delta_h
-    del hpos,halos
+    del hpos,halos#,va
     gc.collect()
     sr.print_this('... snap {0:d} done'.format(snap),sr.logfile)
 
