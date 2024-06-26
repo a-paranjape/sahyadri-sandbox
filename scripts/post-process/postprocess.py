@@ -115,11 +115,11 @@ for snap in range(snap_start,snap_end+1):
         sr.write_to_file(outfile_mf,mlist)
 
 
-    # # more inclusive catalog for .vahc file
-    # hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True)
-    # av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
-    #               ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
-    # va = av.add_value(write_vahc=True)
+    # more inclusive catalog for .vahc file
+    hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True)
+    av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
+                  ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
+    va = av.add_value(write_vahc=True)
 
     del pos#,vel,ids
     del delta_dm, FT_delta_dm,delta_h,FT_delta_h
