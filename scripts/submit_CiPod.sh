@@ -301,44 +301,43 @@ if [ $HALOS == 1 ]; then
     cd $AUTO_ROCKSTAR_DIR
     ROCKSTAR_SERV_JOB=`qsub -V -N $ROCKSTAR_SERV -k oe -W depend=afterok:$GADGET_JOB -l walltime=05:00:00 -- $ROCKSTAR_EXEC $ROCKSTAR_CONFIG_FILE`
     ROCKSTAR_PROC_JOB=`qsub -V -N $ROCKSTAR_PROC -k oe -W depend=after:$ROCKSTAR_SERV_JOB -l walltime=05:00:00 -l select=ncpus=$NWRITER -- $ROCKSTAR_EXEC $AUTO_ROCKSTAR_DIR/auto-rockstar.cfg`
-
-    # run ConsistentTrees if requested
-    if [ $TREES ==  1 ]; then
-      CONSISTENT_TREES_GENCFG=$CODE_HOME/code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/scripts/gen\_merger\_cfg.pl
-      GEN_CFG=ctrees\_cfg
-      GEN_TREES=ctrees\_trees
-      GEN_CAT=ctrees\_cat
-      cd $AUTO_ROCKSTAR_DIR
-      echo "submitting consistent trees job"
-      GEN_CFG_JOB=`qsub -V -N $GEN_CFG -k oe -W depend=afterok:$ROCKSTAR_SERV_JOB -l walltime=00:10:00 -- $PERL_EXEC $CONSISTENT_TREES_GENCFG $ROCKSTAR_CONFIG_FILE`
-      CONSISTENT_TREES_DIR=$CODE_HOME/code/ConsistentTrees/consistent-trees
-      CONSISTENT_TREES_CONFIG_FILE=$AUTO_ROCKSTAR_DIR/outputs/merger\_tree.cfg
-      TREES_EXEC=$CONSISTENT_TREES_DIR/do\_merger\_tree.pl
-      CATALOG_EXEC=$CONSISTENT_TREES_DIR/halo\_trees\_to\_catalog.pl
-      cd $CONSISTENT_TREES_DIR
-      GEN_TREES_JOB=`qsub -V -N $GEN_TREES -k oe -W depend=afterok:$GEN_CFG_JOB -l walltime=05:00:00 -l select=ncpus=$NWRITER -- $PERL_EXEC $TREES_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
-      GEN_CAT_JOB=`qsub -V -N $GEN_CAT -k oe -W depend=afterok:$GEN_TREES_JOB -l walltime=00:30:00 -- $PERL_EXEC $CATALOG_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
-
-      CLEAN_TREE_EXEC=$CODE_HOME/scripts/assist/clean\_trees.pl
-      CLEAN_TREE_JOB=`qsub -V -N clean\_trees -k oe -W depend=afterok:$GEN_CAT_JOB -l walltime=00:10:00 -- $PERL_EXEC $CLEAN_TREE_EXEC $AUTO_ROCKSTAR_DIR`
-      ROCKSTAR_SERV_JOB=$CLEAN_TREE_JOB
-    fi
-    # #################
-
-    cd $HOME # this is user home
-    clean=halo_cleanup.sh
-    str=$'#!/usr/bin/bash\n\n'
-    str="${str}sleep 2; rm -rf $AUTO_ROCKSTAR_DIR/profiling/ $AUTO_ROCKSTAR_DIR/*.ascii $AUTO_ROCKSTAR_DIR/*.bin; "
-    if [ $TREES == 1 ]; then
-        str="${str}mv ctrees_cfg*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_trees*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_cat*.* $AUTO_ROCKSTAR_DIR/logs/."
-    fi
-    echo "$str" > $clean
-    chmod +x $clean
-    HALO_CLEANUP_JOB=`qsub -N halo_cleanup -W depend=afterok:$ROCKSTAR_SERV_JOB -- $clean`
 else
     echo "halos not requested"
-    HALO_CLEANUP_JOB=`qsub -N dummy -k oe -W depend=afterok:$GADGET_JOB  -- $DUMMY_EXEC`
+    ROCKSTAR_SERV_JOB=`qsub -N dummy -k oe -W depend=afterok:$GADGET_JOB  -- $DUMMY_EXEC`
 fi
+
+# run ConsistentTrees if requested
+if [ $TREES ==  1 ]; then
+  CONSISTENT_TREES_GENCFG=$CODE_HOME/code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/scripts/gen\_merger\_cfg.pl
+  GEN_CFG=ctrees\_cfg
+  GEN_TREES=ctrees\_trees
+  GEN_CAT=ctrees\_cat
+  cd $AUTO_ROCKSTAR_DIR
+  echo "submitting consistent trees job"
+  GEN_CFG_JOB=`qsub -V -N $GEN_CFG -k oe -W depend=afterok:$ROCKSTAR_SERV_JOB -l walltime=00:10:00 -- $PERL_EXEC $CONSISTENT_TREES_GENCFG $ROCKSTAR_CONFIG_FILE`
+  CONSISTENT_TREES_DIR=$CODE_HOME/code/ConsistentTrees/consistent-trees
+  CONSISTENT_TREES_CONFIG_FILE=$AUTO_ROCKSTAR_DIR/outputs/merger\_tree.cfg
+  TREES_EXEC=$CONSISTENT_TREES_DIR/do\_merger\_tree.pl
+  CATALOG_EXEC=$CONSISTENT_TREES_DIR/halo\_trees\_to\_catalog.pl
+  cd $CONSISTENT_TREES_DIR
+  GEN_TREES_JOB=`qsub -V -N $GEN_TREES -k oe -W depend=afterok:$GEN_CFG_JOB -l walltime=05:00:00 -l select=ncpus=$NWRITER -- $PERL_EXEC $TREES_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
+  GEN_CAT_JOB=`qsub -V -N $GEN_CAT -k oe -W depend=afterok:$GEN_TREES_JOB -l walltime=00:30:00 -- $PERL_EXEC $CATALOG_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
+
+  CLEAN_TREE_EXEC=$CODE_HOME/scripts/assist/clean\_trees.pl
+  CLEAN_TREE_JOB=`qsub -V -N clean\_trees -k oe -W depend=afterok:$GEN_CAT_JOB -l walltime=00:10:00 -- $PERL_EXEC $CLEAN_TREE_EXEC $AUTO_ROCKSTAR_DIR`
+  cd $HOME # this is user home
+  clean=halo_cleanup.sh
+  str=$'#!/usr/bin/bash\n\n'
+  str="${str}sleep 2; rm -rf $AUTO_ROCKSTAR_DIR/profiling/ $AUTO_ROCKSTAR_DIR/*.ascii $AUTO_ROCKSTAR_DIR/*.bin; "
+  str="${str}mv ctrees_cfg*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_trees*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_cat*.* $AUTO_ROCKSTAR_DIR/logs/."
+  echo "$str" > $clean
+  chmod +x $clean
+  HALO_CLEANUP_JOB=`qsub -N halo_cleanup -W depend=afterok:$CLEAN_TREE_JOB -- $clean`
+else
+  echo "trees not requested"
+  HALO_CLEANUP_JOB=`qsub -N dummy -k oe -W depend=afterok:$ROCKSTAR_SERV_JOB  -- $DUMMY_EXEC`
+fi
+# #################
 
 cd $HOME # this is user home
 
