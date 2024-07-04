@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 my $halos = $ARGV[0];
+my $home = $ARGV[1];
 my $trees = "$halos/hlists";
 my $scales = "$halos/outputs/scales.txt";
 
@@ -25,6 +26,10 @@ foreach ( @scale_values )
 
 system("cp $scales $halos/../scales.txt");
 system("rm -rf $halos/outputs $halos/out_*.list $halos/hlists");
+system("rm -rf $halos/profiling/ $halos/*.ascii $halos/*.bin");
+system("mv $home/ctrees_cfg*.* $halos/logs/.");
+system("mv $home/ctrees_trees*.* $halos/logs/.");
+system("mv $home/ctrees_cat*.* $halos/logs/.");
 
 #print "@scale_values\n";
 #print "$#scale_values\n";

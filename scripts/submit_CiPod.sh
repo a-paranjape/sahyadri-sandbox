@@ -324,18 +324,18 @@ if [ $TREES ==  1 ]; then
   GEN_CAT_JOB=`qsub -V -N $GEN_CAT -k oe -W depend=afterok:$GEN_TREES_JOB -l walltime=00:30:00 -- $PERL_EXEC $CATALOG_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
 
   CLEAN_TREE_EXEC=$CODE_HOME/scripts/assist/clean\_trees.pl
-  CLEAN_TREE_JOB=`qsub -V -N clean\_trees -k oe -W depend=afterok:$GEN_CAT_JOB -l walltime=00:10:00 -- $PERL_EXEC $CLEAN_TREE_EXEC $AUTO_ROCKSTAR_DIR`
-  cd $HOME # this is user home
-  clean=halo_cleanup.sh
-  str=$'#!/usr/bin/bash\n\n'
-  str="${str}sleep 2; rm -rf $AUTO_ROCKSTAR_DIR/profiling/ $AUTO_ROCKSTAR_DIR/*.ascii $AUTO_ROCKSTAR_DIR/*.bin; "
-  str="${str}mv ctrees_cfg*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_trees*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_cat*.* $AUTO_ROCKSTAR_DIR/logs/."
-  echo "$str" > $clean
-  chmod +x $clean
-  HALO_CLEANUP_JOB=`qsub -N halo_cleanup -W depend=afterok:$CLEAN_TREE_JOB -- $clean`
+  CLEAN_TREE_JOB=`qsub -V -N clean\_trees -k oe -W depend=afterok:$GEN_CAT_JOB -l walltime=00:10:00 -- $PERL_EXEC $CLEAN_TREE_EXEC $AUTO_ROCKSTAR_DIR $HOME`
+  # cd $HOME # this is user home
+  # clean=halo_cleanup.sh
+  # str=$'#!/usr/bin/bash\n\n'
+  # str="${str}sleep 2; rm -rf $AUTO_ROCKSTAR_DIR/profiling/ $AUTO_ROCKSTAR_DIR/*.ascii $AUTO_ROCKSTAR_DIR/*.bin; "
+  # str="${str}mv ctrees_cfg*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_trees*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_cat*.* $AUTO_ROCKSTAR_DIR/logs/."
+  # echo "$str" > $clean
+  # chmod +x $clean
+  # HALO_CLEANUP_JOB=`qsub -N halo_cleanup -W depend=afterok:$CLEAN_TREE_JOB -- $clean`
 else
   echo "trees not requested"
-  HALO_CLEANUP_JOB=`qsub -N dummy -k oe -W depend=afterok:$ROCKSTAR_SERV_JOB  -- $DUMMY_EXEC`
+  CLEAN_TREE_JOB=`qsub -N dummy -k oe -W depend=afterok:$ROCKSTAR_SERV_JOB  -- $DUMMY_EXEC`
 fi
 # #################
 
@@ -350,10 +350,10 @@ if [ $POSTPROCESS == 1 ]; then
     N_OUT=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
     SNAP_START=`awk 'NR==1{print $1; exit}' $AUTO_ROCKSTAR_DIR/../scales.txt`
     ###########################
-    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$HALO_CLEANUP_JOB -l walltime=36:00:00 -l select=ncpus=1 -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_FOLDER/$SIM_STUB $SNAP_START $N_OUT $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX`
+    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$CLEAN_TREE_JOB -l walltime=36:00:00 -l select=ncpus=1 -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_FOLDER/$SIM_STUB $SNAP_START $N_OUT $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX`
 else
     echo "post-processing not requested"
-    POSTPROC_JOB=`qsub -N dummy -k oe -W depend=afterok:$HALO_CLEANUP_JOB  -- $DUMMY_EXEC`
+    POSTPROC_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLEAN_TREE_JOB  -- $DUMMY_EXEC`
 fi
 
 qsub -N janitor -k oe -W depend=afterok:$POSTPROC_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR/$SIM_FOLDER $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
