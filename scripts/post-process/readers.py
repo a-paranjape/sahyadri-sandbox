@@ -275,8 +275,8 @@ class HaloReader(SnapshotReader):
 
     
     ###############################################
-    def prep_halos(self,va=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False):
-        """ Reads halo (+ vahc) catalogs for given realisation and snapshot. 
+    def prep_halos(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False):
+        """ Reads halo (+ vahc) (+ext propperties only for fits) catalogs for given realisation and snapshot. 
              Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
              where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
              Selects objects with at least Npmin particles for given massdef.
@@ -287,7 +287,7 @@ class HaloReader(SnapshotReader):
         """
 
         if(use_fits):
-            return self.prep_halos_fits(va=va,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos)
+            return self.prep_halos_fits(va=va,ext=ext,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos)
 
         if self.verbose:
             self.print_this("... preparing halo data",self.logfile)
@@ -347,8 +347,8 @@ class HaloReader(SnapshotReader):
 
     ###############################################
     #prepare halos with fits
-    def prep_halos_fits(self,va=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
-            """ Reads halo (+ vahc) catalogs for given realisation and snapshot. 
+    def prep_halos_fits(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
+            """ Reads halo (+ vahc using va=True) (+extended properties using ext=True) catalogs for given realisation and snapshot. 
                  Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
                  where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
                  Selects objects with at least Npmin particles for given massdef.
@@ -388,7 +388,13 @@ class HaloReader(SnapshotReader):
                     self.print_this("... ... discarding subhalos",self.logfile)
 
             index_clean=np.where(cond_clean)[0]
-            halos=Cfits.fits_to_record(fbasic,index_clean,list_sel_col=None)
+            #if ext is true then load all the record in the extended file as well
+            if ext:
+                ext_fits=self.halo_path + self.halocat_stem + '_extended.fits.gz'
+                with F.FITS(ext_fits) as fext:
+                    halos = Cfits.fits_to_record([fbasic,fext],index_clean,list_sel_col=None)
+            else:
+                halos=Cfits.fits_to_record(fbasic,index_clean,list_sel_col=None)
 
             if self.verbose:
                 self.print_this("... ... kept {0:d} of {1:d} objects in catalog".format(halos.size,Nhalos_all),self.logfile)

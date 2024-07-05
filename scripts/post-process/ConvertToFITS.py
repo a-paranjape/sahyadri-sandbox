@@ -184,7 +184,7 @@ def convert_fits(indir='',rootin='',outdir=None,list_output_type=['basic','exten
 
 
 def fits_to_record(fhandle,index,list_sel_col=None):
-    '''converts a fits file to record array kepping only the index
+    '''converts a fits file to record array keeping only the index
     You can keep only selected fields by giving a list as list_sel_col
     If the columns needed is spread over mutiple files then fhandle can be a list of fits handels'''
 
