@@ -2,6 +2,7 @@ import sys
 import numpy as np
 from time import time
 import gc
+import socket
 # import multiprocessing as mp
 
 
@@ -11,6 +12,9 @@ class Paths(object):
     """ Paths for various local directories. """
     def __init__(self):
         self.home_path = '/home/aseem/iucaa/Sahyadri/sahyadri-sandbox/' #'/mnt/home/faculty/caseem/'
+        if(socket.gethostname()=='Shadabs-MacBook-Pro.local'):
+            self.home_path='/Users/shadab/Documents/Projects/sahyadri-sandbox/'
+
         self.python_path = self.home_path + 'scripts/post-process/'
 
         self.scratch_path = self.home_path + 'Test/' # '/scratch/aseem/'

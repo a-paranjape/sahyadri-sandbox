@@ -5,13 +5,17 @@ import gc
 from utilities import Utilities,Paths
 import h5py
 
+#These libraries are needed to use fits files
+import ConvertToFITS as Cfits
+import fitsio as F
+
 ########################################################
 # Reader for HDF5 Gadget-4 snapshot. 
 ########################################################
 class SnapshotReader(Utilities,Paths):
     """ Reader for HDF5 Gadget-4 snapshot. Reads single snapshot for one particle type. """
     ###############################################
-    def __init__(self,sim_stem='scm1024',real=1,snap=200,ptype=1,logfile=None,verbose=True):
+    def __init__(self,sim_stem='scm1024',real=1,snap=200,ptype=1,logfile=None,verbose=True,read_header=True):
         # code below inspired by Pylians (https://github.com/franciscovillaescusa/Pylians3/blob/master/library/readgadget.py)
         # and simplified to focus on Gadget-4 HDF5 snapshots.
         
@@ -31,13 +35,20 @@ class SnapshotReader(Utilities,Paths):
         elif os.path.exists(self.sim_path + self.snapshot_file+'.0.hdf5'):
             self.snapshot_file += '.0.hdf5'
         else:
-            raise Exception('File not found!')
+            raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
+                self.sim_path,self.snapshot_file))
 
         if self.verbose:
             self.print_this('Snapshot Reader:\n... preparing to read file: '+self.snapshot_file,self.logfile)
             
         self.snapshot_file = self.sim_path + self.snapshot_file
 
+        #read header only if this is set to true, just so that even if snapshot is not available then we should be able to use this function for rest of the file path defintions
+        self.read_header=read_header
+        if(self.read_header):
+            self.read_snapshot_header()
+
+    def read_snapshot_header(self):
         f = h5py.File(self.snapshot_file,'r')
         self.scale    = f['Header'].attrs[u'Time']
         self.redshift = f['Header'].attrs[u'Redshift']
@@ -157,7 +168,8 @@ class HaloReader(SnapshotReader):
                              }
         
         self.halodatanames = list(self.halodatatype.keys())
-        
+       
+        #in the file header this ID is called haloID, it will be good to be consistent, the fits file uses the file header
         self.vadatatype = {'ID':'int64',
                            'lam1_R2R200b':float,'lam2_R2R200b':float,'lam3_R2R200b':float,
                            'lam1_R4R200b':float,'lam2_R4R200b':float,'lam3_R4R200b':float,
@@ -172,6 +184,7 @@ class HaloReader(SnapshotReader):
         
         self.vadatanames = list(self.vadatatype.keys())
 
+        #This and above vadatatype seems to be same
         # needed for AddValue
         self.vadtypelist = [('ID','i8'),
                             ('lam1_R2R200b','f'),('lam2_R2R200b','f'),('lam3_R2R200b','f'),
@@ -220,15 +233,61 @@ class HaloReader(SnapshotReader):
 
     
     ###############################################
-    def prep_halos(self,va=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
-        """ Reads halo (+ vahc) catalogs for given realisation and snapshot. 
+    def convert_halos_fits(self, list_output_type=['basic','extended','vahc']):
+        '''This reads the raw halos and convert them in fits.gz
+        we write the .trees in two files called basic and extended and vahc in a seperate file
+        '''
+
+        #example of how to execute this function to convert to halo catalog
+
+        #input directory for halo catalog
+        #self.halocat_stem = sr.sim_stem + '/r'+str(sr.real)+'/' + 'out_' + str(sr.snap)
+        indir=self.halo_path+self.sim_stem+ '/r'+str(self.real)+'/'
+        #root name for the halo catalog assuming in input directory .trees and .vahc files
+        rootin='out_' + str(self.snap)
+
+        #output directory: set this to None if want to use input directory for output
+        outdir=indir
+        #outdir=None
+
+        fits_exists=False
+        for oo,out_type in enumerate(list_output_type):
+            outfile='%s%s_%s.fits.gz'%(outdir,rootin,out_type)
+            if(os.path.isfile(outfile)):
+                print('!Warning: Fits file exists',out_type,outfile)
+                fits_exists=True
+
+
+        if(fits_exists):
+            print('Since some of the fits file exists not doing anything')
+            print('Please clean the output folder and then re-run, if needed')
+            return
+        else:
+            #list of output to be written
+            #basic: file contain only the most used information about the halos
+            #extended: file contains all information in .trees except what is included in basic
+            #vahc: write the tidal information from vahc
+            #To do: include the tidal ranks
+            #you can chose any combination of output_type and corresponding files will be written
+            Cfits.convert_fits(indir=indir,rootin=rootin,outdir=outdir,list_output_type=list_output_type)
+            return
+    ###############################################
+
+    
+    ###############################################
+    def prep_halos(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False):
+        """ Reads halo (+ vahc) (+ext propperties only for fits) catalogs for given realisation and snapshot. 
              Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
              where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
              Selects objects with at least Npmin particles for given massdef.
              Optionally removes subhalos (set keep_subhalos=False).
              Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
              Halos will be sorted by (increasing) massdef.
-        """ 
+             use_fits: True then load information from the .fits.gz file otherwise load from the .tree/.vahc files
+        """
+
+        if(use_fits):
+            return self.prep_halos_fits(va=va,ext=ext,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos)
 
         if self.verbose:
             self.print_this("... preparing halo data",self.logfile)
@@ -285,7 +344,96 @@ class HaloReader(SnapshotReader):
         return (hpos,halos,vahc) if va else (hpos,halos)
     ###############################################
 
-    
+
+    ###############################################
+    #prepare halos with fits
+    def prep_halos_fits(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
+            """ Reads halo (+ vahc using va=True) (+extended properties using ext=True) catalogs for given realisation and snapshot. 
+                 Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
+                 where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
+                 Selects objects with at least Npmin particles for given massdef.
+                 Optionally removes subhalos (set keep_subhalos=False).
+                 Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
+                 Halos will be sorted by (increasing) massdef.
+            """
+
+            #make sure mass definition follow the same convention as in the header/fits
+            if(massdef[0]=='m'):
+                massdef='M'+massdef[1:]
+
+            if self.verbose:
+                self.print_this("... preparing halo data",self.logfile)
+
+            #open the fits handle for basic and extended
+            halo_basic=self.halo_path + self.halocat_stem + '_basic.fits.gz'
+            fbasic=F.FITS(halo_basic)
+
+            Nhalos_all = fbasic[1][massdef][:].size
+            mmin = self.mpart*Npmin
+            cond_clean = (fbasic[1][massdef][:] >= mmin)
+            if QE is not None:
+                TbyU_max = 0.5*(1+QE)
+                TbyU_min = np.max([0.0,0.5*(1-QE)])
+                cond_clean = cond_clean & ((fbasic[1]['T/|U|'][:] < TbyU_max) & (TbyU_min < fbasic[1]['T/|U|'][:]))
+            if not keep_subhalos:
+                cond_clean = cond_clean & (fbasic[1]['pid'][:] == -1)
+            if self.verbose:
+                self.print_this("... ... using mass definition " + massdef + " > {0:.3e} Msun/h".format(mmin),self.logfile)
+                if QE is not None:
+                    self.print_this("... ... only relaxed objects retained with {0:.2f} < 2T/|U| < {1:.2f}"
+                                    .format(2*TbyU_min,2*TbyU_max),self.logfile)
+                else:
+                    self.print_this("... ... skipping relaxation cleaning",self.logfile)
+                if not keep_subhalos:
+                    self.print_this("... ... discarding subhalos",self.logfile)
+
+            index_clean=np.where(cond_clean)[0]
+            #if ext is true then load all the record in the extended file as well
+            if ext:
+                ext_fits=self.halo_path + self.halocat_stem + '_extended.fits.gz'
+                with F.FITS(ext_fits) as fext:
+                    halos = Cfits.fits_to_record([fbasic,fext],index_clean,list_sel_col=None)
+            else:
+                halos=Cfits.fits_to_record(fbasic,index_clean,list_sel_col=None)
+
+            if self.verbose:
+                self.print_this("... ... kept {0:d} of {1:d} objects in catalog".format(halos.size,Nhalos_all),self.logfile)
+
+
+            hpos = np.array([fbasic[1]['x'][index_clean],fbasic[1]['y'][index_clean],fbasic[1]['z'][index_clean]])
+
+            # if (self.RSD) & (halos.size > 0):
+            #     if self.verbose:
+            #         self.print_this("... ... applying redshift space displacement",self.logfile)
+            #     hpos[2] = hpos[2] + 0.01*halos['vz']*(1+self.redshift)/self.EHub(self.redshift)
+            if va:
+                vahc_fits=self.halo_path + self.halocat_stem + '_vahc.fits.gz'
+                with F.FITS(vahc_fits) as fvahc:
+                    vahc = Cfits.fits_to_record(fvahc,index_clean,list_sel_col=None)
+
+
+            hpos = hpos % self.Lbox
+            hpos = hpos.T  # shape (Ntrc,3)
+
+            del cond_clean
+            gc.collect()
+
+            if self.verbose:
+                self.print_this("... ... sorting by "+massdef,self.logfile)
+            sorter = halos[massdef].argsort()
+            halos = halos[sorter]
+            hpos = hpos[sorter]
+            if va:
+                vahc = vahc[sorter]
+
+            del sorter
+            gc.collect()
+            fbasic.close()
+
+            return (hpos,halos,vahc) if va else (hpos,halos)
+    ###############################################
+
+
     ###############################################
     def calc_Npmin_default(self,grid):
         Npmin = 200*self.NENCL_2R200B*(self.npart/1024**3.)*(512./grid)**3
