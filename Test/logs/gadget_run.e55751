@@ -1,0 +1,51 @@
+Warning: Permanently added 'hpc077,10.1.3.77' (ECDSA) to the list of known hosts.
+Warning: Permanently added 'hpc075,10.1.3.75' (ECDSA) to the list of known hosts.
+Warning: Permanently added 'hpc074,10.1.3.74' (ECDSA) to the list of known hosts.
+--------------------------------------------------------------------------
+WARNING: There was an error initializing an OpenFabrics device.
+
+  Local host:   hpc077
+  Local device: mlx5_0
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+MPI_ABORT was invoked on rank 28 in communicator MPI_COMM_WORLD
+with errorcode 1.
+
+NOTE: invoking MPI_ABORT causes Open MPI to kill all MPI processes.
+You may or may not see output from other processes, depending on
+exactly when Open MPI kills them.
+--------------------------------------------------------------------------
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] PMIX ERROR: UNREACHABLE in file server/pmix_server.c at line 2198
+[hpc071:1666690] 127 more processes have sent help message help-mpi-btl-openib.txt / error in device init
+[hpc071:1666690] Set MCA parameter "orte_base_help_aggregate" to 0 to see all help / error messages
+[hpc071:1666690] 123 more processes have sent help message help-mpi-api.txt / mpi-abort

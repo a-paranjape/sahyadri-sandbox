@@ -1,0 +1,71 @@
+Warning: Permanently added 'hpc079,10.1.3.79' (ECDSA) to the list of known hosts.
+Warning: Permanently added 'hpc072,10.1.3.72' (ECDSA) to the list of known hosts.
+Warning: Permanently added 'hpc080,10.1.3.80' (ECDSA) to the list of known hosts.
+--------------------------------------------------------------------------
+WARNING: There was an error initializing an OpenFabrics device.
+
+  Local host:   hpc080
+  Local device: mlx5_0
+--------------------------------------------------------------------------
+[hpc063:1199237] 127 more processes have sent help message help-mpi-btl-openib.txt / error in device init
+[hpc063:1199237] Set MCA parameter "orte_base_help_aggregate" to 0 to see all help / error messages
+--------------------------------------------------------------------------
+ORTE has lost communication with a remote daemon.
+
+  HNP daemon   : [[3932,0],0] on node hpc063
+  Remote daemon: [[3932,0],3] on node hpc080
+
+This is usually due to either a failure of the TCP network
+connection to the node, or possibly an internal failure of
+the daemon itself. We cannot recover from this failure, and
+therefore will terminate the job.
+--------------------------------------------------------------------------
+[hpc072:1346565:0:1346565] ib_mlx5_log.c:177  Remote OP on mlx5_0:1/IB (synd 0x14 vend 0x89 hw_synd 0/0)
+[hpc072:1346565:0:1346565] ib_mlx5_log.c:177  DCI QP 0x13c51 wqe[35412]: SEND s-e [rqpn 0x1507e rlid 32] [va 0x155530c7d780 len 3866 lkey 0x84707] 
+==== backtrace (tid:1346565) ====
+ 0 0x00000000000254fa uct_ib_mlx5_completion_with_err()  ???:0
+ 1 0x000000000004e68b uct_dc_mlx5_ep_handle_failure()  ???:0
+ 2 0x0000000000026f9d uct_ib_mlx5_check_completion()  ???:0
+ 3 0x0000000000050c32 uct_dc_mlx5_ep_check()  ???:0
+ 4 0x000000000004382a ucp_worker_progress()  ???:0
+ 5 0x0000000000004200 mca_pml_ucx_recv()  ???:0
+ 6 0x0000000000089ac5 PMPI_Recv()  ???:0
+ 7 0x000000000046299b tree<gravnode, simparticles, gravpoint_data, foreign_gravpoint_data>::tree_fetch_foreign_nodes()  /mnt/home/faculty/caseem/code/Gadget-4/gadget4/src/tree/tree.cc:1049
+ 8 0x0000000000468e5e gwalk::gravity_tree()  /mnt/home/faculty/caseem/code/Gadget-4/gadget4/src/gravtree/gwalk.cc:816
+ 9 0x000000000044ef0f sim::gravity()  /mnt/home/faculty/caseem/code/Gadget-4/gadget4/src/gravity/gravity.cc:232
+10 0x000000000044f5fc sim::compute_grav_accelerations()  /mnt/home/faculty/caseem/code/Gadget-4/gadget4/src/gravity/gravity.cc:119
+11 0x0000000000448916 sim::do_gravity_step_second_half()  /mnt/home/faculty/caseem/code/Gadget-4/gadget4/src/time_integration/kicks.cc:379
+12 0x000000000041031d sim::run()  /mnt/home/faculty/caseem/code/Gadget-4/gadget4/src/main/run.cc:150
+13 0x0000000000405166 main()  /mnt/home/faculty/caseem/code/Gadget-4/gadget4/src/main/main.cc:329
+14 0x000000000003aca3 __libc_start_main()  ???:0
+15 0x00000000004057ee _start()  ???:0
+=================================
+[hpc072:1346565] *** Process received signal ***
+[hpc072:1346565] Signal: Aborted (6)
+[hpc072:1346565] Signal code:  (-6)
+[hpc072:1346565] [ 0] /lib64/libpthread.so.0(+0x12ce0)[0x15555323fce0]
+[hpc072:1346565] [ 1] /lib64/libc.so.6(gsignal+0x10f)[0x155552eb6a4f]
+[hpc072:1346565] [ 2] /lib64/libc.so.6(abort+0x127)[0x155552e89db5]
+[hpc072:1346565] [ 3] /lib64/libucs.so.0(+0x5d2e6)[0x155541ac02e6]
+[hpc072:1346565] [ 4] /lib64/libucs.so.0(ucs_log_default_handler+0xde4)[0x155541ac54f4]
+[hpc072:1346565] [ 5] /lib64/libucs.so.0(ucs_log_dispatch+0xe4)[0x155541ac5814]
+[hpc072:1346565] [ 6] /lib64/ucx/libuct_ib.so.0(uct_ib_mlx5_completion_with_err+0x27a)[0x1555411cd4fa]
+[hpc072:1346565] [ 7] /lib64/ucx/libuct_ib.so.0(uct_dc_mlx5_ep_handle_failure+0xcb)[0x1555411f668b]
+[hpc072:1346565] [ 8] /lib64/ucx/libuct_ib.so.0(uct_ib_mlx5_check_completion+0x4d)[0x1555411cef9d]
+[hpc072:1346565] [ 9] /lib64/ucx/libuct_ib.so.0(+0x50c32)[0x1555411f8c32]
+[hpc072:1346565] [10] /lib64/libucp.so.0(ucp_worker_progress+0x6a)[0x15554206082a]
+[hpc072:1346565] [11] /mnt/csoft/compilers/openmpi-4.1.5-gcc-11.2/lib/openmpi/mca_pml_ucx.so(mca_pml_ucx_recv+0x130)[0x1555433ca200]
+[hpc072:1346565] [12] /mnt/csoft/compilers/openmpi-4.1.5-gcc-11.2/lib/libmpi.so.40(MPI_Recv+0x155)[0x155553df9ac5]
+[hpc072:1346565] [13] /mnt/home/faculty/caseem/code/Gadget-4/mesh512-NGenIC/Gadget4[0x46299b]
+[hpc072:1346565] [14] /mnt/home/faculty/caseem/code/Gadget-4/mesh512-NGenIC/Gadget4[0x468e5e]
+[hpc072:1346565] [15] /mnt/home/faculty/caseem/code/Gadget-4/mesh512-NGenIC/Gadget4[0x44ef0f]
+[hpc072:1346565] [16] /mnt/home/faculty/caseem/code/Gadget-4/mesh512-NGenIC/Gadget4[0x44f5fc]
+[hpc072:1346565] [17] /mnt/home/faculty/caseem/code/Gadget-4/mesh512-NGenIC/Gadget4[0x448916]
+[hpc072:1346565] [18] /mnt/home/faculty/caseem/code/Gadget-4/mesh512-NGenIC/Gadget4[0x41031d]
+[hpc072:1346565] [19] /mnt/home/faculty/caseem/code/Gadget-4/mesh512-NGenIC/Gadget4[0x405166]
+[hpc072:1346565] [20] /lib64/libc.so.6(__libc_start_main+0xf3)[0x155552ea2ca3]
+[hpc072:1346565] [21] /mnt/home/faculty/caseem/code/Gadget-4/mesh512-NGenIC/Gadget4[0x4057ee]
+[hpc072:1346565] *** End of error message ***
+--------------------------------------------------------------------------
+mpirun noticed that process rank 33 with PID 1346565 on node hpc072 exited on signal 6 (Aborted).
+--------------------------------------------------------------------------
