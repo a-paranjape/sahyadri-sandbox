@@ -350,7 +350,7 @@ if [ $POSTPROCESS == 1 ]; then
     N_OUT=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
     SNAP_START=`awk 'NR==1{print $1; exit}' $AUTO_ROCKSTAR_DIR/../scales.txt`
     ###########################
-    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$CLEAN_TREE_JOB -l walltime=36:00:00 -l select=1:ncpus=1:mem=20gb -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_FOLDER/$SIM_STUB $SNAP_START $N_OUT $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX`
+    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$CLEAN_TREE_JOB -l walltime=36:00:00 -l select=1:ncpus=1:mem=100gb -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_FOLDER/$SIM_STUB $SNAP_START $N_OUT $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX`
 else
     echo "post-processing not requested"
     POSTPROC_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLEAN_TREE_JOB  -- $DUMMY_EXEC`
