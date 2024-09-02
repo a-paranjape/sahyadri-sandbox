@@ -83,7 +83,7 @@ for snap in range(snap_start,snap_end+1):
     for t in tags[:-1]: mass_string += t+','
     mass_string += tags[-1]
 
-    lgmmin = np.log10(mmin)
+    lgmmin = 11.0 #np.log10(mmin) # hard-code to enable easier comparison across cosmologies
     lgmmax = np.log10(hr.MHALO_MAX)
     dlgm = 0.1
     nlgm = int((lgmmax-lgmmin)/dlgm)
@@ -123,7 +123,8 @@ for snap in range(snap_start,snap_end+1):
 
     del pos#,vel,ids
     del delta_dm, FT_delta_dm,delta_h,FT_delta_h
-    del hpos,halos#,va
+    del hpos,halos
+    del va
     gc.collect()
     sr.print_this('... snap {0:d} done'.format(snap),sr.logfile)
 
