@@ -27,8 +27,19 @@ Include the following line in the install user's `.bashrc` file, replacing the m
 
 Including `anaconda3` ensures that the command `python` links to Python3.
 
+### Envirnoment variable ###
+it is best to define the following environment variables by copying these lines to your bashrc or equivalent files
+```
+#Gadet_related stuff
+export CODE_HOME= path to the directory where we should find a code directory and all installation needs to be in this dirctory
+export SANDBOX_DIR= Path to sahyadri-sandbox directory, i. e. this repositories clone
+```
+
+
+
+
 ### Installing `CLASS` ###
-1. Download the latest `class_public***.tar.gz` file from the `CLASS` repository and unzip it in the local install folder.
+1. Download the latest `class_public***.tar.gz` file from the `CLASS` repository and unzip it in the local install folder. The install folder should be $CODE_HOME/code/Class/ . After unzip the folder should be named class_public with path should look like $CODE_HOME/code/Class/class_public/
 2. The Makefile should not need any edits if the module list above is loaded.
 3. Run the following in the `class_public` folder
    ```
@@ -107,11 +118,14 @@ We use `ROCKSTAR` version `36ce9eea36ee` with some custom modifications to enabl
 * support for non-zero `Omega_k`
 The modifications are described in [this file](/scripts/rockstar/readme_aseem.txt).
 
+This Should be installed at $CODE_HOME/code/Rockstar/
+
 `ROCKSTAR` can be installed with `GADGET-4` HDF5 support by simply typing `make' at the command prompt in the install folder after making all changes mentioned in the file above.
 
 Contact Aseem Paranjape for help installing this modified version.
 
 ### Installing `CONSISTENT-TREES` ###
+Should be installed at $CODE_HOME/code/ConsistentTrees/
 1. Clone into the `CONSISTENT-TREES` repository [here](https://bitbucket.org/pbehroozi/consistent-trees).
 2. Type `make` at the command prompt in the install folder.
 

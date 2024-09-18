@@ -14,7 +14,12 @@ NCPU_TOT=$3
 NMESH=$(( NPART * 2 ))
 NGENIC=$4
 RESTART=$5
-CODE_HOME=/mnt/home/faculty/caseem
+
+if [[ -z "$CODE_HOME" ]]; then
+    CODE_HOME=/mnt/home/faculty/caseem
+    echo 'CODE_HOME is not defined setting it to' $CODE_HOME
+fi
+
 
 # Run MPI program
 #mpirun -np $NCPU_TOT -envall $HOME/code/Gadget-2/Gadget-2.0.7-mesh$NMESH/Gadget2/Gadget2 $GADGET2_CONFIG_FILE $RESTART
