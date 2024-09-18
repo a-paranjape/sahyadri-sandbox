@@ -126,6 +126,7 @@ Contact Aseem Paranjape for help installing this modified version.
 
 ### Installing `CONSISTENT-TREES` ###
 Should be installed at $CODE_HOME/code/ConsistentTrees/
+The name of the directory should be consistent_trees under the above directory
 1. Clone into the `CONSISTENT-TREES` repository [here](https://bitbucket.org/pbehroozi/consistent-trees).
 2. Type `make` at the command prompt in the install folder.
 
