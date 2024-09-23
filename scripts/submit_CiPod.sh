@@ -8,12 +8,39 @@ fi
 
 # general setup
 ############# USER TO EDIT TWO LINES BELOW #################
-CONFIG_DIR=$HOME/config # change path to local (writable) config folder
-SCRATCH_DIR=$SCRATCH # change this to top-level (writable) output folder for snapshots, catalogs etc.
+#SCRATCH_DIR=$SCRATCH # change this to top-level (writable) output folder for snapshots, catalogs etc.
+SANDBOX_DIR=`awk '$1=="SANDBOX_DIR" {print $3}' $1`
+if [[ -z "$SANDBOX_DIR" ]]; then
+    SANDBOX_DIR=$CODE_HOME
+    echo 'SANDBOX_DIR not availbe in config file using default'
+fi
+echo 'SANDBOX_DIR =' $SANDBOX_DIR
+
+
+CONFIG_DIR=`awk '$1=="CONFIG_DIR" {print $3}' $1`
+if [[ -z "$CONFIG_DIR" ]]; then
+    CONFIG_DIR=$HOME/config/
+    echo 'CONFIG_DIR not availbe in config file using default'
+fi
+echo 'CONFIG_DIR =' $CONFIG_DIR
+
+SCRATCH_DIR=`awk '$1=="SCRATCH_DIR" {print $3}' $1`
+if [[ -z "$SCRATCH_DIR" ]]; then
+    SCRATH_DIR=$SCRATCH
+    echo 'SCRATCH_DIR not availbe in config file using default'
+fi
+echo 'SCRATCH_DIR =' $SCRATCH_DIR
+
 ############################################################
-#
-SCF=$CONFIG_DIR/submit/$1 # main config file input to the script must sit in $CONFIG_DIR/submit
-CODE_HOME=/mnt/home/faculty/caseem # hard-coding for now, will fix when resolving paths.machine_name Issue
+#SCF=$CONFIG_DIR/submit/$1 # main config file input to the script must sit in $CONFIG_DIR/submit
+#CODE_HOME=/mnt/home/faculty/caseem # hard-coding for now, will fix when resolving paths.machine_name Issue
+# This is the input to the script and hence need to be fixed to a location
+SCF=$1 # main config file input to the script must sit in $CONFIG_DIR/submit
+if [[ -z "$CODE_HOME" ]]; then
+    CODE_HOME=/mnt/home/faculty/caseem 
+    echo 'CODE_HOME is not availbe variable using default'
+fi
+echo 'CODE_HOME =' $CODE_HOME
 
 SIM_FOLDER=`awk '$1=="SIM_FOLDER" {print $3}' $SCF`
 SIM_NAME=`awk '$1=="SIM_NAME" {print $3}' $SCF`
@@ -68,46 +95,58 @@ if [ $POSTPROCESS == 1 ]; then
     fi
 fi
 
+
+
 NHRS=192
 NMIN=00
 NCPU=32
 NNODE=1
 NFILE=1
 NWRITER=16
+
 # hard-coded NNODE / NCPU values below will be updated after scaling study
-case $SIM_NPART in
-  128)
-    NHRS=05; NMIN=00 #; NCPU=16; NWRITER=8
-    ;;
-  256)
-    NHRS=12; NNODE=4
-    ;;
-  512)
-    NHRS=24; NNODE=4
-    ;;
-  1024)
-    NNODE=8; NFILE=8
-    ;;
-  2048)
-    NNODE=16; NFILE=8
-    ;;
-esac
+echo $HOSTNAME
+if [[ $HOSTNAME == "pawna" ]]; then
+    echo "got pawna"
+    NNODE=1; NCPU=192
+else
+    case $SIM_NPART in
+        128)
+           NHRS=05; NMIN=00 #; NCPU=16; NWRITER=8
+         ;;
+        256)
+           NHRS=12; NNODE=4
+        ;;
+        512)
+           NHRS=24; NNODE=4
+        ;;
+        1024)
+           NNODE=8; NFILE=8
+        ;;
+        2048)
+           NNODE=16; NFILE=8
+        ;;
+    esac
+fi
+
 NCPU_TOT=$(( NCPU * NNODE ))
 
 # setup dummy job and janitor
-DUMMY_EXEC=$CODE_HOME/scripts/assist/dummy.sh
-JANITOR=$CODE_HOME/scripts/assist/janitor.sh
+DUMMY_EXEC=$SANDBOX_DIR/scripts/assist/dummy.sh
+JANITOR=$SANDBOX_DIR/scripts/assist/janitor.sh
 
 # setup CLASS run and Python
-PREP_TRANSFER=$CODE_HOME/scripts/assist/prep\_transfer.sh
-PYTHON_EXEC=/mnt/csoft/tools/anaconda3/bin/python
+PREP_TRANSFER=$SANDBOX_DIR/scripts/assist/prep\_transfer.sh
+#PYTHON_EXEC=/mnt/csoft/tools/anaconda3/bin/python
+PYTHON_EXEC=$(which python)
 CLASS_TEMPLATE=$CLASS_OUT_DIR/class_template_As.ini #sig8.ini # adjust later for non-standard CDM
 CLASS_CONFIG_FILE=$CLASS_OUT_DIR/$SIM_FOLDER/class_$SIM_STUB.ini
 
 # setup GADGET
 GADGET_OUT_DIR=$SCRATCH_DIR/sims/$SIM_FOLDER/$SIM_STUB/r$SIM_REAL
+GADGET_IC_FILE=$SCRATCH_DIR/ICs/ics_scm$SIM_STUB_r$SIM_REAL.dat
 GADGET_CONFIG_FILE=$CONFIG_DIR/sims/$SIM_FOLDER/run.param.$SIM_STUB.r$SIM_REAL
-GADGET_EXEC=$CODE_HOME/scripts/gadget/run\_gadget.sh 
+GADGET_EXEC=$SANDBOX_DIR/scripts/gadget/run\_gadget.sh 
 GADGET_TEMPLATE=$CONFIG_DIR/sims/run.param.template
 
 # setup NGenIC 
@@ -137,7 +176,7 @@ fi
 ROCKSTAR_STUB=$SIM_STUB
 ROCKSTAR_CONFIG_FILE=$CONFIG_DIR/halos/$SIM_FOLDER/rockstar\_$ROCKSTAR_STUB\_r$SIM_REAL.cfg
 AUTO_ROCKSTAR_DIR=$SCRATCH_DIR/halos/$SIM_FOLDER/$ROCKSTAR_STUB/r$SIM_REAL
-ROCKSTAR_EXEC=$CODE_HOME/scripts/rockstar/run\_rockstar.sh
+ROCKSTAR_EXEC=$SANDBOX_DIR/scripts/rockstar/run\_rockstar.sh
 ROCKSTAR_TEMPLATE=$CONFIG_DIR/halos/rockstar\_template.cfg
 
 # setup analysis script
@@ -204,9 +243,9 @@ sed -i -e "s#^z_pk.*#z_pk = $Z_START#" "$CLASS_CONFIG_FILE"
 
 echo '... gadget'
 cp $GADGET_TEMPLATE $GADGET_CONFIG_FILE
+sed -i -e "s#InitCondFile.*#InitCondFile\t $GADGET_IC_FILE#" $GADGET_CONFIG_FILE
 sed -i -e "s#OutputDir.*#OutputDir\t $GADGET_OUT_DIR#" "$GADGET_CONFIG_FILE"
 sed -i -e "s#OutputListFilename.*#OutputListFilename\t $OUTPUTS_TXT#" "$GADGET_CONFIG_FILE"
-
 sed -i -e "s/^TimeBegin.*/TimeBegin\t\t $A_START/" "$GADGET_CONFIG_FILE"
 sed -i -e "s/^TimeMax.*/TimeMax\t\t $A_FIN/" "$GADGET_CONFIG_FILE"
 
@@ -277,6 +316,7 @@ echo "... all good!     proceeding with submission"
 if [ $RUN_CLASS == 1 ]; then
     echo "submitting class job"
     CLASS_JOB=`qsub -V -N $CLASS_RUN -k oe -l walltime=01:00:00 -l select=1:ncpus=16 -- $PREP_TRANSFER $CLASS_CONFIG_FILE $CLASS_TRANSFER_RAW $PYTHON_EXEC`
+    echo $PREP_TRANSFER $CLASS_CONFIG_FILE $CLASS_TRANSFER_RAW $PYTHON_EXEC
 else
     echo "transfer function not requested"
     cd $HOME # this is user home
@@ -288,6 +328,7 @@ if [ $RUN_SIM == 1 ]; then
     echo "submitting gadget job"
     cd $GADGET_OUT_DIR
     # removed -l place=pack:exclhost
+    echo $GADGET_EXEC $GADGET_CONFIG_FILE $SIM_NPART $NCPU_TOT $NGENIC $RESTART
     GADGET_JOB=`qsub -V -N $GADGET_RUN -k oe -W depend=afterok:$CLASS_JOB -l walltime=$NHRS:$NMIN:00 -l select=$NNODE:ncpus=$NCPU:mpiprocs=$NCPU -- $GADGET_EXEC $GADGET_CONFIG_FILE $SIM_NPART $NCPU_TOT $NGENIC $RESTART`
 else
     echo "simulation not requested"
@@ -299,6 +340,8 @@ if [ $HALOS == 1 ]; then
     echo "submitting rockstar job"
     # run Rockstar
     cd $AUTO_ROCKSTAR_DIR
+    echo $ROCKSTAR_EXEC $ROCKSTAR_CONFIG_FILE
+    echo $ROCKSTAR_EXEC $AUTO_ROCKSTAR_DIR/auto-rockstar.cfg
     ROCKSTAR_SERV_JOB=`qsub -V -N $ROCKSTAR_SERV -k oe -W depend=afterok:$GADGET_JOB -l walltime=05:00:00 -- $ROCKSTAR_EXEC $ROCKSTAR_CONFIG_FILE`
     ROCKSTAR_PROC_JOB=`qsub -V -N $ROCKSTAR_PROC -k oe -W depend=after:$ROCKSTAR_SERV_JOB -l walltime=05:00:00 -l select=ncpus=$NWRITER -- $ROCKSTAR_EXEC $AUTO_ROCKSTAR_DIR/auto-rockstar.cfg`
 else
@@ -323,7 +366,7 @@ if [ $TREES ==  1 ]; then
   GEN_TREES_JOB=`qsub -V -N $GEN_TREES -k oe -W depend=afterok:$GEN_CFG_JOB -l walltime=05:00:00 -l select=ncpus=$NWRITER -- $PERL_EXEC $TREES_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
   GEN_CAT_JOB=`qsub -V -N $GEN_CAT -k oe -W depend=afterok:$GEN_TREES_JOB -l walltime=00:30:00 -- $PERL_EXEC $CATALOG_EXEC $CONSISTENT_TREES_CONFIG_FILE $CONSISTENT_TREES_DIR`
 
-  CLEAN_TREE_EXEC=$CODE_HOME/scripts/assist/clean\_trees.pl
+  CLEAN_TREE_EXEC=$SANDBOX_DIR/scripts/assist/clean\_trees.pl
   CLEAN_TREE_JOB=`qsub -V -N clean\_trees -k oe -W depend=afterok:$GEN_CAT_JOB -l walltime=00:10:00 -- $PERL_EXEC $CLEAN_TREE_EXEC $AUTO_ROCKSTAR_DIR $HOME`
   # cd $HOME # this is user home
   # clean=halo_cleanup.sh
