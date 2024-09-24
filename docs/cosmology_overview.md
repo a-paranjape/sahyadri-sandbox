@@ -28,3 +28,36 @@ The values of $\Delta\Theta$ for each parameter are as follows
 ## **Sahyadri** simulations
 **In progress**
 
+## PMCAP 2024 discussion:
+### Priority list for running the +/- variation simulations:
+*  $\Omega_{\rm m}$
+*  $h$
+*   $A_{\rm s}$
+*   $w_0$
+*   $\Omega_{\rm k}$
+*  $n_{\rm s}$
+Discussion about whether to use $\sigma_8$ instead of $A_s$, inconclusive. Decided to do some Halofits checks.
+
+ ### Fisher Analysis
+ #### Observables to be explored now
+ * VVF
+ * KNN
+ * Redshift space 2pcf
+ * Real space 2pcf
+ * Halo mass function
+ * Density profiles around massive clusters
+ * Mass accretion history
+ * Assembly bias: concentration + tidal field
+The first 4 point to be considered immediately, with halos with 2 or more mass cuts.
+2PCFs to be obtained for halos + hod
+ #### Observables to be explored now
+ * Mock HI+ optical catalogues
+ * relativistic effects X dipole
+ * some kind of intensity mapping
+
+#### Covariance matrix calculations
+* L200N256: 20 realisations, jk averages or 100 realisations, proper errors. To be compared to jk error on single realisation
+* L50N512: 20 realisations. Compare this covariance matrix with that of L200N256.
+* Behaviour as a function of mass cuts.
+
+
