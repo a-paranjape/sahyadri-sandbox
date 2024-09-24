@@ -50,7 +50,7 @@ Discussion about whether to use $\sigma_8$ instead of $A_s$, inconclusive. Decid
  * Assembly bias: concentration + tidal field
 The first 4 point to be considered immediately, with halos with 2 or more mass cuts.
 2PCFs to be obtained for halos + hod
- #### Observables to be explored now
+ #### Observables to be explored later
  * Mock HI+ optical catalogues
  * relativistic effects X dipole
  * some kind of intensity mapping
