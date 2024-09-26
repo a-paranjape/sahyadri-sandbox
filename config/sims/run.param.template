@@ -43,7 +43,7 @@ MaxFilesWithConcurrentIO  1
 %---- Accuracy of time integration
 ErrTolIntAccuracy        0.01 
 CourantFac               0.3
-MaxSizeTimestep          0.005
+MaxSizeTimestep          0.004
 MinSizeTimestep          0.0 
 
 %---- Tree algorithm, force accuracy, domain update frequency
