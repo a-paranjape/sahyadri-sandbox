@@ -77,22 +77,23 @@ class AddValue(HaloReader):
         del out
         gc.collect()
 
-        va_cat = self.sim_stem + '/r{0:d}/out_{1:d}.vahc'.format(self.real,self.snap)
-        if self.verbose:
-            self.print_this('Writing to file: '+ va_cat,self.logfile)
-        va_cat = self.halo_path + va_cat
-        header_string =  "# Value added halo catalog. All quantities computed on {0:d}^3 grid\n".format(self.grid)
-        header_string += '# haloID'
-        for s in self.scale_strings:
-            header_string += ' lam1_'+s+' lam2_'+s+' lam3_'+s
-        for s in self.scale_strings[-2:]:
-            header_string += ' lamH1_'+s+' lamH2_'+s+' lamH3_'+s
-        header_string += ' b1' # deleted old 'b1', renamed old 'b1wtd' as new 'b1'
-        header_string += '\n'
-        f = open(va_cat,'w')
-        f.write(header_string)
-        f.close()
-        self.write_structured(va_cat,va_props)
+        if write_vahc:
+            va_cat = self.sim_stem + '/r{0:d}/out_{1:d}.vahc'.format(self.real,self.snap)
+            if self.verbose:
+                self.print_this('Writing to file: '+ va_cat,self.logfile)
+            va_cat = self.halo_path + va_cat
+            header_string =  "# Value added halo catalog. All quantities computed on {0:d}^3 grid\n".format(self.grid)
+            header_string += '# haloID'
+            for s in self.scale_strings:
+                header_string += ' lam1_'+s+' lam2_'+s+' lam3_'+s
+            for s in self.scale_strings[-2:]:
+                header_string += ' lamH1_'+s+' lamH2_'+s+' lamH3_'+s
+            header_string += ' b1' # deleted old 'b1', renamed old 'b1wtd' as new 'b1'
+            header_string += '\n'
+            f = open(va_cat,'w')
+            f.write(header_string)
+            f.close()
+            self.write_structured(va_cat,va_props)
         
         return va_props
     ###############################################
