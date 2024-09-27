@@ -1,9 +1,9 @@
 #!/bin/bash
 
-if [ "$#" -ne 5 ]; then
+if [ "$#" -ne 6 ]; then
   echo ''	
-  echo "USAGE: $0 <GADGET2_CONFIG_FILE> <NPART> <NCPU_TOT> <NGENIC> <RESTART>"
-  echo " e.g.: $0 $HOME/config/sims/run.param 1024 256 0 0"
+  echo "USAGE: $0 <GADGET2_CONFIG_FILE> <NPART> <NCPU_TOT> <NGENIC> <RESTART> <CODE_HOME>"
+  echo " e.g.: $0 $HOME/config/sims/run.param 1024 256 0 0 /mnt/home/faculty/caseem"
   echo ''
   exit 1
 fi
@@ -14,7 +14,7 @@ NCPU_TOT=$3
 NMESH=$(( NPART * 2 ))
 NGENIC=$4
 RESTART=$5
-CODE_HOME=/mnt/home/faculty/caseem
+CODE_HOME=$6
 
 # Run MPI program
 #mpirun -np $NCPU_TOT -envall $HOME/code/Gadget-2/Gadget-2.0.7-mesh$NMESH/Gadget2/Gadget2 $GADGET2_CONFIG_FILE $RESTART
