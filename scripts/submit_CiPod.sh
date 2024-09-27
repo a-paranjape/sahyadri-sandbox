@@ -57,6 +57,11 @@ AS=`awk '$1=="AS" {print $3}' $SCF`
 HALOS=`awk '$1=="HALOS" {print $3}' $SCF`
 TREES=`awk '$1=="TREES" {print $3}' $SCF`
 
+if [ $(( HALOS + TREES  )) == 1 ]; then
+    echo cannot submit halos but not trees or vice-versa. either switch on both or neither and try again
+    exit 1
+fi
+
 # Post-processing
 POSTPROCESS=`awk '$1=="POSTPROCESS" {print $3}' $SCF`
 PP_GRID=`awk '$1=="PP_GRID" {print $3}' $SCF`
@@ -74,7 +79,11 @@ NCPU=32
 NNODE=1
 NFILE=1
 NWRITER=16
-NCPU_PP=4 # max 16 for Pegasus due to node memory constraints, but only gives factor ~4.5 speedup with multiprocessing.Pool
+######################
+# parallelization of post processing. chkd that 8cpus, 5jobs gives ~17x speedup while 4cpus, 5jobs gives ~10x speedup
+NCPU_PP=8 # max 16 for Pegasus due to node memory constraints, but only gives factor ~4.5 speedup with multiprocessing.Pool with single job
+NJOBS_PP=5 # number of concurrent jobs in job_array 
+######################
 # hard-coded NNODE / NCPU values below will be updated after scaling study
 case $SIM_NPART in
   128)
@@ -142,7 +151,8 @@ ROCKSTAR_EXEC=$CODE_HOME/scripts/rockstar/run\_rockstar.sh
 ROCKSTAR_TEMPLATE=$CONFIG_DIR/halos/rockstar\_template.cfg
 
 # setup analysis script
-POSTPROC_EXEC=$HOME/scripts/post-process/postprocess.py # use local user version
+POSTPROC_EXEC=$CODE_HOME/scripts/post-process/run\_postprocess.sh
+# POSTPROC_EXEC=$HOME/scripts/post-process/postprocess.py # use local user version
 
 # setup perl
 PERL_EXEC=/usr/bin/perl
@@ -277,38 +287,52 @@ echo "... all good!     proceeding with submission"
 # run CLASS and setup transfer function
 if [ $RUN_CLASS == 1 ]; then
     echo "submitting class job"
-    CLASS_JOB=`qsub -V -N $CLASS_RUN -k oe -l walltime=01:00:00 -l select=1:ncpus=16 -- $PREP_TRANSFER $CLASS_CONFIG_FILE $CLASS_TRANSFER_RAW $PYTHON_EXEC`
+    CLASS_JOB=`qsub -V -N $CLASS_RUN -k oe -l walltime=01:00:00 -l select=1:ncpus=16 -- $PREP_TRANSFER $CLASS_CONFIG_FILE $CLASS_TRANSFER_RAW $PYTHON_EXEC $CODE_HOME`
 else
     echo "transfer function not requested"
-    cd $HOME # this is user home
-    CLASS_JOB=`qsub -N dummy -k oe  -- $DUMMY_EXEC`
+    # no dummy needed since gadget has no dependency in this case
+    # cd $HOME # this is user home
+    # CLASS_JOB=`qsub -N dummy -k oe  -- $DUMMY_EXEC`
 fi
 
 # run gadget
 if [ $RUN_SIM == 1 ]; then
     echo "submitting gadget job"
     cd $GADGET_OUT_DIR
-    # removed -l place=pack:exclhost
-    GADGET_JOB=`qsub -V -N $GADGET_RUN -k oe -W depend=afterok:$CLASS_JOB -l walltime=$NHRS:$NMIN:00 -l select=$NNODE:ncpus=$NCPU:mpiprocs=$NCPU -- $GADGET_EXEC $GADGET_CONFIG_FILE $SIM_NPART $NCPU_TOT $NGENIC $RESTART`
+    if [ $RUN_CLASS == 1 ]; then
+	GADGET_JOB=`qsub -V -N $GADGET_RUN -k oe -W depend=afterok:$CLASS_JOB -l walltime=$NHRS:$NMIN:00 -l select=$NNODE:ncpus=$NCPU:mpiprocs=$NCPU -- $GADGET_EXEC $GADGET_CONFIG_FILE $SIM_NPART $NCPU_TOT $NGENIC $RESTART $CODE_HOME`
+    else
+	# no dependency in this case
+	GADGET_JOB=`qsub -V -N $GADGET_RUN -k oe -l walltime=$NHRS:$NMIN:00 -l select=$NNODE:ncpus=$NCPU:mpiprocs=$NCPU -- $GADGET_EXEC $GADGET_CONFIG_FILE $SIM_NPART $NCPU_TOT $NGENIC $RESTART $CODE_HOME`
+    fi
 else
     echo "simulation not requested"
-    cd $HOME # this is user home
-    GADGET_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLASS_JOB  -- $DUMMY_EXEC`
+    # no dummy needed since halos has no dependency in this case
+    # cd $HOME # this is user home
+    # GADGET_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLASS_JOB  -- $DUMMY_EXEC`
 fi
 
 if [ $HALOS == 1 ]; then
     echo "submitting rockstar job"
     # run Rockstar
     cd $AUTO_ROCKSTAR_DIR
-    ROCKSTAR_SERV_JOB=`qsub -V -N $ROCKSTAR_SERV -k oe -W depend=afterok:$GADGET_JOB -l walltime=05:00:00 -- $ROCKSTAR_EXEC $ROCKSTAR_CONFIG_FILE`
+    if [ $RUN_SIM == 1 ]; then
+	ROCKSTAR_SERV_JOB=`qsub -V -N $ROCKSTAR_SERV -k oe -W depend=afterok:$GADGET_JOB -l walltime=05:00:00 -- $ROCKSTAR_EXEC $ROCKSTAR_CONFIG_FILE`
+    else
+	# no dependency on class
+	ROCKSTAR_SERV_JOB=`qsub -V -N $ROCKSTAR_SERV -k oe -l walltime=05:00:00 -- $ROCKSTAR_EXEC $ROCKSTAR_CONFIG_FILE`
+    fi
+    # ADD INTERMEDIATE JOB HERE THAT SEARCHES FOR AUTO-ROCKSTAR.CFG FILE. 
     ROCKSTAR_PROC_JOB=`qsub -V -N $ROCKSTAR_PROC -k oe -W depend=after:$ROCKSTAR_SERV_JOB -l walltime=05:00:00 -l select=ncpus=$NWRITER -- $ROCKSTAR_EXEC $AUTO_ROCKSTAR_DIR/auto-rockstar.cfg`
 else
     echo "halos not requested"
-    ROCKSTAR_SERV_JOB=`qsub -N dummy -k oe -W depend=afterok:$GADGET_JOB  -- $DUMMY_EXEC`
+    # no dummy needed since trees won't be submitted and postproc has no dependency
+    # ROCKSTAR_SERV_JOB=`qsub -N dummy -k oe -W depend=afterok:$GADGET_JOB  -- $DUMMY_EXEC`
 fi
 
 # run ConsistentTrees if requested
-if [ $TREES ==  1 ]; then
+if [ $TREES == 1 ]; then
+  # we assume HALOS==1 in this case, since postproc is all hard-coded for .trees files not .list
   CONSISTENT_TREES_GENCFG=$CODE_HOME/code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/scripts/gen\_merger\_cfg.pl
   GEN_CFG=ctrees\_cfg
   GEN_TREES=ctrees\_trees
@@ -326,17 +350,10 @@ if [ $TREES ==  1 ]; then
 
   CLEAN_TREE_EXEC=$CODE_HOME/scripts/assist/clean\_trees.pl
   CLEAN_TREE_JOB=`qsub -V -N clean\_trees -k oe -W depend=afterok:$GEN_CAT_JOB -l walltime=00:10:00 -- $PERL_EXEC $CLEAN_TREE_EXEC $AUTO_ROCKSTAR_DIR $HOME`
-  # cd $HOME # this is user home
-  # clean=halo_cleanup.sh
-  # str=$'#!/usr/bin/bash\n\n'
-  # str="${str}sleep 2; rm -rf $AUTO_ROCKSTAR_DIR/profiling/ $AUTO_ROCKSTAR_DIR/*.ascii $AUTO_ROCKSTAR_DIR/*.bin; "
-  # str="${str}mv ctrees_cfg*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_trees*.* $AUTO_ROCKSTAR_DIR/logs/.; mv ctrees_cat*.* $AUTO_ROCKSTAR_DIR/logs/."
-  # echo "$str" > $clean
-  # chmod +x $clean
-  # HALO_CLEANUP_JOB=`qsub -N halo_cleanup -W depend=afterok:$CLEAN_TREE_JOB -- $clean`
 else
   echo "trees not requested"
-  CLEAN_TREE_JOB=`qsub -N dummy -k oe -W depend=afterok:$ROCKSTAR_SERV_JOB  -- $DUMMY_EXEC`
+  # no need for dummy job since postproc doesn't need dependency
+  # CLEAN_TREE_JOB=`qsub -N dummy -k oe -W depend=afterok:$ROCKSTAR_SERV_JOB  -- $DUMMY_EXEC`
 fi
 # #################
 
@@ -344,18 +361,40 @@ cd $HOME # this is user home
 
 # post processing
 if [ $POSTPROCESS == 1 ]; then
+    # recall post-processing currently CANNOT be submitted along with sim/halos/trees job(s), so no dependencies required.
     echo "submitting post-processing job"
-    ###########################
-    # below could be ported to separate shell script
-    DOWN_SAMP=$(( SIM_NPART > 512 ? 512 : 0 )) # if particle count exceeds 512^3 then downsample to 512^3.
-    SNAP_END=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
     SNAP_START=`awk 'NR==1{print $1; exit}' $AUTO_ROCKSTAR_DIR/../scales.txt`
-    ###########################
-    #POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$CLEAN_TREE_JOB -l walltime=36:00:00 -l select=ncpus=$NCPU_PP -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_FOLDER/$SIM_STUB $SNAP_START $SNAP_END $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX $NCPU_PP`    
-    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -k oe -W depend=afterok:$CLEAN_TREE_JOB -l walltime=36:00:00 -l select=ncpus=$NCPU_PP -l place=pack:exclhost -- $PYTHON_EXEC $POSTPROC_EXEC $SIM_FOLDER/$SIM_STUB $SNAP_START $SNAP_END $SIM_REAL $PP_GRID $DOWN_SAMP $LBOX $NCPU_PP`
+    #############
+    # hard-coding for tests. comment-out for normal use 
+    SNAP_START=191
+    SNAP_END=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
+    BATCH_SIZE=$(( SNAP_END - SNAP_START + 1 ))
+    if [ $BATCH_SIZE -le $NJOBS_PP ]; then
+	echo ... ... very few snapshots. only $BATCH_SIZE jobs needed with one cpu each
+	NJOBS_PP=$BATCH_SIZE
+	NCPU_PP=1
+    else
+	BATCH_SIZE=$(( BATCH_SIZE / NJOBS_PP ))
+	if [ $BATCH_SIZE -lt $NCPU_PP ]; then
+	    echo very small batches. only $BATCH_SIZE cpus needed
+	    NCPU_PP=$BATCH_SIZE
+	fi
+    fi
+    #############
+    # chkd that OMP_NUM_THREADS makes no difference below
+    POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -J 1-$NJOBS_PP -k oe -l walltime=36:00:00 -l select=ncpus=$NCPU_PP -- $POSTPROC_EXEC $PYTHON_EXEC $SIM_FOLDER/$SIM_STUB $SIM_REAL $SIM_NPART $SNAP_START $N_OUT $PP_GRID $LBOX $NJOBS_PP $NCPU_PP` #  -l place=pack:exclhost
+    # POSTPROC_JOB=`qsub -V -N $POSTPROC_RUN -J 1-$NJOBS_PP -k oe -W depend=afterok:$CLEAN_TREE_JOB -l walltime=36:00:00 -l select=ncpus=$NCPU_PP -- $POSTPROC_EXEC $PYTHON_EXEC $SIM_FOLDER/$SIM_STUB $SIM_REAL $SIM_NPART $SNAP_START $N_OUT $PP_GRID $LBOX $NJOBS_PP $NCPU_PP` #  -l place=pack:exclhost    
+    qsub -N janitor -k oe -W depend=afterok:$POSTPROC_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR/$SIM_FOLDER $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
 else
     echo "post-processing not requested"
-    POSTPROC_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLEAN_TREE_JOB  -- $DUMMY_EXEC`
+    # POSTPROC_JOB=`qsub -N dummy -k oe  -- $DUMMY_EXEC`
+    # fix dependence on class/sims/halos/trees
+    if [ $TREES == 1 ]; then
+	qsub -N janitor -k oe -W depend=afterok:$CLEAN_TREE_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR/$SIM_FOLDER $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
+    elif [ $RUN_SIM == 1 ]; then
+	qsub -N janitor -k oe -W depend=afterok:$GADGET_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR/$SIM_FOLDER $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
+    elif [ $RUN_CLASS == 1 ]; then
+	qsub -N janitor -k oe -W depend=afterok:$CLASS_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR/$SIM_FOLDER $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR
+    fi # no janitor needed if nothing was submitted!
 fi
 
-qsub -N janitor -k oe -W depend=afterok:$POSTPROC_JOB -l walltime=00:10:00 -- $JANITOR $CLASS_OUT_DIR/$SIM_FOLDER $GADGET_OUT_DIR $AUTO_ROCKSTAR_DIR

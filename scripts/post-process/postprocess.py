@@ -6,7 +6,7 @@ from correlations import PowerSpectrum
 from addvalue import AddValue
 from time import time
 import multiprocessing as mp
-
+print(sys.argv)
 if(len(sys.argv)==9):
     sim_stem = sys.argv[1]
     snap_start = int(sys.argv[2])
@@ -36,8 +36,8 @@ ps = PowerSpectrum(grid=grid,Lbox=Lbox,logfile=logfile)
 ###########################################
 # move these hard-coded values to a file
 calc_Pk = True
-calc_mf = True
-add_value = True
+calc_mf = False
+add_value = False
 
 if calc_Pk:
     Seed = 42
