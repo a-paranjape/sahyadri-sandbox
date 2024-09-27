@@ -36,8 +36,8 @@ ps = PowerSpectrum(grid=grid,Lbox=Lbox,logfile=logfile)
 ###########################################
 # move these hard-coded values to a file
 calc_Pk = True
-calc_mf = False
-add_value = False
+calc_mf = True
+add_value = True
 
 if calc_Pk:
     Seed = 42
@@ -159,7 +159,6 @@ def do_this_snap(snap):
 
 start_time = time()
 if N_Proc==1:
-    start_time = time()
     print('serial calculation')
     for snap in range(snap_start,snap_end+1):
         do_this_snap(snap)
