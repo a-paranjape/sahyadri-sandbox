@@ -146,4 +146,55 @@ class Voronoi(HaloReader,Constants):
         else:
             return out
     ############################################################
-            
+
+
+    ############################################################
+    def get_knn_data_vector(self,halo_pos,target_number_density = 1e-4, rmin = 1, rmax =  40, nbin = 80,
+                            n_query_points = 4000000, k_list = [1,2,3,4]):
+
+        """
+        Takes in a set of halo positions and returns the CDF of the distance to the kth nearest neighbour
+
+        halo_pos: array of shape (n_halos, 3) containing the positions of the halos
+        target_number_density: the number density of halos to sample (this choice will depend on the scales of interest -
+                                                                      the default number density here will be for data vectors 
+                                                                      that are well-measured in the (rmin, rmax) range of
+                                                                      1-40 Mpc/h)
+        rmin: minimum distance in the data vector (in Mpc/h)
+        rmax: maximum distance in the data vector (in Mpc/h)
+        nbin: number of bins in the data vector
+        n_query_points: number of query points to use to calculate the CDF
+        k_list: list of k values to calculate the CDF for
+        """
+
+        #Define the bins - equally spaced between rmin and rmax
+        bins = np.linspace(rmin, rmax, nbin)
+
+        #Create the data vector - CDF of query points for each k in k_list
+        knn_data_vector = np.zeros((nbin, len(k_list)))
+
+        #Check that the number density is correct
+        n_halos = len(halo_pos)
+        halo_number_density = n_halos / boxsixe**3
+        # print('Halo number density: ', halo_number_density)
+
+        if halo_number_density>target_number_density:
+            ind = np.random.choice(n_halos, int(n_halos * target_number_density / halo_number_density), replace=False)
+            halo_pos = halo_pos[ind]
+
+
+        query_pos = np.random.rand(n_query_points, 3) * boxsixe
+        tree = scipy.spatial.cKDTree(halo_pos,boxsize=self.Lbox)
+        dist, ind = tree.query(query_pos, k=k_list, workers=-1)
+
+        for k in k_list:
+            dist_list = dist[:, k-1]
+            ind = np.argsort(dist_list)
+            dist_list = dist_list[ind]
+
+            #Calculate the CDF at each bin
+            knn_data_vector[:, k-1] = np.searchsorted(dist_list, bins) / n_query_points
+
+
+        return bins, knn_data_vector
+    ############################################################
