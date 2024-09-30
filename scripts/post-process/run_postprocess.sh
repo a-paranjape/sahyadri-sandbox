@@ -3,7 +3,7 @@
 if [ "$#" -ne 10 ]; then
   echo ''	
   echo "USAGE: $0 <PYTHON_EXEC> <SIM_STEM> <REAL> <NPART> <SNAP_START> <N_OUT> <PP_GRID> <LBOX> <NJOBS_PP> <NCPU_PP>"
-  echo " e.g.: $0 scratch/halos/sinhagad/default256/r1 256 5 201"
+  echo " e.g.: $0 /usr/bin/python3 sinhagad/default256 1 256 5 201 256 200.0 5 8"
   echo ''
   exit 1
 fi
