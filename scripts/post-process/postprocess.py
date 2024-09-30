@@ -4,9 +4,10 @@ import gc
 from readers import SnapshotReader,HaloReader
 from correlations import PowerSpectrum
 from addvalue import AddValue
+from voronoi_web import Voronoi
 from time import time
 import multiprocessing as mp
-print(sys.argv)
+
 if(len(sys.argv)==9):
     sim_stem = sys.argv[1]
     snap_start = int(sys.argv[2])
@@ -35,13 +36,14 @@ ps = PowerSpectrum(grid=grid,Lbox=Lbox,logfile=logfile)
 
 ###########################################
 # move these hard-coded values to a file
-calc_Pk = True
-calc_mf = True
-add_value = True
+calc_Pk = False
+calc_mf = False
+add_value = False
+calc_vvf = True
 
-if calc_Pk:
+if calc_Pk | calc_vvf:
     Seed = 42
-if calc_Pk | calc_mf:
+if calc_Pk | calc_mf | calc_vvf:
     massdef = 'm200b'
     QE = 0.5
 if calc_mf:
@@ -50,6 +52,11 @@ if calc_mf:
     dlgm = 0.1
 if add_value:
     kmax = 0.1
+if calc_vvf:
+    ran_fac = 30000 # default 30000, will be adjusted according to grid size and number of halos
+    force_ran_fac = False # set to True to by-pass adjustment and force above value to be used as-is
+    lgm_cuts = [11.5,12.5,13.5] # adjust as needed. expect ~250 halos >~ 1e14 Msun/h in 200 Mpc/h box
+    vvf_percs = [2.5,16.0,50.0,84.0,97.5] # VVF percentile values to report
 ###########################################
 
 
@@ -68,9 +75,11 @@ def do_this_snap(snap):
         # vel = sr.read_block('vel',down_to=downsample,seed=Seed)
         # ids = sr.read_block('ids',down_to=downsample,seed=Seed)
 
-    if calc_Pk | calc_mf:
+    if calc_Pk | calc_mf | calc_vvf:
         hr = HaloReader(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile)
         Npmin = hr.calc_Npmin_default(grid)
+        # this is 5 particles for sinhagad with grid=256, i.e. a very inclusive cut
+        # for sahyadri with grid=512, value is 320 particles
 
         mmin = hr.mpart*Npmin
         hpos,halos = hr.prep_halos(massdef=massdef,QE=QE,Npmin=Npmin)
@@ -142,11 +151,46 @@ def do_this_snap(snap):
         av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
                       ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
         va = av.add_value(write_vahc=True)
+        
+    if calc_vvf:
+        stats = np.zeros((len(lgm_cuts),len(vvf_percs)),dtype=float)
+        vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,Ran_Fac=ran_fac,logfile=logfile,seed=Seed,firstcall=True,N_Proc=1))
+        for m in range(stats.shape[0]):
+            mmin = 10**lgm_cuts[m]
+            cond = (halos[massdef] >= mmin)
+            halos_cut = halos[cond]
+            hpos_cut = hpos[cond]
+            Ntrc = halos_cut.size
+            
+            if not force_ran_fac:
+                vor.set_ran_fac(Ntrc,grid)
 
+            delta_trc = vor.voronoi_periodic_box(hpos_cut,ret_ran=False)
+            V_trc = 1/(1.0 + delta_trc + vor.TINY)
+
+            for s in range(stats.shape[1]):
+                stats[m,s] = np.percentile(V_trc,vvf_percs[s])
+            
+            del halos_cut,hpos_cut,delta_trc,V_trc
+            gc.collect()
+
+        outfile_vvf = sr.halo_path + sim_stem + '/r'+str(real)+'/vvf_{0:d}.txt'.format(snap)
+        sr.print_this('Writing to file: '+outfile_vvf,sr.logfile)
+        fv = open(outfile_vvf,'w')
+        fv.write("#\n# Voronoi volume functions for " + sim_stem + '/'+'r'+str(real)+'/out_' + str(snap)+"\n")
+        fv.write("# This file contains VVF percentiles for various mass cuts.\n")
+        fv.write("#\n# percentile | lg(m_min/h-1Msun) = ["+','.join([str(lgm) for lgm in lgm_cuts])+"]\n")
+        fv.close()
+        for s in range(stats.shape[1]):
+            vlist = [vvf_percs[s]]
+            for m in range(stats.shape[0]):
+                vlist.append(stats[m,s])
+            sr.write_to_file(outfile_vvf,vlist)
+       
     if calc_Pk:
         del pos#,vel,ids
         del delta_dm, FT_delta_dm,delta_h,FT_delta_h    
-    if calc_Pk | calc_mf:
+    if calc_Pk | calc_mf | calc_vvf:
         del hpos,halos
     if add_value:
         del va
