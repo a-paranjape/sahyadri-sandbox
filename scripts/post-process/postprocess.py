@@ -53,10 +53,12 @@ if calc_mf:
 if add_value:
     kmax = 0.1
 if calc_vvf:
-    ran_fac = 30000 # default 30000, will be adjusted according to grid size and number of halos
-    force_ran_fac = False # set to True to by-pass adjustment and force above value to be used as-is
+    ran_fac = 5000 # default 5000 for < 3% convergence of 2.5pc (and sub-percent for > 16pc) at z ~ 0
+    force_ran_fac = True # set to True to by-pass adjustment and force above value to be used as-is,
+                         # else will be adjusted according to grid size and number of halos
     lgm_cuts = [11.5,12.5,13.5] # adjust as needed. expect ~250 halos >~ 1e14 Msun/h in 200 Mpc/h box
     vvf_percs = [2.5,16.0,50.0,84.0,97.5] # VVF percentile values to report
+    Ntrc_Min = 100 # minimum number of halos in any population for calculating VVF stats
 ###########################################
 
 
@@ -154,24 +156,27 @@ def do_this_snap(snap):
         
     if calc_vvf:
         stats = np.zeros((len(lgm_cuts),len(vvf_percs)),dtype=float)
-        vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,Ran_Fac=ran_fac,logfile=logfile,seed=Seed,firstcall=True,N_Proc=1))
+        vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,Ran_Fac=ran_fac,logfile=logfile,seed=Seed)
         for m in range(stats.shape[0]):
             mmin = 10**lgm_cuts[m]
             cond = (halos[massdef] >= mmin)
             halos_cut = halos[cond]
             hpos_cut = hpos[cond]
             Ntrc = halos_cut.size
-            
-            if not force_ran_fac:
-                vor.set_ran_fac(Ntrc,grid)
 
-            delta_trc = vor.voronoi_periodic_box(hpos_cut,ret_ran=False)
-            V_trc = 1/(1.0 + delta_trc + vor.TINY)
+            if Ntrc >= Ntrc_Min:
+                if not force_ran_fac:
+                    vor.set_ran_fac(Ntrc,grid)
 
-            for s in range(stats.shape[1]):
-                stats[m,s] = np.percentile(V_trc,vvf_percs[s])
+                delta_trc = vor.voronoi_periodic_box(hpos_cut,ret_ran=False)
+                V_trc = 1/(1.0 + delta_trc + vor.TINY)
+
+                for s in range(stats.shape[1]):
+                    stats[m,s] = np.percentile(V_trc,vvf_percs[s])
+
+                del delta_trc,V_trc
             
-            del halos_cut,hpos_cut,delta_trc,V_trc
+            del cond,halos_cut,hpos_cut
             gc.collect()
 
         outfile_vvf = sr.halo_path + sim_stem + '/r'+str(real)+'/vvf_{0:d}.txt'.format(snap)

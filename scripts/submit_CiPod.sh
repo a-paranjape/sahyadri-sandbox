@@ -365,8 +365,8 @@ if [ $POSTPROCESS == 1 ]; then
     echo "submitting post-processing job"
     SNAP_START=`awk 'NR==1{print $1; exit}' $AUTO_ROCKSTAR_DIR/../scales.txt`
     #############
-    # hard-coding for tests. comment-out for normal use 
-    SNAP_START=191
+    # # hard-coding for tests. comment-out for normal use 
+    # SNAP_START=191
     #############
     SNAP_END=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
     BATCH_SIZE=$(( SNAP_END - SNAP_START + 1 ))

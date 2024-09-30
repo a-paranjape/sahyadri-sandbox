@@ -36,7 +36,7 @@ else
     fi
 fi
 
-echo batch size: $BATCH_SIZE
+echo batch size: $BATCH_SIZE, n_jobs: $NJOBS_PP
 declare -a SJ_START
 declare -a SJ_END
 start=$SNAP_START

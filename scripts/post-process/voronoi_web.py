@@ -1,15 +1,17 @@
 import numpy as np
 import scipy.spatial as spatial
 from readers import HaloReader
+from utilities import Constants
 import gc
 
-class Voronoi(HaloReader):
+class Voronoi(HaloReader,Constants):
     """ Voronoi methods for density estimation in halo (and, later, galaxy) catalogs."""
     ############################################################
     ############################################################
     def __init__(self,sim_stem='scm1024',real=1,snap=200,Ran_Fac=30000,
                  verbose=True,logfile=None,seed=None,firstcall=False,N_Proc=1):
         HaloReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose)
+        Constants.__init__(self)
 
         if self.verbose:
             print_string = "--------------------------------\n"
