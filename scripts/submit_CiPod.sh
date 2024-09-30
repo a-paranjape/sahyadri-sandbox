@@ -10,6 +10,7 @@ fi
 ############# USER TO EDIT TWO LINES BELOW #################
 CONFIG_DIR=$HOME/config # change path to local (writable) config folder
 SCRATCH_DIR=$SCRATCH # change this to top-level (writable) output folder for snapshots, catalogs etc.
+PYTHON_EXEC=/mnt/csoft/tools/anaconda3-py-3.10.9/bin/python # change this to system python3 installation >=3.10)
 ############################################################
 #
 SCF=$CONFIG_DIR/submit/$1 # main config file input to the script must sit in $CONFIG_DIR/submit
@@ -110,7 +111,6 @@ JANITOR=$CODE_HOME/scripts/assist/janitor.sh
 
 # setup CLASS run and Python
 PREP_TRANSFER=$CODE_HOME/scripts/assist/prep\_transfer.sh
-PYTHON_EXEC=/mnt/csoft/tools/anaconda3/bin/python
 CLASS_TEMPLATE=$CLASS_OUT_DIR/class_template_As.ini #sig8.ini # adjust later for non-standard CDM
 CLASS_CONFIG_FILE=$CLASS_OUT_DIR/$SIM_FOLDER/class_$SIM_STUB.ini
 
@@ -365,8 +365,8 @@ if [ $POSTPROCESS == 1 ]; then
     echo "submitting post-processing job"
     SNAP_START=`awk 'NR==1{print $1; exit}' $AUTO_ROCKSTAR_DIR/../scales.txt`
     #############
-    # # hard-coding for tests. comment-out for normal use 
-    # SNAP_START=191
+    # hard-coding for tests. comment-out for normal use 
+    SNAP_START=191
     #############
     SNAP_END=$(( N_OUT - 1 )) # convert number of snapshots into index of last snapshot
     BATCH_SIZE=$(( SNAP_END - SNAP_START + 1 ))
