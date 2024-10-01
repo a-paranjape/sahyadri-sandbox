@@ -209,7 +209,7 @@ class Voronoi(HaloReader,Constants):
             self.print_this('... ... generating tracer tree',self.logfile)
         tree = spatial.cKDTree(pos,boxsize=self.Lbox)
         dist, ind_nbr = tree.query(query_pos, k=k_list,workers=self.N_Proc)
-        del tree,ind_nbr
+        del tree,ind_nbr,query_pos
         gc.collect()
 
         if self.verbose:
