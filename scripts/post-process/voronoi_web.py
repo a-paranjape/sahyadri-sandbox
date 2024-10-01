@@ -150,7 +150,7 @@ class Voronoi(HaloReader,Constants):
 
     ############################################################
     def get_knn_data_vector(self,pos,target_number_density = 1e-4, rmin = 1, rmax =  40, nbin = 80,
-                            n_query_points = 4000000, k_list = [1,2,3,4]):
+                            n_query_points = 4000000, k_list = [1,2,3,4], seed = None):
         """
         Takes in a set of halo positions (Ntrc,3) and returns the CDF of the distance to the kth nearest neighbour [shape (len(k_list),nbin)]
 
