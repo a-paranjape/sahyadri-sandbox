@@ -39,11 +39,12 @@ ps = PowerSpectrum(grid=grid,Lbox=Lbox,logfile=logfile)
 calc_Pk = False
 calc_mf = False
 add_value = False
-calc_vvf = True
+calc_vvf = False
+calc_knn = True
 
-if calc_Pk | calc_vvf:
+if calc_Pk | calc_vvf | calc_knn:
     Seed = 42
-if calc_Pk | calc_mf | calc_vvf:
+if calc_Pk | calc_mf | calc_vvf | calc_knn:
     massdef = 'm200b'
     QE = 0.5
 if calc_mf:
@@ -52,13 +53,21 @@ if calc_mf:
     dlgm = 0.1
 if add_value:
     kmax = 0.1
+if calc_vvf | calc_knn:
+    lgm_cuts = [11.5,12.5,13.5] # adjust as needed. expect ~250 halos >~ 1e14 Msun/h in 200 Mpc/h box
+    Ntrc_Min = 100 # minimum number of halos in any population for calculating VVF/kNN stats
 if calc_vvf:
     ran_fac = 5000 # default 5000 for < 3% convergence of 2.5pc (and sub-percent for > 16pc) at z ~ 0
     force_ran_fac = True # set to True to by-pass adjustment and force above value to be used as-is,
                          # else will be adjusted according to grid size and number of halos
-    lgm_cuts = [11.5,12.5,13.5] # adjust as needed. expect ~250 halos >~ 1e14 Msun/h in 200 Mpc/h box
     vvf_percs = [2.5,16.0,50.0,84.0,97.5] # VVF percentile values to report
-    Ntrc_Min = 100 # minimum number of halos in any population for calculating VVF stats
+if calc_knn:
+    target_number_density = 1e-4 # (h/Mpc)^3
+    rmin = 1.0 # Mpc/h
+    rmax = 40.0 # Mpc/h
+    nbin = 80 # int
+    n_query_points = 4000000 # int
+    k_list = [1,2,3,4] # list of ints
 ###########################################
 
 
@@ -77,7 +86,7 @@ def do_this_snap(snap):
         # vel = sr.read_block('vel',down_to=downsample,seed=Seed)
         # ids = sr.read_block('ids',down_to=downsample,seed=Seed)
 
-    if calc_Pk | calc_mf | calc_vvf:
+    if calc_Pk | calc_mf | calc_vvf | calc_knn:
         hr = HaloReader(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile)
         Npmin = hr.calc_Npmin_default(grid)
         # this is 5 particles for sinhagad with grid=256, i.e. a very inclusive cut
@@ -104,7 +113,7 @@ def do_this_snap(snap):
 
         sr.print_this('... done',ps.logfile)
 
-        outfile_Pk = sr.sim_path + sim_stem + '/r'+str(real)+'/Pk_{0:03d}.txt'.format(snap)
+        outfile_Pk = sr.sim_path + sim_stem + '/r'+str(real)+'/Pk/Pk_{0:03d}.txt'.format(snap)
         sr.print_this('Writing to file: '+outfile_Pk,sr.logfile)
         f = open(outfile_Pk,'w')
         f.write("# P(k) (DM,halos,cross) from snapshot_{0:03d}\n".format(snap))
@@ -134,7 +143,7 @@ def do_this_snap(snap):
                 sr.print_this("Nhalos: direct = {0:d}; integrated = {1:.1f}"
                               .format(halos.size,Vbox*dlnm*np.sum(dndlnm[t])),sr.logfile)
 
-        outfile_mf = sr.halo_path + sim_stem + '/r'+str(real)+'/mf_{0:d}.txt'.format(snap)
+        outfile_mf = sr.halo_path + sim_stem + '/r'+str(real)+'/mf/mf_{0:d}.txt'.format(snap)
         sr.print_this('Writing to file: '+outfile_mf,sr.logfile)
         fh = open(outfile_mf,'w')
         fh.write("#\n# Mass functions for " + sim_stem + '/'+'r'+str(real)+'/out_' + str(snap)+"\n")
@@ -155,8 +164,8 @@ def do_this_snap(snap):
         va = av.add_value(write_vahc=True)
         
     if calc_vvf:
-        stats = np.zeros((len(lgm_cuts),len(vvf_percs)),dtype=float)
         vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,Ran_Fac=ran_fac,logfile=logfile,seed=Seed)
+        stats = np.zeros((len(lgm_cuts),len(vvf_percs)),dtype=float)
         for m in range(stats.shape[0]):
             mmin = 10**lgm_cuts[m]
             cond = (halos[massdef] >= mmin)
@@ -179,7 +188,7 @@ def do_this_snap(snap):
             del cond,halos_cut,hpos_cut
             gc.collect()
 
-        outfile_vvf = sr.halo_path + sim_stem + '/r'+str(real)+'/vvf_{0:d}.txt'.format(snap)
+        outfile_vvf = sr.halo_path + sim_stem + '/r'+str(real)+'/vvf/vvf_{0:d}.txt'.format(snap)
         sr.print_this('Writing to file: '+outfile_vvf,sr.logfile)
         fv = open(outfile_vvf,'w')
         fv.write("#\n# Voronoi volume functions for " + sim_stem + '/'+'r'+str(real)+'/out_' + str(snap)+"\n")
@@ -191,6 +200,41 @@ def do_this_snap(snap):
             for m in range(stats.shape[0]):
                 vlist.append(stats[m,s])
             sr.write_to_file(outfile_vvf,vlist)
+
+    if calc_knn:
+        vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,seed=Seed)
+        stats = np.zeros((len(lgm_cuts),len(k_list),nbin),dtype=float)
+        for m in range(stats.shape[0]):
+            mmin = 10**lgm_cuts[m]
+            cond = (halos[massdef] >= mmin)
+            halos_cut = halos[cond]
+            hpos_cut = hpos[cond]
+            Ntrc = halos_cut.size
+
+            if Ntrc >= Ntrc_Min:
+                bins,knn_data_vector = vor.get_knn_data_vector(hpos_cut,target_number_density=target_number_density,
+                                                               rmin=rmin,rmax=rmax,nbin=nbin,n_query_points=n_query_points,k_list=k_list)
+                for k in range(stats.shape[1]):
+                    stats[m,k] = knn_data_vector[k]
+            
+            del cond,halos_cut,hpos_cut
+            gc.collect()
+
+        sr.print_this('Writing to files... ',sr.logfile)
+        for k in range(len(k_list)):
+            outfile_knn = sr.halo_path + sim_stem + '/r'+str(real)+'/knn/knn_k{0:d}_{1:d}.txt'.format(k_list[k],snap)
+            sr.print_this('... '+outfile_knn,sr.logfile)
+            fv = open(outfile_knn,'w')
+            fv.write("#\n# kNN CDFs for " + sim_stem + '/'+'r'+str(real)+'/out_' + str(snap)+"\n")
+            fv.write("# This file contains kNN CDFs for k = {0:d} and various mass cuts.\n".format(k_list[k]))
+            fv.write("#\n# bin (Mpc/h) | lg(m_min/h-1Msun) = ["+','.join([str(lgm) for lgm in lgm_cuts])+"]\n")
+            fv.close()
+            for s in range(stats.shape[2]):
+                vlist = [bins[s]]
+                for m in range(stats.shape[0]):
+                    vlist.append(stats[m,k,s])
+                sr.write_to_file(outfile_knn,vlist)
+            
        
     if calc_Pk:
         del pos#,vel,ids
