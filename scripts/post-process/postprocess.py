@@ -36,9 +36,9 @@ ps = PowerSpectrum(grid=grid,Lbox=Lbox,logfile=logfile)
 
 ###########################################
 # move these hard-coded values to a file
-calc_Pk = True
-calc_mf = True
-add_value = True
+calc_Pk = False
+calc_mf = False
+add_value = False
 calc_vvf = True
 calc_knn = True
 
@@ -239,7 +239,7 @@ def do_this_snap(snap):
     if calc_Pk:
         del pos#,vel,ids
         del delta_dm, FT_delta_dm,delta_h,FT_delta_h    
-    if calc_Pk | calc_mf | calc_vvf:
+    if calc_Pk | calc_mf | calc_vvf | calc_knn:
         del hpos,halos
     if add_value:
         del va
