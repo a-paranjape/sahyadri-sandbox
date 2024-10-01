@@ -36,10 +36,10 @@ ps = PowerSpectrum(grid=grid,Lbox=Lbox,logfile=logfile)
 
 ###########################################
 # move these hard-coded values to a file
-calc_Pk = False
-calc_mf = False
-add_value = False
-calc_vvf = False
+calc_Pk = True
+calc_mf = True
+add_value = True
+calc_vvf = True
 calc_knn = True
 
 if calc_Pk | calc_vvf | calc_knn:

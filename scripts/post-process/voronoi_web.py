@@ -191,9 +191,11 @@ class Voronoi(HaloReader,Constants):
         # print('', halo_number_density)
 
         if halo_number_density > target_number_density:
+            SEED = self.seed if seed is None else seed
+            rng = np.random.RandomState(seed=SEED)
             if self.verbose:
                 self.print_this("... ... downsampling to target number density of {0:.3e} (h/Mpc)^3".format(target_number_density),self.logfile)
-            ind = np.random.choice(n_halos, int(n_halos * target_number_density / halo_number_density), replace=False)
+            ind = rng.choice(n_halos, int(n_halos * target_number_density / halo_number_density), replace=False)
             pos = pos[ind]
         else:
             if self.verbose:
@@ -201,7 +203,7 @@ class Voronoi(HaloReader,Constants):
 
         if self.verbose:
             self.print_this("... ... generating {0:d} query points".format(n_query_points),self.logfile)
-        query_pos = np.random.rand(n_query_points, 3) * self.Lbox
+        query_pos = rng.rand(n_query_points, 3) * self.Lbox
         
         if self.verbose:
             self.print_this('... ... generating tracer tree',self.logfile)
