@@ -189,10 +189,11 @@ class Voronoi(HaloReader,Constants):
         if self.verbose:
             self.print_this("... ... input tracer number density = {0:.3e} (h/Mpc)^3".format(halo_number_density),self.logfile)
         # print('', halo_number_density)
+        
+        SEED = self.seed if seed is None else seed
+        rng = np.random.RandomState(seed=SEED)
 
         if halo_number_density > target_number_density:
-            SEED = self.seed if seed is None else seed
-            rng = np.random.RandomState(seed=SEED)
             if self.verbose:
                 self.print_this("... ... downsampling to target number density of {0:.3e} (h/Mpc)^3".format(target_number_density),self.logfile)
             ind = rng.choice(n_halos, int(n_halos * target_number_density / halo_number_density), replace=False)
