@@ -215,7 +215,7 @@ def do_this_snap(snap):
                 bins,knn_data_vector = vor.get_knn_data_vector(hpos_cut,target_number_density=target_number_density,
                                                                rmin=rmin,rmax=rmax,nbin=nbin,n_query_points=n_query_points,k_list=k_list)
                 stats[m,0] = bins
-                for k in range(stats.shape[1]):
+                for k in range(len(k_list)):
                     stats[m,k+1] = knn_data_vector[k]
             
             del cond,halos_cut,hpos_cut
