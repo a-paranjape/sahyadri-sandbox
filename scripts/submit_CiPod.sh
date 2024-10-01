@@ -198,11 +198,19 @@ if [ ! -d $CONFIG_DIR/halos/$SIM_FOLDER ]; then
 fi
 
 if [ $POSTPROCESS == 1 ]; then
-  echo "making post-processing output directories"
-  mkdir $GADGET_OUT_DIR/Pk
-  mkdir $AUTO_ROCKSTAR_DIR/mf
-  mkdir $AUTO_ROCKSTAR_DIR/vvf
-  mkdir $AUTO_ROCKSTAR_DIR/knn
+  echo "making post-processing output directories as needed"
+  if [ ! -d $GADGET_OUT_DIR/Pk ]; then
+      mkdir $GADGET_OUT_DIR/Pk
+  fi
+  if [ ! -d $AUTO_ROCKSTAR_DIR/mf ]; then
+      mkdir $AUTO_ROCKSTAR_DIR/mf
+  fi
+  if [ ! -d $AUTO_ROCKSTAR_DIR/vvf ]; then
+      mkdir $AUTO_ROCKSTAR_DIR/vvf
+  fi
+  if [ ! -d $AUTO_ROCKSTAR_DIR/knn ]; then
+      mkdir $AUTO_ROCKSTAR_DIR/knn
+  fi
 fi
 
 N_OUT=`awk 'END {print FNR}' $OUTPUTS_TXT`
