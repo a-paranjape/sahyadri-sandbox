@@ -198,6 +198,7 @@ if [ ! -d $CONFIG_DIR/halos/$SIM_FOLDER ]; then
 fi
 
 if [ $POSTPROCESS == 1 ]; then
+  echo "making post-processing output directories"
   mkdir $GADGET_OUT_DIR/Pk
   mkdir $AUTO_ROCKSTAR_DIR/mf
   mkdir $AUTO_ROCKSTAR_DIR/vvf
