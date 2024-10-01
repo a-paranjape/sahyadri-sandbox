@@ -203,7 +203,7 @@ def do_this_snap(snap):
 
     if calc_knn:
         vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,seed=Seed)
-        stats = np.zeros((len(lgm_cuts),len(k_list),nbin),dtype=float)
+        stats = np.zeros((len(lgm_cuts),len(k_list)+1,nbin),dtype=float)
         for m in range(stats.shape[0]):
             mmin = 10**lgm_cuts[m]
             cond = (halos[massdef] >= mmin)
@@ -214,8 +214,9 @@ def do_this_snap(snap):
             if Ntrc >= Ntrc_Min:
                 bins,knn_data_vector = vor.get_knn_data_vector(hpos_cut,target_number_density=target_number_density,
                                                                rmin=rmin,rmax=rmax,nbin=nbin,n_query_points=n_query_points,k_list=k_list)
+                stats[m,0] = bins
                 for k in range(stats.shape[1]):
-                    stats[m,k] = knn_data_vector[k]
+                    stats[m,k+1] = knn_data_vector[k]
             
             del cond,halos_cut,hpos_cut
             gc.collect()
@@ -230,9 +231,9 @@ def do_this_snap(snap):
             fv.write("#\n# bin (Mpc/h) | lg(m_min/h-1Msun) = ["+','.join([str(lgm) for lgm in lgm_cuts])+"]\n")
             fv.close()
             for s in range(stats.shape[2]):
-                vlist = [bins[s]]
+                vlist = [stats[m,0,s]]
                 for m in range(stats.shape[0]):
-                    vlist.append(stats[m,k,s])
+                    vlist.append(stats[m,k+1,s])
                 sr.write_to_file(outfile_knn,vlist)
             
        
