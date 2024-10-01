@@ -197,6 +197,13 @@ if [ ! -d $CONFIG_DIR/halos/$SIM_FOLDER ]; then
   mkdir -p $CONFIG_DIR/halos/$SIM_FOLDER
 fi
 
+if [ $POSTPROCESS == 1 ]; then
+  mkdir $GADGET_OUT_DIR/Pk
+  mkdir $AUTO_ROCKSTAR_DIR/mf
+  mkdir $AUTO_ROCKSTAR_DIR/vvf
+  mkdir $AUTO_ROCKSTAR_DIR/knn
+fi
+
 N_OUT=`awk 'END {print FNR}' $OUTPUTS_TXT`
 N_OUT=$(( N_OUT + 1 ))
 
