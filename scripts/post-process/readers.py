@@ -63,7 +63,7 @@ class SnapshotReader(Utilities,Paths):
         self.mpart = self.massarr[self.ptype]*1e10 # Msun/h
 
         self.Om = f['Parameters'].attrs[u'Omega0']
-        self.Olam = f['Parameters'].attrs[u'OmegaLambda']
+        self.OLam = f['Parameters'].attrs[u'OmegaLambda']
         self.hubble = f['Parameters'].attrs[u'HubbleParam']
         
         if self.verbose:
