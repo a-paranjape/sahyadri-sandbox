@@ -11,18 +11,18 @@ import socket
 class Paths(object):
     """ Paths for various local directories. """
     def __init__(self):
-        self.home_path = '/home/aseem/iucaa/Sahyadri/sahyadri-sandbox/' #'/mnt/home/faculty/caseem/'
+        self.home_path = '/mnt/home/faculty/caseem/' # '/home/aseem/iucaa/Sahyadri/sahyadri-sandbox/' 
         if(socket.gethostname()=='Shadabs-MacBook-Pro.local'):
             self.home_path='/Users/shadab/Documents/Projects/sahyadri-sandbox/'
 
         self.python_path = self.home_path + 'scripts/post-process/'
 
-        self.scratch_path = self.home_path + 'Test/' # '/scratch/aseem/'
+        self.scratch_path = '/scratch/aseem/' # self.home_path + 'Test/' 
         self.sim_path = self.scratch_path + 'sims/'
         self.halo_path = self.scratch_path + 'halos/'
         self.gal_path = self.scratch_path + 'galaxies/'
 
-        self.config_path = self.home_path + 'Test/' # 'config/'
+        self.config_path = self.home_path + 'config/' # 'Test/' 
         self.config_transfer_path = self.config_path + 'transfer/'
         self.config_sim_path = self.config_path + 'sims/'
         self.config_halo_path = self.config_path + 'halos/'
