@@ -37,31 +37,39 @@ ps = PowerSpectrum(grid=grid,Lbox=Lbox,logfile=logfile)
 ###########################################
 # move these hard-coded values to a file
 calc_Pk = False
-calc_mf = False
+calc_mf = True
 add_value = False
 calc_vvf = True
 calc_knn = True
+calc_2pcf = False 
 
 if calc_Pk | calc_vvf | calc_knn:
     Seed = 42
-if calc_Pk | calc_mf | calc_vvf | calc_knn:
+if calc_Pk | calc_mf | calc_vvf | calc_knn | calc_2pcf:
     massdef = 'm200b'
     QE = 0.5
 if calc_mf:
     tags = ['mvir','m200b','m200c']
-    lgmmin = 11.0 # hard-coded to enable easier comparison across cosmologies
+    lgmmin = 11.0 # hard-coded value in log10(Msun) to enable easier comparison across cosmologies
     dlgm = 0.1
 if add_value:
     kmax = 0.1
-if calc_vvf | calc_knn:
-    lgm_cuts = [11.5,12.5,13.5] # adjust as needed. expect ~250 halos >~ 1e14 Msun/h in 200 Mpc/h box
-    Ntrc_Min = 100 # minimum number of halos in any population for calculating VVF/kNN stats
+if calc_vvf | calc_knn | calc_2pcf:
+    Ntrc_Min = 100 # minimum number of halos in any population for calculating VVF/kNN/2pcf stats
+if calc_vvf | calc_2pcf:
+    Np_min = 40 # minimum particle count for halos to define VVF
+    n_cuts = [7e-4,2e-4,7e-5,2e-5] # no. density cuts in Mpc^-3: 7e-4 ~ 2.5e-3 (h/Mpc)^3 ~ 10^12.2 Msun/h at z=0 (40 particles)
 if calc_vvf:
     ran_fac = 5000 # default 5000 for < 3% convergence of 2.5pc (and sub-percent for > 16pc) at z ~ 0
     force_ran_fac = True # set to True to by-pass adjustment and force above value to be used as-is,
                          # else will be adjusted according to grid size and number of halos
     vvf_percs = [2.5,16.0,50.0,84.0,97.5] # VVF percentile values to report
+#!!!!!!######
+if calc_2pcf:
+    pass # SHADAB CAN ADD NEW VARIABLES HERE SPECIFIC TO 2PCF
+#!!!!!!######
 if calc_knn:
+    lgm_cuts = [12.5,13.0,13.5] # adjust as needed. expect ~250 halos >~ 1e14 Msun/h in 200 Mpc/h box
     target_number_density = 1e-4 # (h/Mpc)^3
     rmin = 1.0 # Mpc/h
     rmax = 40.0 # Mpc/h
@@ -86,7 +94,7 @@ def do_this_snap(snap):
         # vel = sr.read_block('vel',down_to=downsample,seed=Seed)
         # ids = sr.read_block('ids',down_to=downsample,seed=Seed)
 
-    if calc_Pk | calc_mf | calc_vvf | calc_knn:
+    if calc_Pk | calc_mf | calc_vvf | calc_knn | calc_2pcf:
         hr = HaloReader(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile)
         Npmin = hr.calc_Npmin_default(grid)
         # this is 5 particles for sinhagad with grid=256, i.e. a very inclusive cut
@@ -95,9 +103,11 @@ def do_this_snap(snap):
         mmin = hr.mpart*Npmin
         hpos,halos = hr.prep_halos(massdef=massdef,QE=QE,Npmin=Npmin)
 
-    if calc_Pk:
+    if calc_Pk | add_value:
         delta_dm = ps.density_field(pos)
         FT_delta_dm = ps.fourier_transform_density(delta_dm)
+        
+    if calc_Pk:
         Pk_mm = ps.Pk_grid(FT_delta_dm,input_is_FTdensity=True)
 
         delta_h = ps.density_field(hpos.T)
@@ -127,7 +137,7 @@ def do_this_snap(snap):
             sr.write_to_file(outfile_Pk,[ps.ktab[k],Pk_mm[k],Pk_hh[k],Pk_hm[k]])
 
     if calc_mf:
-        lgmmax = np.log10(hr.MHALO_MAX)
+        lgmmax = np.log10(hr.MHALO_MAX/hr.hubble) # value in log10(Msun)
         nlgm = int((lgmmax-lgmmin)/dlgm)
         mbins = np.logspace(lgmmin,lgmmax,nlgm+1)
         mcenter = np.sqrt(mbins[1:]*mbins[:-1])
@@ -137,69 +147,88 @@ def do_this_snap(snap):
         Vbox = sr.Lbox**3
         for t in range(ntags):
             tag = tags[t]
-            dndlnm[t],temp = np.histogram(halos[tag],bins=mbins,density=False)
-            dndlnm[t] = dndlnm[t]/dlnm/Vbox
+            dndlnm[t],temp = np.histogram(halos[tag]/hr.hubble,bins=mbins,density=False) # bin values in Msun
+            dndlnm[t] = dndlnm[t]/dlnm/(Vbox/hr.hubble**3) # value in Mpc^-3
             if tag==massdef:
                 sr.print_this("Nhalos: direct = {0:d}; integrated = {1:.1f}"
-                              .format(halos.size,Vbox*dlnm*np.sum(dndlnm[t])),sr.logfile)
+                              .format(halos.size,Vbox/hr.hubble**3*dlnm*np.sum(dndlnm[t])),sr.logfile)
 
         outfile_mf = sr.halo_path + sim_stem + '/r'+str(real)+'/mf/mf_{0:d}.txt'.format(snap)
         sr.print_this('Writing to file: '+outfile_mf,sr.logfile)
         fh = open(outfile_mf,'w')
         fh.write("#\n# Mass functions for " + sim_stem + '/'+'r'+str(real)+'/out_' + str(snap)+"\n")
-        fh.write("# This file contains dn/dlnm (h/Mpc)^3 for various mass definitions.\n")
-        fh.write("#\n# mass (Msun/h) | dndlnm["+mass_string+"]\n")
+        fh.write("# This file contains dn/dlnm (1/Mpc)^3 for various mass definitions.\n")
+        fh.write("#\n# mass (Msun) | dndlnm["+mass_string+"]\n")
         fh.close()
         for m in range(nlgm):
             mlist = [mcenter[m]]
             for t in range(ntags):
                 mlist.append(dndlnm[t,m])
             sr.write_to_file(outfile_mf,mlist)
-
-    if add_value:
-        # more inclusive catalog for .vahc file
-        hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True)
-        av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
-                      ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
-        va = av.add_value(write_vahc=True)
         
-    if calc_vvf:
-        vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,Ran_Fac=ran_fac,logfile=logfile,seed=Seed)
-        stats = np.zeros((len(lgm_cuts),len(vvf_percs)),dtype=float)
-        for m in range(stats.shape[0]):
-            mmin = 10**lgm_cuts[m]
-            cond = (halos[massdef] >= mmin)
-            halos_cut = halos[cond]
-            hpos_cut = hpos[cond]
-            Ntrc = halos_cut.size
+    if calc_vvf | calc_2pcf:
+        # hpos,halos will be available at this point
+        if calc_vvf:
+            vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,Ran_Fac=ran_fac,logfile=logfile,seed=Seed)
+            stats = np.zeros((len(n_cuts),len(vvf_percs)),dtype=float)
+        #!!!!!!!#########
+        if calc_2pcf:
+            pass # SHADAB CAN ADD CLASS/ARRAY INITIALIZATION SPECIFIC TO 2PCF. DON'T RE-USE THE ARRAY stats
+            # storage array should have first dimension equal to number of density thresholds
+            # stats_2pcf = np.zeros((len(n_cuts),...),dtype=float)
+        #!!!!!!!#########
 
-            if Ntrc >= Ntrc_Min:
-                if not force_ran_fac:
-                    vor.set_ran_fac(Ntrc,grid)
+        for m in range(stats.shape[0]): # ensure stats_2pcf.shape[0] == stats.shape[0] == len(n_cuts)
+            # note: halos already sorted in increasing order of massdef by HaloReader
+            N_req = int(n_cuts[m]*(sr.Lbox/sr.hubble)**3) # required no. of halos. recall n_cuts in 1/Mpc^3
+            if (N_req <= halos.size) & (N_req >= Ntrc_Min):
+                mmin = halos[massdef][-N_req]
+                if (mmin > Np_min*sr.mpart): # ensure only resolved halos retained
+                    halos_cut = halos[-N_req:]
+                    hpos_cut = hpos[-N_req:]
+                    Ntrc = halos_cut.size # should equal N_req
+                    if Ntrc != N_req:
+                        raise Exception('detected Ntrc = {0:d} which is not N_req = {1:d}'.format(Ntrc,N_req))
 
-                delta_trc = vor.voronoi_periodic_box(hpos_cut,ret_ran=False)
-                V_trc = 1/(1.0 + delta_trc + vor.TINY)
+                    if calc_vvf:
+                        if not force_ran_fac:
+                            vor.set_ran_fac(Ntrc,grid)
 
-                for s in range(stats.shape[1]):
-                    stats[m,s] = np.percentile(V_trc,vvf_percs[s])
+                        delta_trc = vor.voronoi_periodic_box(hpos_cut,ret_ran=False)
+                        V_trc = 1/(1.0 + delta_trc + vor.TINY)
 
-                del delta_trc,V_trc
-            
-            del cond,halos_cut,hpos_cut
-            gc.collect()
+                        for s in range(stats.shape[1]):
+                            stats[m,s] = np.percentile(V_trc,vvf_percs[s])
 
-        outfile_vvf = sr.halo_path + sim_stem + '/r'+str(real)+'/vvf/vvf_{0:d}.txt'.format(snap)
-        sr.print_this('Writing to file: '+outfile_vvf,sr.logfile)
-        fv = open(outfile_vvf,'w')
-        fv.write("#\n# Voronoi volume functions for " + sim_stem + '/'+'r'+str(real)+'/out_' + str(snap)+"\n")
-        fv.write("# This file contains VVF percentiles for various mass cuts.\n")
-        fv.write("#\n# percentile | lg(m_min/h-1Msun) = ["+','.join([str(lgm) for lgm in lgm_cuts])+"]\n")
-        fv.close()
-        for s in range(stats.shape[1]):
-            vlist = [vvf_percs[s]]
-            for m in range(stats.shape[0]):
-                vlist.append(stats[m,s])
-            sr.write_to_file(outfile_vvf,vlist)
+                        del delta_trc,V_trc
+
+                    #!!!!!!!#########
+                    if calc_2pcf:
+                        pass # SHADAB CAN ADD 2PCF EVALUATION CODE HERE. STORE RESULTS IN stats_2pcf
+                    #!!!!!!!#########
+
+                    del halos_cut,hpos_cut
+                    gc.collect()
+
+        if calc_vvf:
+            outfile_vvf = sr.halo_path + sim_stem + '/r'+str(real)+'/vvf/vvf_{0:d}.txt'.format(snap)
+            sr.print_this('Writing to file: '+outfile_vvf,sr.logfile)
+            fv = open(outfile_vvf,'w')
+            fv.write("#\n# Voronoi volume functions for " + sim_stem + '/'+'r'+str(real)+'/out_' + str(snap)+"\n")
+            fv.write("# This file contains VVF percentiles for various number density thresholds.\n")
+            fv.write("#\n# percentile | n (Mpc-3) = 1e4 * ["+','.join(['{0:.2f}'.format(1e4*n) for n in n_cuts])+"]\n")
+            fv.close()
+            for s in range(stats.shape[1]):
+                vlist = [vvf_percs[s]]
+                for m in range(stats.shape[0]):
+                    vlist.append(stats[m,s])
+                sr.write_to_file(outfile_vvf,vlist)
+                
+
+        #!!!!!!!#########
+        if calc_2pcf:
+            pass # SHADAB CAN ADD 2PCF WRITE-OUT CODE HERE
+        #!!!!!!!#########
 
     if calc_knn:
         vor = Voronoi(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,seed=Seed)
@@ -235,12 +264,19 @@ def do_this_snap(snap):
                 for m in range(stats.shape[0]):
                     vlist.append(stats[m,k+1,s])
                 sr.write_to_file(outfile_knn,vlist)
+
+    if add_value:
+        # more inclusive catalog for .vahc file
+        hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True)
+        av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
+                      ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
+        va = av.add_value(write_vahc=True)
             
        
     if calc_Pk:
         del pos#,vel,ids
         del delta_dm, FT_delta_dm,delta_h,FT_delta_h    
-    if calc_Pk | calc_mf | calc_vvf | calc_knn:
+    if calc_Pk | calc_mf | calc_vvf | calc_knn | add_value:
         del hpos,halos
     if add_value:
         del va
