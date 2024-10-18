@@ -29,19 +29,7 @@ class SnapshotReader(Utilities,Paths):
         self.logfile = logfile
         self.verbose = verbose
 
-        self.snapshot_file = self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap) 
-        if os.path.exists(self.sim_path + self.snapshot_file+'.hdf5'):
-            self.snapshot_file += '.hdf5' 
-        elif os.path.exists(self.sim_path + self.snapshot_file+'.0.hdf5'):
-            self.snapshot_file += '.0.hdf5'
-        else:
-            raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
-                self.sim_path,self.snapshot_file))
-
-        if self.verbose:
-            self.print_this('Snapshot Reader:\n... preparing to read file: '+self.snapshot_file,self.logfile)
-            
-        self.snapshot_file = self.sim_path + self.snapshot_file
+        self.snapshot_file = self.sim_path+ self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap) 
 
         #read header only if this is set to true, just so that even if snapshot is not available then we should be able to use this function for rest of the file path defintions
         self.read_header=read_header
@@ -49,6 +37,17 @@ class SnapshotReader(Utilities,Paths):
             self.read_snapshot_header()
 
     def read_snapshot_header(self):
+        if os.path.exists(self.snapshot_file+'.hdf5'):
+            self.snapshot_file += '.hdf5' 
+        elif os.path.exists(self.snapshot_file+'.0.hdf5'):
+            self.snapshot_file += '.0.hdf5'
+        else:
+            raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
+                self.sim_path,self.snapshot_file))
+        if self.verbose:
+            self.print_this('Snapshot Reader:\n... preparing to read file: '+self.snapshot_file,self.logfile)
+            
+
         f = h5py.File(self.snapshot_file,'r')
         self.scale    = f['Header'].attrs[u'Time']
         self.redshift = f['Header'].attrs[u'Redshift']

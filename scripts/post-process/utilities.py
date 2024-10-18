@@ -12,12 +12,14 @@ class Paths(object):
     """ Paths for various local directories. """
     def __init__(self):
         self.home_path = '/mnt/home/faculty/caseem/' # '/home/aseem/iucaa/Sahyadri/sahyadri-sandbox/' 
+        self.scratch_path = '/scratch/aseem/' # self.home_path + 'Test/' 
         if(socket.gethostname()=='Shadabs-MacBook-Pro.local'):
-            self.home_path='/Users/shadab/Documents/Projects/sahyadri-sandbox/'
+            self.home_path='/Users/shadab/Downloads/tmp/sahyadri-sandbox/'
+            #/Users/shadab/Documents/Projects/sahyadri-sandbox/'
+            self.scratch_path = '/Users/shadab/Downloads/tmp/sahyadri-sandbox/Test/' # self.home_path + 'Test/' 
 
         self.python_path = self.home_path + 'scripts/post-process/'
 
-        self.scratch_path = '/scratch/aseem/' # self.home_path + 'Test/' 
         self.sim_path = self.scratch_path + 'sims/'
         self.halo_path = self.scratch_path + 'halos/'
         self.gal_path = self.scratch_path + 'galaxies/'
