@@ -25,11 +25,11 @@ The values of $\Delta\Theta$ for each parameter are as follows
 * $\Delta\Omega_{\rm k}$: $0.05$
 * $\Delta w_0$ : $0.1$
 
-Particle mass for the default simulation is $4.15153e10\,M_\odot/h$.
+Particle mass for the default simulation is $4.15153e10\ M_\odot/h$.
 
 ## **Sahyadri** simulations
 **In progress**
-Particle mass for the default simulation is $8.108e7\,M_\odot/h$.
+Particle mass for the default simulation is $8.108e7\M_\odot/h$.
 
 ## PMCAP 2024 discussion:
 ### Priority list for running the +/- variation simulations:
