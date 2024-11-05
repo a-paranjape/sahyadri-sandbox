@@ -43,9 +43,9 @@ calc_vvf = True
 calc_knn = True
 calc_2pcf = False 
 
-if calc_Pk | calc_vvf | calc_knn:
+if calc_Pk | calc_vvf | calc_knn | add_value:
     Seed = 42
-if calc_Pk | calc_mf | calc_vvf | calc_knn | calc_2pcf:
+if calc_Pk | calc_mf | calc_vvf | calc_knn | calc_2pcf | add_value:
     massdef = 'm200b'
     QE = 0.5
 if calc_mf:
@@ -89,12 +89,12 @@ if calc_mf:
 def do_this_snap(snap):
     start_time_snap = time()
     sr = SnapshotReader(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile)
-    if calc_Pk:
+    if calc_Pk | add_value:
         pos = sr.read_block('pos',down_to=downsample,seed=Seed)
         # vel = sr.read_block('vel',down_to=downsample,seed=Seed)
         # ids = sr.read_block('ids',down_to=downsample,seed=Seed)
 
-    if calc_Pk | calc_mf | calc_vvf | calc_knn | calc_2pcf:
+    if calc_Pk | calc_mf | calc_vvf | calc_knn | calc_2pcf | add_value:
         hr = HaloReader(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile)
         Npmin = hr.calc_Npmin_default(grid)
         # this is 5 particles for sinhagad with grid=256, i.e. a very inclusive cut
