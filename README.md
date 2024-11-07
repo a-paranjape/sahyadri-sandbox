@@ -4,7 +4,7 @@ Sandbox for testing codes and scripts related to Sahyadri simulations at IUCAA/T
 ## Introduction ##
 As an offshoot of the 2nd edition of the [PMCAP](https://www.tifr.res.in/~shadab.alam/PM_CAP_meeting/) meeting held at IUCAA, Pune, it was decided to build a suite of cosmological N-body simulations that explore various cosmological and dark matter models using high-resolution, intermediate volume configurations that are optimal for exploring statistics related to the cosmic web, beyond-2pt observables and the small-scale phenomenology of dark matter.
 
-The simulation suite is named **Sayhadri** (inspired by the mountain range one must cross to travel between Pune and Mumbai), with a smaller pilot study named **Sinhagad** (after a popular mountain in the range).
+The simulation suite is named **Sahyadri** (inspired by the mountain range one must cross to travel between Pune and Mumbai), with a smaller pilot study named **Sinhagad** (after a popular mountain in the range).
 
 This repository collects various pieces of code and general information that is needed for setting up and running individual realisations in **Sahyadri** or **Sinhagad**. The information here should, in principle, suffice to set up an end-to-end local pipeline that starts with calculating a transfer function, performs the simulation, finds halos and finally analyses all the output to produce some basic summary statistics like power spectra and mass functions.
 
