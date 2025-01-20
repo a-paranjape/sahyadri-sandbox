@@ -1,0 +1,7 @@
+
+Sync-Point 0, Time: 0.02, Redshift: 49, Systemstep: 0, Dloga: 0
+Occupied timebins: gravity         sph          dt              cumul-grav   cumul-sph A D    avg-time  cpu-frac
+ X  bin= 0      8589934592           0     0.000000000000       8589934592           0 < *        0.00      0.0%
+               ------------------------
+PM-Step. Total: 8589934592           0
+
