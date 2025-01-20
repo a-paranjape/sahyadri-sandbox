@@ -1,0 +1,21 @@
+#!/mnt/csoft/tools/anaconda3/bin/python
+
+home_path = '/mnt/home/faculty/caseem/'
+python_path = home_path + 'scripts/util/gadget2-lite/'
+python_path2 = home_path + 'scripts/util/data-analysis/'
+scratch_path = '/scratch/aseem/'
+ics_path = scratch_path + 'ICs/'
+sim_path = scratch_path + 'sims/'
+halo_path = scratch_path + 'halos/'
+gal_path = scratch_path + 'galaxies/'
+yang_dir = 'yang/'
+sdssDR7_dir = 'sdssDR7/'
+galex_dir = 'galex/'
+sdssMTV_dir = 'sdssMTV/'
+mockSCM_dir = 'mockSCM/'
+sdssDR7_mask = 'mask/sdss_dr72safe0_res6d.pol'
+
+config_path = home_path + 'config/'
+config_ics_path = config_path + 'ICs/'
+config_sim_path = config_path + 'sims/'
+config_halo_path = config_path + 'halos/'
