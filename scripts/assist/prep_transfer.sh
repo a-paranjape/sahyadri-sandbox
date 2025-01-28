@@ -13,11 +13,12 @@ CLASS_TRANSFER_FILE=$2
 PYTHON_EXEC=$3
 CODE_HOME=$4
 
+
 echo $CLASS_INIT_FILE
 $CODE_HOME/code/Class/class_public/class $CLASS_INIT_FILE
 
 mv class_output_pk.dat $CLASS_TRANSFER_FILE
 
-$PYTHON_EXEC $CODE_HOME/scripts/assist/modify_class_output.py $CLASS_TRANSFER_FILE
+$PYTHON_EXEC $SANDBOX_DIR/scripts/assist/modify_class_output.py $CLASS_TRANSFER_FILE
 
 echo Transfer setup complete

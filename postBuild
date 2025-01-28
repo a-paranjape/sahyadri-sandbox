@@ -1,10 +1,27 @@
-python3 -m venv sahyadri
-source sahyadri/bin/activate
-python3 -m pip install ipykernel
-python -m ipykernel install --name sahyadri
-pip install numpy==1.24.4
-pip install matplotlib==3.7.5
-pip install pandas==2.0.3
-pip install fitsio==1.2.3
-pip install h5py==3.11.0
-pip install scipy==1.10.1
+conda create -n sahyadri python=3.9
+conda activate sahyadri
+conda install ipykernel
+python -m ipykernel install --name sahyadri --user
+# Install some used library
+conda install numpy==1.24.4
+conda install conda-forge::matplotlib==3.9.2
+conda install conda-forge::pandas==2.0.3
+conda install conda-forge::fitsio==1.2.4
+conda install conda-forge::h5py==3.11.0
+conda install conda-forge::scipy==1.10.1
+conda install conda-forge::cython
+
+# Install class : cython must be installed before this step
+wget https://lesgourg.github.io/class_public/class_public-3.2.3.tar.gz
+tar xvzf  class_public-3.2.3.tar.gz
+cd class_public-3.2.3/
+make clean
+make
+
+#install rockstar
+
+#insteall consistent tree
+wget https://bitbucket.org/pbehroozi/consistent-trees/downloads/ctrees-1.0.tar.gz
+
+
+

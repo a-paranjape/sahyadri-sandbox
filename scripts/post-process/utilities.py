@@ -26,7 +26,6 @@ class Paths(object):
         self.sim_path = self.scratch_path + 'sims/'
         self.halo_path = self.scratch_path + 'halos/'
         self.gal_path = self.scratch_path + 'galaxies/'
-
         self.config_transfer_path = self.config_path + 'transfer/'
         self.config_sim_path = self.config_path + 'sims/'
         self.config_halo_path = self.config_path + 'halos/'
@@ -180,6 +179,20 @@ class Utilities(object):
         return
     ############################################################
 
+    ############################################################
+    def derivative(self,f_pp,f_p,f0,f_m,f_mm,h,order=1):
+        """ Return 5-point estimate of 1st or 2nd order derivatives. Error in each case is O(h^4). """
+        out = np.zeros_like(f0)
+        if order==1:
+            out = -f_pp + 8*f_p - 8*f_m + f_mm
+        elif order==2:
+            out = -f_pp + 16*f_p - 30*f0 + 16*f_m - f_mm
+            out /= h
+        else:
+            raise Exception('Only order = 1 and 2 supported.')
+        out /= (12*h)
+        return out
+    ############################################################
 
     ############################################################
     def write_to_file(self,filestring,seq):
