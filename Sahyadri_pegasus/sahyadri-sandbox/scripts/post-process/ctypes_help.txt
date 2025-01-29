@@ -1,0 +1,10 @@
+# See http://stackoverflow.com/questions/5081875/ctypes-beginner
+# See https://docs.python.org/2/library/ctypes.html
+# See http://stackoverflow.com/questions/5862915/passing-numpy-arrays-to-a-c-function-for-input-and-output
+
+# Mac OS possibilities
+gcc -shared -Wl,-install_name,testlib.so -o testlib.so -fPIC testlib.c
+gcc -shared <files> -lc -Wl,-install_name,<libname>.so, -o <libname>.so.1
+
+# Linux possibilities
+gcc -shared -Wl,-soname,testlib -o testlib.so -fPIC testlib.c
