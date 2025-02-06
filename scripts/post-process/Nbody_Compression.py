@@ -147,7 +147,10 @@ def compress_nbody_data(original_quant, L, Ngrid, vmax, pmax,quant='positions',s
         return compressed_potential
     elif(quant=='ids'):
         sorted_ids = original_quant[sort_indices]
-        ids_bit_depth=32
+        if(sorted_ids.size<np.power(1024,3)):
+            ids_bit_depth=32
+        else:
+            ids_bit_depth=64
         packed_ids, overflow_indices, overflow_values,ids_dtype,ids_bit_depth=c12b.compress_integer_array(sorted_ids, ids_bit_depth)
         return packed_ids
     

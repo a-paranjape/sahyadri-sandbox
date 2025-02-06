@@ -13,7 +13,8 @@ if ! command_exists conda; then
 fi
 
 # Create and activate the environment
-ENV_NAME="sahyadri"
+#This is needed only for postprocessing
+ENV_NAME="sahyadri_pp"
 #PYTHON_VERSION="3.8.8"
 PYTHON_VERSION="3.12.0"
 

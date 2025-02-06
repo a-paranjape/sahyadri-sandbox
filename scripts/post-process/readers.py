@@ -33,8 +33,10 @@ class SnapshotReader(Utilities,Paths):
         self.verbose = verbose
         self.use_compressed=use_compressed
         self.subsamples=subsamples
+        self.compressed_fileroot='comp_snapshot_{0:03d}'.format(self.snap) 
         
-        self.snapshot_file = self.sim_path+ self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap) 
+        self.snapshot_file = self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap)
+        self.snapdir = self.sim_stem + '/r'+str(self.real) + '/snapdir_{0:03d}'.format(self.snap)
 
         #read header only if this is set to true, just so that even if snapshot is not available then we should be able to use this function for rest of the file path defintions
         self.read_header=read_header
@@ -43,9 +45,16 @@ class SnapshotReader(Utilities,Paths):
 
     def read_snapshot_header(self):
         if os.path.exists(self.snapshot_file+'.hdf5'):
-            self.snapshot_file += '.hdf5' 
+            self.snapshot_ext = '.hdf5' 
         elif os.path.exists(self.snapshot_file+'.0.hdf5'):
-            self.snapshot_file += '.0.hdf5'
+            self.snapshot_ext = '.0.hdf5'
+        elif(os.path.exists(self.snapdir)): #If snapshots have its own directory [eg: 2048 sahyadri runs]
+            if(os.path.exists(self.snapdir+'/snapshot_{0:03d}.hdf5'.format(self.snap))):
+                self.snapshot_file=self.snapdir+'/snapshot_{0:03d}'.format(self.snap)
+                self.snapshot_ext = '.hdf5'
+            elif(os.path.exists(self.snapdir+'/snapshot_{0:03d}.0.hdf5'.format(self.snap))):
+                self.snapshot_file=self.snapdir+'/snapshot_{0:03d}'.format(self.snap)
+                self.snapshot_ext = '.0.hdf5'
         else:
             raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
                 self.sim_path,self.snapshot_file))
@@ -56,7 +65,7 @@ class SnapshotReader(Utilities,Paths):
             header_info=self.read_compressed_header()
             self.subsamples=header_info['Header']['subsamples']
         else:
-            f = h5py.File(self.snapshot_file,'r')
+            f = h5py.File(self.snapshot_file+self.snapshot_ext,'r')
             header_info={}
             for group_name in ['Config', 'Header', 'Parameters']:
                 if group_name in f:
@@ -113,18 +122,21 @@ class SnapshotReader(Utilities,Paths):
         if self.verbose:
             self.print_this('... reading '+suffix,self.logfile)
 
-        f = h5py.File(self.snapshot_file,'r')
+        f = h5py.File(self.snapshot_file+self.snapshot_ext,'r')
         out_part = f[prefix+suffix][:]
         f.close()
         if self.nFile > 1:
             # NEEDS TESTING
             out = np.zeros(self.npart,dtype=out_part.dtype) if block=='ids' else np.zeros((self.npart,3),dtype=out_part.dtype)
-            out[:self.npart_this] = out_part 
-            shift = self.npart_this 
+            np_this=out_part.shape[0]
+            out[:np_this] = out_part 
+            shift = np_this
             for i in range(1,self.nFile):
-                filename = self.snapshot_file[:-6]+str(i)+'.hdf5'
-                f = h5py.File(self.snapshot_file,'r')
-                np_this = (f['Header'].attrs[u'NumPart_ThisFile']).astype(np.int64)
+                filename = self.snapshot_file+'.'+str(i)+'.hdf5'
+                f = h5py.File(filename,'r')
+                np_arr_this = (f['Header'].attrs[u'NumPart_ThisFile']).astype(np.int64)
+                #select the ptype
+                np_this=np_arr_this[self.ptype]
                 out[shift:shift+np_this] = f[prefix+suffix][:]
                 f.close()
                 shift += np_this
@@ -152,7 +164,7 @@ class SnapshotReader(Utilities,Paths):
         
         return out if block == 'ids' else out.T # notice transpose
 
-    def compress_snapshot(self, subsamples,ref_snapshot=200):
+    def compress_snapshot(self, subsamples,ref_snapshot=200,quant_write=['positions','ids','velocities','potentials']):
         """
         Compress the snapshot data, create subsamples, and save header information.
         
@@ -163,7 +175,6 @@ class SnapshotReader(Utilities,Paths):
         Returns:
         None
         """
-        compress_fileroot=f'snapshot_{0:03d}'.format(self.snap)
         import Nbody_Compression as NbodyCompress 
         if self.verbose:
             self.print_this('Compressing snapshot data and saving header...', self.logfile)
@@ -198,7 +209,7 @@ class SnapshotReader(Utilities,Paths):
         sort_indices_dic={}
         for ii, indices in enumerate(subsample_indices):
             sort_indices_dic[ii]=None
-        for qq,quant in enumerate(['positions','ids','velocities','potentials']): 
+        for qq,quant in enumerate(quant_write): 
             # Read positions, velocities, and potential
             original_quant = self.read_block(transform_quant[quant])
             if(quant not in ['potentials']):
@@ -206,10 +217,20 @@ class SnapshotReader(Utilities,Paths):
 
             # Compress and save each subsample
             for ii, indices in enumerate(subsample_indices):
-                file_prefix=f"{full_fileroot}_subsample{subsamples[ii]}"
+                #file_prefix=f"{full_fileroot}_subsample{subsamples[ii]}"
+                subsample_dir=f"{compressed_path}/subsample{subsamples[ii]}/"
+                os.makedirs(subsample_dir, exist_ok=True)
+                file_prefix=f"{subsample_dir}/{self.compressed_fileroot}_subsample{subsamples[ii]}"
+                this_fname=NbodyCompress.compressed_filename(file_prefix, quant)
+                if(os.path.isfile(this_fname)):
+                    self.print_this(f'{ii} Compressed file already exists! {this_fname}', self.logfile)
+                    continue
+                
+                    
                 attribute_dic={'Ndata':indices.size,'L':Lbox,'Ngrid':Ngrid,'ref_snapshot':ref_snapshot,
                          'vmax':vmax,'pmax':pmax,'subsamp_percent':subsamples[ii],
                          'little_endian':little_endian,'byteorder':sys.byteorder}
+                
                 if(quant=='positions'):
                     compressed_quant,full_counts_dic, sort_indices_dic[ii]=NbodyCompress.compress_nbody_data(original_quant[indices], 
                           Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
@@ -305,7 +326,7 @@ class SnapshotReader(Utilities,Paths):
 
         json_data = {}
 
-        with h5py.File(self.snapshot_file, 'r') as f:
+        with h5py.File(self.snapshot_file+self.snapshot_ext, 'r') as f:
             for group_name in ['Config', 'Header', 'Parameters']:
                 if group_name in f:
                     group = f[group_name]
