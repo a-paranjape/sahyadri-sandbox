@@ -11,6 +11,18 @@ import fitsio as F
 import sys
 import json
 
+import time
+
+def ltime(date=True):
+    tm=time.localtime()
+    datestr=str(tm.tm_mday)+'/'+str(tm.tm_mon)+'/'+str(tm.tm_year)
+    tmstr=str(tm.tm_hour)+':'+str(tm.tm_min)+':'+str(tm.tm_sec)
+
+    if(date):
+        tmstr=datestr+' '+tmstr
+
+    return tmstr
+
 ########################################################
 # Reader for HDF5 Gadget-4 snapshot. 
 ########################################################
@@ -127,7 +139,7 @@ class SnapshotReader(Utilities,Paths):
         f.close()
         if self.nFile > 1:
             # NEEDS TESTING
-            out = np.zeros(self.npart,dtype=out_part.dtype) if block=='ids' else np.zeros((self.npart,3),dtype=out_part.dtype)
+            out = np.zeros(self.npart,dtype=out_part.dtype) if block in ['ids','potential'] else np.zeros((self.npart,3),dtype=out_part.dtype)
             np_this=out_part.shape[0]
             out[:np_this] = out_part 
             shift = np_this
@@ -190,9 +202,12 @@ class SnapshotReader(Utilities,Paths):
 
         # Create JSON file with full snapshot information
         json_filename = f"{full_fileroot}_info.json"
-        json_data=self.hdf5_to_json(json_filename,subsamples)
-        if self.verbose:
-            self.print_this(f'Snapshot information saved to: {json_filename}', self.logfile)
+        if(os.path.isfile(json_filename)):
+            self.print_this(f'{ltime()} Snapshot information already exists: {json_filename}', self.logfile)
+        else:
+            json_data=self.hdf5_to_json(json_filename,subsamples)
+            if self.verbose:
+                self.print_this(f'{ltime()} Snapshot information saved to: {json_filename}', self.logfile)
         
 
         # Compression related setting
@@ -247,7 +262,7 @@ class SnapshotReader(Utilities,Paths):
                                               full_counts_dic=full_counts_dic, quant=quant,verbose=False)
                 if self.verbose:
                     this_fname=NbodyCompress.compressed_filename(file_prefix, quant)
-                    self.print_this(f'{ii} Compression complete {this_fname}', self.logfile)
+                    self.print_this(f'{ltime()} sub-{ii} Compression complete {this_fname}', self.logfile)
         
 
         return
