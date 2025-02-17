@@ -156,13 +156,13 @@ class PowerSpectrum(Utilities,Paths,Constants):
 
         c_update_density = self.lib_cic.update_density
         c_update_density.restype = None
-        c_update_density.argtypes = [c_int,c_int,ndpointer(c_double, flags="C_CONTIGUOUS"),
+        c_update_density.argtypes = [c_long,c_int,ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      c_double,c_double]
 
-        c_update_density(c_int(ndata),c_int(self.grid),density,
+        c_update_density(c_long(ndata),c_int(self.grid),density,
                          pos[0].astype('float64'),
                          pos[1].astype('float64'),
                          pos[2].astype('float64'),
@@ -174,7 +174,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
             if self.verbose:
                 self.print_this('... interlacing (NEEDS TESTING!!)',self.logfile)
             density2 = np.zeros(self.grid**3)
-            c_update_density(c_int(ndata),c_int(self.grid),density2,
+            c_update_density(c_long(ndata),c_int(self.grid),density2,
                              pos[0].astype('float64'),
                              pos[1].astype('float64'),
                              pos[2].astype('float64'),
