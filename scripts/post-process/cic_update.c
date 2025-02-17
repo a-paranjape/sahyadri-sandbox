@@ -2,15 +2,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void update_density(int ndata, int grid, double *density, 
+void update_density(long int ndata, int grid, double *density, 
 		    double *x, double *y, double *z, double cell_size, double interlace);
 
 
-void update_density(int ndata, int grid, double *density, 
+void update_density(long int ndata, int grid, double *density, 
 		    double *x, double *y, double *z, double cell_size, double interlace)
 {
 
-  int i;
+  long int i;
   int c0,c1,c2,cp10,cp11,cp12;
   int grid2 = grid*grid;
   double cx,cy,cz,dx,dy,dz,tx,ty,tz;
