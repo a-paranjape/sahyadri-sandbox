@@ -376,14 +376,20 @@ if [ $HALOS == 1 ]; then
     echo "submitting rockstar job"
     # run Rockstar
     cd $AUTO_ROCKSTAR_DIR
+    echo "deleting existing auot-rockstar.cfg file"
+    rm auto-rockstar.cfg
     if [ $RUN_SIM == 1 ]; then
 	ROCKSTAR_SERV_JOB=`qsub -V -N $ROCKSTAR_SERV -k oe -W depend=afterok:$GADGET_JOB -l walltime=05:00:00 -- $ROCKSTAR_EXEC $ROCKSTAR_CONFIG_FILE`
     else
 	# no dependency on class
 	ROCKSTAR_SERV_JOB=`qsub -V -N $ROCKSTAR_SERV -k oe -l walltime=05:00:00 -- $ROCKSTAR_EXEC $ROCKSTAR_CONFIG_FILE`
     fi
-    # ADD INTERMEDIATE JOB HERE THAT SEARCHES FOR AUTO-ROCKSTAR.CFG FILE. 
-
+    echo "Waiting for auto-rockstar.cfg creation"
+    while [ ! -f "$AUTO_ROCKSTAR_DIR/auto-rockstar.cfg" ]
+    do
+            sleep 1
+    done
+    echo "Found auto-rockstar.cfg, starting worker"
     ROCKSTAR_PROC_JOB=`qsub -V -N $ROCKSTAR_PROC -k oe -W depend=after:$ROCKSTAR_SERV_JOB -l walltime=05:00:00 -l select=ncpus=$NWRITER -- $ROCKSTAR_EXEC $AUTO_ROCKSTAR_DIR/auto-rockstar.cfg`
 else
     echo "halos not requested"
