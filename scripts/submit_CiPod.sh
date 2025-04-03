@@ -88,6 +88,7 @@ AS=`awk '$1=="AS" {print $3}' $SCF`
 # Run Rockstar / consistent trees?
 HALOS=`awk '$1=="HALOS" {print $3}' $SCF`
 TREES=`awk '$1=="TREES" {print $3}' $SCF`
+RESTART_RS=`awk '$1=="RESTART_RS" {print $3}' $SCF`
 
 if [ $(( HALOS + TREES  )) == 1 ]; then
     echo cannot submit halos but not trees or vice-versa. either switch on both or neither and try again
@@ -370,6 +371,12 @@ else
     # no dummy needed since halos has no dependency in this case
     # cd $HOME # this is user home
     # GADGET_JOB=`qsub -N dummy -k oe -W depend=afterok:$CLASS_JOB  -- $DUMMY_EXEC`
+fi
+
+if [ $RESTART_RS == 1 ]; then
+        ROCKSTAR_CONFIG_FILE=$AUTO_ROCKSTAR_DIR/restart.cfg
+        echo "The file used for rockstar server:"
+        echo $ROCKSTAR_CONFIG_FILE
 fi
 
 if [ $HALOS == 1 ]; then
