@@ -18,12 +18,12 @@ def grid_index_to_3d(index, Ngrid):
     x = index % Ngrid
     return np.column_stack([x, y, z])
 
-def compress_12bit(data, max_value):
-    scaled = np.clip(data / max_value, -1, 1)
-    return np.clip(np.round((scaled + 1) * 2047), 0, 4095).astype(np.uint16)
+#def compress_12bit(data, max_value):
+#    scaled = np.clip(data / max_value, -1, 1)
+#    return np.clip(np.round((scaled + 1) * 2047.5), 0, 4095).astype(np.uint16)
 
-def decompress_12bit(compressed, max_value):
-    return (compressed.astype(float) / 2047 - 1) * max_value
+#def decompress_12bit(compressed, max_value):
+#    return (compressed.astype(float) / 2047 - 1) * max_value
 
 
 def create_subsamples(N, subsamples):
@@ -45,8 +45,10 @@ def create_subsamples(N, subsamples):
         raise ValueError(f"Subsamples must have unique values and add up to 100: {subsamples}")
 
     if N % 2 != 0:
-        raise ValueError("N must be even")
+        raise ValueError(f"N must be even: {N}")
 
+    #Set a random seed
+    np.random.seed(0)
     indices = np.arange(N)
     np.random.shuffle(indices)
 
@@ -77,11 +79,20 @@ def create_subsamples(N, subsamples):
 
 def Get_sorted_indices(positions,L, Ngrid):
     grid_size = L / Ngrid
-    grid_indices = np.floor(positions / grid_size).astype(int)
-
+    #memory expensive implemnetation
+    #grid_indices = np.floor(positions / grid_size).astype(int)
     # Convert 3D grid indices to single index
-    single_indices = grid_indices[:, 0] + Ngrid * (grid_indices[:, 1] + Ngrid * grid_indices[:, 2])
+    #single_indices = grid_indices[:, 0] + Ngrid * (grid_indices[:, 1] + Ngrid * grid_indices[:, 2])
 
+    #memory efficient implemnetation
+    single_indices=np.floor(positions[:,2] / grid_size).astype(int)
+    single_indices=(single_indices*Ngrid) + (np.floor(positions[:,1] / grid_size).astype(int) )
+    single_indices = (single_indices*Ngrid) + (np.floor(positions[:,0] / grid_size).astype(int) )
+    #grid_indices = np.floor(positions / grid_size).astype(int)
+    # Convert 3D grid indices to single index
+    #single_indices = grid_indices[:, 0] + Ngrid * (grid_indices[:, 1] + Ngrid * grid_indices[:, 2])
+    
+    
     # Sort data based on single index
     sort_indices = np.argsort(single_indices)
 
@@ -90,7 +101,8 @@ def Get_sorted_indices(positions,L, Ngrid):
     return sorted_single_indices, sort_indices
 
 
-def compress_nbody_data(original_quant, L, Ngrid, vmax, pmax,quant='positions',sort_indices=None,full_count_bit_depth=12,little_endian=True):
+def compress_nbody_data(original_quant, L, Ngrid, vmax, pmax,quant='positions',sort_indices=None,full_count_bit_depth=12,little_endian=True,npart=None):
+    '''npart is the total number of particle in the simulation'''
     if (quant in ['positions', 'velocities'] and original_quant.shape[1]!= 3):
         raise ValueError("Input positions and velocities should have shape (Ndata, 3)")
    
@@ -126,6 +138,12 @@ def compress_nbody_data(original_quant, L, Ngrid, vmax, pmax,quant='positions',s
         grid_corners = grid_index_to_3d(sorted_single_indices, Ngrid) * grid_size
         position_diffs = sorted_positions - grid_corners
         normalized_diffs = position_diffs / grid_size
+        # Check for invalid values
+        #print('validating normalized_diffs')
+        #print("Contains NaN:", np.any(np.isnan(normalized_diffs)))
+        #print("Contains inf:", np.any(np.isinf(normalized_diffs)))
+        #print("Array dtype:", normalized_diffs.dtype)
+        #print("Array shape:", normalized_diffs.shape)
         compressed_positions = np.clip(np.round(normalized_diffs * 255), 0, 255).astype(np.uint8)
         #transformed_diffs = nonlinear_transform(normalized_diffs)
         return compressed_positions, full_counts_dic, sort_indices
@@ -147,14 +165,195 @@ def compress_nbody_data(original_quant, L, Ngrid, vmax, pmax,quant='positions',s
         return compressed_potential
     elif(quant=='ids'):
         sorted_ids = original_quant[sort_indices]
-        if(sorted_ids.size<np.power(1024,3)):
+        if(npart<np.power(1024,3)):
             ids_bit_depth=32
         else:
             ids_bit_depth=64
         packed_ids, overflow_indices, overflow_values,ids_dtype,ids_bit_depth=c12b.compress_integer_array(sorted_ids, ids_bit_depth)
         return packed_ids
     
- 
+def compress_nbody_data_optimized(original_quant, L, Ngrid, vmax, pmax, quant='positions', 
+                                 sort_indices=None, full_count_bit_depth=12, 
+                                 little_endian=True, npart=None,chunk_size=None):
+    if (quant in ['positions', 'velocities'] and original_quant.shape[1] != 3):
+        raise ValueError("Input positions and velocities should have shape (Ndata, 3)")
+
+    if(sort_indices is None and quant != 'positions'):
+        raise ValueError('You must provide the sort_indices if input quant is not positions')
+
+    if(sort_indices is not None):
+        if(sort_indices.size != original_quant.shape[0]):
+            raise ValueError('The size of sort_indices and input array rows must match')
+    
+    grid_size = L / Ngrid
+
+    if(sort_indices is None and quant == 'positions'):
+        for ii in range(0,3): #To take care of the co-ordinates exactly Lbox
+            original_quant[:,ii]=original_quant[:,ii]%L
+
+        # Calculate indices without copying the entire array
+        sorted_single_indices, sort_indices = Get_sorted_indices(original_quant, L, Ngrid)
+       
+        # Sort data based on single index
+        original_quant = original_quant[sort_indices]
+
+        # Count objects in each grid cell
+        unique_indices, index_bins = np.unique(sorted_single_indices, return_index=True)
+        counts = np.diff(np.append(index_bins, len(sorted_single_indices)))
+
+        # Create full counts array including empty cells
+        full_counts = np.zeros(Ngrid**3, dtype=int)
+        full_counts[unique_indices] = counts
+        #compress the full counts
+        #full_counts=c12int.pack_12bit(full_counts)
+        full_counts_dic={}
+        full_counts_dic['packed'], full_counts_dic['overflow_indices'], full_counts_dic['overflow_values'],full_counts_dic['dtype'],full_counts_dic['bit_depth']=c12b.compress_integer_array(full_counts, full_count_bit_depth)
+
+        
+        # Pre-allocate output array for compressed positions
+        compressed_positions = np.empty((original_quant.shape[0], 3), dtype=np.uint8)
+        
+        # Process in chunks if requested
+        if chunk_size is not None and chunk_size < original_quant.shape[0]:
+            # Process in chunks to reduce memory usage
+            for start_idx in range(0, len(sort_indices), chunk_size):
+                end_idx = min(start_idx + chunk_size, len(sort_indices))
+                #chunk_indices = sort_indices[start_idx:end_idx]
+                # Calculate grid corners for this chunk
+                chunk_single_indices = sorted_single_indices[start_idx:end_idx]
+                grid_corners = grid_index_to_3d(chunk_single_indices, Ngrid) * grid_size
+                
+                # For each dimension, calculate the difference and normalize in one step
+                for dim in range(0,3):
+                    # Get original positions, apply modulo only if needed
+                    pos_values = original_quant[start_idx:end_idx, dim]
+                    pos_values = pos_values % L  # This creates a temporary array, but only for this chunk
+                    
+                    # Process directly to uint8 compression
+                    compressed_positions[start_idx:end_idx, dim] = np.clip(
+                        np.round(((pos_values - grid_corners[:, dim]) / grid_size) * 255), 0, 255
+                    ).astype(np.uint8)
+        else:
+            # Process all at once
+            grid_corners = grid_index_to_3d(sorted_single_indices, Ngrid) * grid_size
+            
+            # For each dimension, calculate the difference and normalize in one step
+            for dim in range(3):
+                # Get original positions, apply modulo only if needed
+                pos_values = original_quant[:, dim]
+                pos_values = pos_values % L  # This creates a temporary array but only for one dimension at a time
+                
+                # Process directly to uint8 compression
+                compressed_positions[:, dim] = np.clip(
+                    np.round(((pos_values - grid_corners[:, dim]) / grid_size) * 255), 0, 255
+                ).astype(np.uint8)
+                
+        return compressed_positions, full_counts_dic, sort_indices
+    
+    elif(quant == 'velocities'):
+        # Add chunking for velocity compression if needed
+        if chunk_size is not None and chunk_size < len(sort_indices):
+            
+            if(False):
+                # Determine output dtype based on first chunk to ensure consistency
+                chunk_indices = sort_indices[:min(chunk_size, 10)]
+                test_cvx, _ = c12b.compress_12bit(
+                    original_quant[chunk_indices, 0], vmax, 
+                    allow_negative=True, little_endian=little_endian
+                )
+            
+                # Pre-allocate based on determined dtype
+                #compressed_velocities = np.empty((len(sort_indices), 3), dtype=test_cvx.dtype)
+            else:
+                compressed_velocities = None
+            
+            for start_idx in range(0, len(sort_indices), chunk_size):
+                end_idx = min(start_idx + chunk_size, len(sort_indices))
+                chunk_indices = sort_indices[start_idx:end_idx]
+                
+                compressed_chunk=None
+                for dim in range(3):
+                    cvd, _ = c12b.compress_12bit(
+                        original_quant[chunk_indices, dim], vmax, 
+                        allow_negative=True, little_endian=little_endian
+                    )
+                    if(dim==0):
+                        compressed_chunk=cvd
+                    else:
+                        compressed_chunk=np.column_stack([compressed_chunk,cvd])
+                if(start_idx==0):
+                    compressed_velocities=compressed_chunk
+                else:
+                    compressed_velocities=np.row_stack([compressed_velocities,compressed_chunk])
+            
+            return compressed_velocities
+        else:
+            # Original approach without intermediate array
+            cvx, _ = c12b.compress_12bit(original_quant[sort_indices, 0], vmax, allow_negative=True, little_endian=little_endian)
+            cvy, _ = c12b.compress_12bit(original_quant[sort_indices, 1], vmax, allow_negative=True, little_endian=little_endian)
+            cvz, _ = c12b.compress_12bit(original_quant[sort_indices, 2], vmax, allow_negative=True, little_endian=little_endian)
+            
+            compressed_velocities = np.column_stack([cvx, cvy, cvz])
+            
+            return compressed_velocities
+    
+    elif(quant == 'potentials'): #Since potential has only one axis no need to do chunks
+        # Compress potential directly without creating sorted_potential array
+        compressed_potential, _ = c12b.compress_12bit(
+            original_quant[sort_indices], pmax, 
+                allow_negative=True, little_endian=little_endian
+            )
+        return compressed_potential
+    elif(quant == 'ids'):
+        # Determine bit depth without creating a sorted copy first
+        ids_bit_depth = 32 if npart < np.power(1024, 3) else 64
+        
+        # Apply chunking for IDs compression
+        if False and chunk_size is not None and chunk_size < len(sort_indices):
+            # For IDs, we need to collect all compressed data before finalizing
+            # We'll store intermediate results for each chunk
+            chunk_results = []
+            
+            for start_idx in range(0, len(sort_indices), chunk_size):
+                end_idx = min(start_idx + chunk_size, len(sort_indices))
+                chunk_indices = sort_indices[start_idx:end_idx]
+                
+                # Compress this chunk of IDs
+                chunk_packed, chunk_overflow_indices, chunk_overflow_values, chunk_dtype, _ = \
+                    c12b.compress_integer_array(original_quant[chunk_indices], ids_bit_depth)
+                
+                # Store chunk results with adjusted overflow indices to account for chunking
+                chunk_results.append({
+                    'packed': chunk_packed,
+                    'overflow_indices': chunk_overflow_indices + start_idx if chunk_overflow_indices is not None else None,
+                    'overflow_values': chunk_overflow_values
+                })
+            
+            # Combine all chunk results
+            packed_ids = np.concatenate([chunk['packed'] for chunk in chunk_results])
+            
+            # Combine overflow information if present
+            has_overflow = any(chunk['overflow_indices'] is not None for chunk in chunk_results)
+            if has_overflow:
+                overflow_indices = np.concatenate([
+                    chunk['overflow_indices'] for chunk in chunk_results 
+                    if chunk['overflow_indices'] is not None
+                ])
+                overflow_values = np.concatenate([
+                    chunk['overflow_values'] for chunk in chunk_results
+                    if chunk['overflow_values'] is not None
+                ])
+            else:
+                overflow_indices = None
+                overflow_values = None
+            
+            return packed_ids #, overflow_indices, overflow_values, chunk_dtype, ids_bit_depth
+        else:
+            # Compress directly using indexing without chunking
+            packed_ids, overflow_indices, overflow_values, ids_dtype, ids_bit_depth = \
+                c12b.compress_integer_array(original_quant[sort_indices], ids_bit_depth)
+                
+            return packed_ids #, overflow_indices, overflow_values, ids_dtype, ids_bit_depth 
 
 def decompress_nbody_data(file_root,subsample,attribute_dic,load_quant=[]):#compressed_dic,attribute_dic):
     little_endian=attribute_dic['little_endian']
