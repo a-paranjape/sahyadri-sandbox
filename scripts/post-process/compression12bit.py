@@ -18,7 +18,7 @@ def compress_12bit(data, max_value, allow_negative=True, little_endian=True,inpu
     else:            
         if allow_negative:
             # Scale from [-max_value, max_value] to [0, 4095]
-            scaled = np.clip((data / max_value + 1) * 2047.5, 0, 4095)
+            scaled = np.clip((data / max_value + 1) * 2047, 0, 4095)
         else:
             # Scale from [0, max_value] to [0, 4095]
             scaled = np.clip(data / max_value * 4095, 0, 4095)
@@ -69,7 +69,7 @@ def decompress_12bit(compressed, max_value, output_size, allow_negative=True, li
     else:
         if allow_negative:
             # Scale back to [-max_value, max_value]
-            return (unpacked.astype(float) / 2047.5 - 1) * max_value
+            return (unpacked.astype(float) / 2047- 1) * max_value
         else:
             # Scale back to [0, max_value]
             return unpacked.astype(float) / 4095 * max_value
@@ -109,18 +109,53 @@ def compress_integer_array(arr, bit_depth=None,little_endian=True,possible_bit_d
 
     return packed, overflow_indices, overflow_values, arr.dtype, bit_depth
     
-def decompress_integer_array(packed, overflow_indices, overflow_values, original_dtype, bit_depth, original_size,little_endian=True):
+#def decompress_integer_array(packed, overflow_indices, overflow_values, original_dtype, bit_depth, original_size,little_endian=True):
+#    if bit_depth in (8, 16, 32, 64):
+#        # Use native types for these bit depths
+#        unpacked = packed.astype(original_dtype)
+#    else:
+#        #unpacked = unpack_12bit(packed)
+#        unpacked = decompress_12bit(packed, None, original_size, allow_negative=False, little_endian=little_endian,input_dtype='integer')
+#    
+#    # Restore overflow values
+#    unpacked[overflow_indices] = overflow_values
+#
+#    return unpacked
+
+def decompress_integer_array(packed, overflow_indices, overflow_values, original_dtype, bit_depth, original_size, little_endian=True):
     if bit_depth in (8, 16, 32, 64):
         # Use native types for these bit depths
         unpacked = packed.astype(original_dtype)
     else:
-        #unpacked = unpack_12bit(packed)
-        unpacked = decompress_12bit(packed, None, original_size, allow_negative=False, little_endian=little_endian,input_dtype='integer')
-    
+        # Decompress with the default uint16 type
+        unpacked = decompress_12bit(packed, None, original_size, allow_negative=False, little_endian=little_endian, input_dtype='integer')
+        #
+        # Check if any overflow values exceed uint16 max (65535)
+        # or if the original dtype can handle larger values
+        if(overflow_values.size==0):
+            msg='No overflow values'
+        elif (np.any(overflow_values >= 65536) or
+            np.dtype(original_dtype).itemsize > np.dtype(np.uint16).itemsize):
+            # Convert to a type that can handle larger values before restoring overflows
+            if np.issubdtype(original_dtype, np.integer):
+                # If original type was integer, use appropriate integer type
+                if np.max(overflow_values) <= np.iinfo(np.uint32).max:
+                    unpacked = unpacked.astype(np.uint32)
+                else:
+                    unpacked = unpacked.astype(np.uint64)
+            else:
+                # If original type was float or other, use the original type
+                unpacked = unpacked.astype(original_dtype)
+    #
     # Restore overflow values
     unpacked[overflow_indices] = overflow_values
-
+    #
+    # Final conversion to original dtype if needed
+    if unpacked.dtype != original_dtype:
+        unpacked = unpacked.astype(original_dtype)
+    #
     return unpacked
+
 
 def find_optimal_bit_depth(arr, overflow_threshold):
     possible_bit_depths = [8, 12, 16, 32, 64]
