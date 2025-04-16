@@ -11,15 +11,21 @@ import socket
 class Paths(object):
     """ Paths for various local directories. """
     def __init__(self):
-        self.home_path = '/home/aseem/iucaa/Sahyadri/sahyadri-sandbox/' #'/mnt/home/faculty/caseem/'
-        self.scratch_path = self.home_path + 'Test/' # '/scratch/aseem/'
-        self.config_path = self.home_path + 'Test/' # 'config/'
+        self.home_path = '/mnt/home/project/chpc2501005/shadab/sahyadri-sandbox/'
+        self.scratch_path = '/mnt/home/project/chpc2501005/data/'
+        self.config_path = self.home_path + 'config/'
+        #self.home_path = '/home/aseem/iucaa/Sahyadri/sahyadri-sandbox/' #'/mnt/home/faculty/caseem/'
+        #self.scratch_path = self.home_path + 'Test/' # '/scratch/aseem/'
+        #self.config_path = self.home_path + 'Test/' # 'config/'
         if(socket.gethostname()=='Shadabs-MacBook-Pro.local'):
             self.home_path='/Users/shadab/Documents/Projects/sahyadri-sandbox/'
         elif(socket.gethostname()=='pawna'):
             self.home_path='/user/shadab/Projects/sahyadri-sandbox/'
             self.scratch_path = '/storage/shadab/' # '/scratch/aseem/'
             self.config_path = self.home_path + 'config/' # 'config/'
+        elif(socket.gethostname()=='ln3'):
+            self.home_path = '/mnt/home/project/chpc2501005/sahyadri-sandbox/'
+            self.scratch_path = '/mnt/home/project/chpc2501005/data/'
 
         self.python_path = self.home_path + 'scripts/post-process/'
 
