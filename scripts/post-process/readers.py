@@ -33,7 +33,6 @@ class SnapshotReader(Utilities,Paths):
         '''use_compressed will read using compressed files, in this case one could give a series of subsamples to accumulate all the file for outputs. This should match the subsamples given while compressing'''
         # code below inspired by Pylians (https://github.com/franciscovillaescusa/Pylians3/blob/master/library/readgadget.py)
         # and simplified to focus on Gadget-4 HDF5 snapshots.
-        
         Paths.__init__(self)
         Utilities.__init__(self)
         
@@ -47,8 +46,8 @@ class SnapshotReader(Utilities,Paths):
         self.subsamples=subsamples
         self.compressed_fileroot='comp_snapshot_{0:03d}'.format(self.snap) 
         
-        self.snapshot_file = self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap)
-        self.snapdir = self.sim_stem + '/r'+str(self.real) + '/snapdir_{0:03d}'.format(self.snap)
+        self.snapshot_file = self.sim_path + self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap)
+        self.snapdir = self.sim_path + self.sim_stem + '/r'+str(self.real) + '/snapdir_{0:03d}'.format(self.snap)
 
         #read header only if this is set to true, just so that even if snapshot is not available then we should be able to use this function for rest of the file path defintions
         self.read_header=read_header
@@ -67,9 +66,11 @@ class SnapshotReader(Utilities,Paths):
             elif(os.path.exists(self.snapdir+'/snapshot_{0:03d}.0.hdf5'.format(self.snap))):
                 self.snapshot_file=self.snapdir+'/snapshot_{0:03d}'.format(self.snap)
                 self.snapshot_ext = '.0.hdf5'
+
         else:
             raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
                 self.sim_path,self.snapshot_file))
+
         if self.verbose:
             self.print_this('Snapshot Reader:\n... preparing to read file: '+self.snapshot_file,self.logfile)
             
@@ -538,7 +539,7 @@ class HaloReader(SnapshotReader):
 
     
     ###############################################
-    def prep_halos(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False):
+    def prep_halos(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False, sorthalos=True):
         """ Reads halo (+ vahc) (+ext propperties only for fits) catalogs for given realisation and snapshot. 
              Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
              where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
@@ -547,10 +548,11 @@ class HaloReader(SnapshotReader):
              Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
              Halos will be sorted by (increasing) massdef.
              use_fits: True then load information from the .fits.gz file otherwise load from the .tree/.vahc files
+             sorthalos: if True, sorts the halos based on massdef. otherwise keeps the ordering like the input file. Default is True
         """
 
         if(use_fits):
-            return self.prep_halos_fits(va=va,ext=ext,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos)
+            return self.prep_halos_fits(va=va,ext=ext,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos, sorthalos=sorthalos)
 
         if self.verbose:
             self.print_this("... preparing halo data",self.logfile)
@@ -593,15 +595,17 @@ class HaloReader(SnapshotReader):
         del cond_clean
         gc.collect()
 
-        if self.verbose:
-            self.print_this("... ... sorting by "+massdef,self.logfile)
-        sorter = halos[massdef].argsort()
-        halos = halos[sorter]
-        hpos = hpos[sorter]
-        if va:
-            vahc = vahc[sorter]
+        
+        if (sorthalos is True):
+            if self.verbose:
+                self.print_this("... ... sorting by "+massdef,self.logfile)
+            sorter = halos[massdef].argsort()
+            halos = halos[sorter]
+            hpos = hpos[sorter]
+            if va:
+                vahc = vahc[sorter]
 
-        del sorter
+            del sorter
         gc.collect()
 
         return (hpos,halos,vahc) if va else (hpos,halos)
@@ -610,7 +614,7 @@ class HaloReader(SnapshotReader):
 
     ###############################################
     #prepare halos with fits
-    def prep_halos_fits(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
+    def prep_halos_fits(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False, sorthalos=True):
             """ Reads halo (+ vahc using va=True) (+extended properties using ext=True) catalogs for given realisation and snapshot. 
                  Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
                  where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
@@ -618,6 +622,7 @@ class HaloReader(SnapshotReader):
                  Optionally removes subhalos (set keep_subhalos=False).
                  Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
                  Halos will be sorted by (increasing) massdef.
+                 sorthalos: sorts halos according to massdef if set to True. Default is True
             """
 
             #make sure mass definition follow the same convention as in the header/fits
@@ -681,15 +686,16 @@ class HaloReader(SnapshotReader):
             del cond_clean
             gc.collect()
 
-            if self.verbose:
-                self.print_this("... ... sorting by "+massdef,self.logfile)
-            sorter = halos[massdef].argsort()
-            halos = halos[sorter]
-            hpos = hpos[sorter]
-            if va:
-                vahc = vahc[sorter]
+            if (sorthalos is True):
+                if self.verbose:
+                    self.print_this("... ... sorting by "+massdef,self.logfile)
+                sorter = halos[massdef].argsort()
+                halos = halos[sorter]
+                hpos = hpos[sorter]
+                if va:
+                    vahc = vahc[sorter]
 
-            del sorter
+                del sorter
             gc.collect()
             fbasic.close()
 
