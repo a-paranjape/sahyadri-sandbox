@@ -1,7 +1,7 @@
 # sahyadri-sandbox
 Sandbox for testing codes and scripts related to Sahyadri simulations at IUCAA/TIFR/IISER-Pune/NCRA
 
-## Introduction ##
+## Introduction  ##
 As an offshoot of the 2nd edition of the [PMCAP](https://www.tifr.res.in/~shadab.alam/PM_CAP_meeting/) meeting held at IUCAA, Pune, it was decided to build a suite of cosmological N-body simulations that explore various cosmological and dark matter models using high-resolution, intermediate volume configurations that are optimal for exploring statistics related to the cosmic web, beyond-2pt observables and the small-scale phenomenology of dark matter.
 
 The simulation suite is named **Sahyadri** (inspired by the mountain range one must cross to travel between Pune and Mumbai), with a smaller pilot study named **Sinhagad** (after a popular mountain in the range).
