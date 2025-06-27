@@ -76,7 +76,9 @@ class SnapshotReader(Utilities,Paths):
             
         if(self.use_compressed):
             header_info=self.read_compressed_header()
-            self.subsamples=header_info['Header']['subsamples']
+            self.compression_dic=header_info['Header']['compression_dic']
+            self.subsamples=self.compression_dic['subsamples']
+
         else:
             f = h5py.File(self.snapshot_file+self.snapshot_ext,'r')
             header_info={}
@@ -111,14 +113,17 @@ class SnapshotReader(Utilities,Paths):
     ###############################################
 
     ###############################################
-    def read_block(self,block='pos',down_to=0,seed=None):
-        """ Read positions, velocities or IDs of one complete snapshot. """
+    def read_block(self,block='pos',down_to=0,seed=None,subsamples=[],raw_nfile=[]):
+        """ Read positions, velocities or IDs of one complete snapshot.
+        if use_compressed =True then you can use subsamples list to select which subsample to read, by default it will read all the subsamples
+        if use_compressed=False and snapshot is in multiple files then you can use raw_nfile to chose which files to read, by default it will read all file. This is relevant only for simulations with multiple file per snapshot"""
         if block not in ['pos','vel','ids','potential']:
             raise ValueError("block should be one of ['pos','vel','ids'] in read_block().")
         
         if(self.use_compressed):
             transform_quant={'pos':'positions','vel':'velocities','potential':'potentials','ids':'ids'}
-            subsamples=self.subsamples
+            if(subsamples==[]):
+                subsamples=self.subsamples
             res_dic=self.load_compressed(subsamples,load_quant=[transform_quant[block]])
             return res_dic[transform_quant[block]]
 
@@ -134,6 +139,35 @@ class SnapshotReader(Utilities,Paths):
             
         if self.verbose:
             self.print_this('... reading '+suffix,self.logfile)
+
+        if(self.nFile==1):
+            fnum_list=[0]
+        elif(raw_nfile ==[]):
+            fnum_list=np.arange(0,self.nFile)
+        else:
+            fnum_list=raw_nfile
+
+
+
+        for ii, ifile in enumerate(fnum_list):
+            if(self.nFile==1):
+                filename = self.snapshot_file+self.snapshot_ext
+            else:
+                filename = self.snapshot_file+'.'+str(ifile)+'.hdf5'
+            f = h5py.File(filename,'r')
+            np_arr_this = (f['Header'].attrs[u'NumPart_ThisFile']).astype(np.int64)
+            #select the ptype
+            np_this=np_arr_this[self.ptype]
+            out_this=f[prefix+suffix][:]
+
+            if(ii==0):
+                out=out_this
+            elif(block in ['ids','potential']):
+                out=np.append(out,out_this)
+            else:
+                out=np.row_stack([out,out_this])
+
+        return out if block in ['ids','potential'] else out.T # notice transpose
 
         f = h5py.File(self.snapshot_file+self.snapshot_ext,'r')
         out_part = f[prefix+suffix][:]
@@ -175,9 +209,9 @@ class SnapshotReader(Utilities,Paths):
             
         gc.collect()
         
-        return out if block == 'ids' else out.T # notice transpose
+        return out if block in ['ids','potential'] else out.T # notice transpose
 
-    def compress_snapshot(self, subsamples,ref_snapshot=200,quant_write=['positions','ids','velocities','potentials']):
+    def compress_snapshot(self, subsamples,ref_snapshot=200,quant_write=['positions','ids','velocities','potentials'],optimized=True):
         """
         Compress the snapshot data, create subsamples, and save header information.
         
@@ -197,29 +231,38 @@ class SnapshotReader(Utilities,Paths):
             self.read_snapshot_header()
 
         # Prepare the full path for compressed files
-        compressed_path = os.path.join(self.sim_path, self.sim_stem, f'r{self.real}', 'compressed')
+        compressed_path = self.sim_path +  os.path.join(self.sim_stem, f'r{self.real}', 'compressed')
         os.makedirs(compressed_path, exist_ok=True)
         full_fileroot = os.path.join(compressed_path, self.compressed_fileroot)
+        
+
+        # Compression related setting
+        Ndata=self.npart
+        Lbox=self.Lbox; Ngrid=int(2*Lbox); 
+        vmax=5000.0; pmax=1e5
+        full_count_bit_depth=12
+        little_endian=True
+
 
         # Create JSON file with full snapshot information
         json_filename = f"{full_fileroot}_info.json"
         if(os.path.isfile(json_filename)):
             self.print_this(f'{ltime()} Snapshot information already exists: {json_filename}', self.logfile)
         else:
-            json_data=self.hdf5_to_json(json_filename,subsamples)
+            compression_dic={'subsamples':subsamples,'Ngrid':Ngrid,
+                    'Lbox':Lbox,'vmax':vmax,'pmax':pmax,'full_count_bit_depth':full_count_bit_depth}
+            json_data=self.hdf5_to_json(json_filename,compression_dic)
             if self.verbose:
                 self.print_this(f'{ltime()} Snapshot information saved to: {json_filename}', self.logfile)
-        
 
-        # Compression related setting
-        Ndata=self.npart_this
-        Lbox=self.Lbox; Ngrid=int(Lbox); 
-        vmax=6000.0; pmax=1e5
-        full_count_bit_depth=12
-        little_endian=True
+
 
         # Create subsamples
         subsample_indices = NbodyCompress.create_subsamples(Ndata, subsamples)
+        self.print_this(f'{ltime()} Created Subsample indices',self.logfile)
+        #for ii, indices in enumerate(subsample_indices):
+        #    self.print_this(f'{ltime()} sub {subsamples[ii]}, {indices.size} {indices.min()} {indices.max()}',self.logfile)
+
        
         transform_quant={'positions':'pos','velocities':'vel','potentials':'potential','ids':'ids'}
         sort_indices_dic={}
@@ -230,6 +273,9 @@ class SnapshotReader(Utilities,Paths):
             original_quant = self.read_block(transform_quant[quant])
             if(quant not in ['potentials']):
                 original_quant= original_quant.T
+            tmp_shape=original_quant.shape
+            self.print_this(f'{ltime()} Loaded raw values of {quant}, array shape {tmp_shape}',self.logfile)
+
 
             # Compress and save each subsample
             for ii, indices in enumerate(subsample_indices):
@@ -246,28 +292,46 @@ class SnapshotReader(Utilities,Paths):
                 attribute_dic={'Ndata':indices.size,'L':Lbox,'Ngrid':Ngrid,'ref_snapshot':ref_snapshot,
                          'vmax':vmax,'pmax':pmax,'subsamp_percent':subsamples[ii],
                          'little_endian':little_endian,'byteorder':sys.byteorder}
-                
+
+                chunk_size=int(0.1*indices.size)
+                if(chunk_size%2==1):
+                    chunk_size=chunk_size+1
+
                 if(quant=='positions'):
-                    compressed_quant,full_counts_dic, sort_indices_dic[ii]=NbodyCompress.compress_nbody_data(original_quant[indices], 
+                    if(not optimized):
+                        compressed_quant,full_counts_dic, sort_indices_dic[ii]=NbodyCompress.compress_nbody_data(original_quant[indices],
                           Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
-                          full_count_bit_depth=full_count_bit_depth,little_endian=little_endian)
+                          full_count_bit_depth=full_count_bit_depth,little_endian=little_endian,npart=self.npart)
+                    else:
+                        self.print_this(f'Using optimized version of compression for positions chunk_size={chunk_size}',self.logfile)
+                        compressed_quant,full_counts_dic, sort_indices_dic[ii]=NbodyCompress.compress_nbody_data_optimized(original_quant[indices],
+                          Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
+                          full_count_bit_depth=full_count_bit_depth,little_endian=little_endian,npart=self.npart,chunk_size=chunk_size)
                     attribute_dic['full_count_bit_depth']=full_count_bit_depth
                     attribute_dic['full_count_dtype']= '%s'%full_counts_dic['dtype']
                 else:
-                    compressed_quant=NbodyCompress.compress_nbody_data(original_quant[indices], 
+                    if(not optimized):
+                        compressed_quant=NbodyCompress.compress_nbody_data(original_quant[indices],
                           Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
-                          full_count_bit_depth=full_count_bit_depth,little_endian=little_endian)
+                          full_count_bit_depth=full_count_bit_depth,little_endian=little_endian,npart=self.npart)
+                    else:
+                        self.print_this(f'Using optimized version of compression for {quant} chunk_size={chunk_size}',self.logfile)
+                        compressed_quant=NbodyCompress.compress_nbody_data_optimized(original_quant[indices],
+                          Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
+                          full_count_bit_depth=full_count_bit_depth,little_endian=little_endian,npart=self.npart,chunk_size=chunk_size)
                     full_counts_dic=None
-                    
-                NbodyCompress.save_compressed_data(file_prefix, compressed_quant, attribute_dic, 
+
+                NbodyCompress.save_compressed_data(file_prefix, compressed_quant, attribute_dic,
                                               full_counts_dic=full_counts_dic, quant=quant,verbose=False)
+
                 if self.verbose:
                     this_fname=NbodyCompress.compressed_filename(file_prefix, quant)
                     self.print_this(f'{ltime()} sub-{ii} Compression complete {this_fname}', self.logfile)
-        
+
 
         return
         #end of compression function
+
 
     def load_compressed(self, subsamples,load_quant=['positions','velocities','potentials','ids']):
         """
@@ -286,14 +350,15 @@ class SnapshotReader(Utilities,Paths):
 
 
         # Prepare the full path for compressed files
-        compressed_path = os.path.join(self.sim_path, self.sim_stem, f'r{self.real}', 'compressed')
+        compressed_path = self.sim_path + os.path.join(self.sim_stem, f'r{self.real}', 'compressed')
         full_fileroot = os.path.join(compressed_path, self.compressed_fileroot)
 
         decomp_dic={}
         # Call your decompression function
         for qq,quant in enumerate(load_quant):
             for ii, indices in enumerate(subsamples):
-                this_root=f"{full_fileroot}_subsample{subsamples[ii]}"
+                subsample_dir=f"{compressed_path}/subsample{subsamples[ii]}/"
+                this_root=f"{subsample_dir}/{self.compressed_fileroot}_subsample{subsamples[ii]}"
                 if(qq==0 and ii==0):
                     attribute_dic = NbodyCompress.load_compressed_data(this_root,load_quant=['attributes'])
                 tmp_dic = NbodyCompress.decompress_nbody_data(this_root,subsamples[ii], attribute_dic,load_quant=[quant])
@@ -359,6 +424,7 @@ class SnapshotReader(Utilities,Paths):
                             json_data[group_name][dset_name] = self.json_serializable(data)
         #Also add the subsamples in the header
         json_data['Header']['subsamples']= subsamples
+        json_data['Header']['compression_dic']= compression_dic
         # Write to JSON file
         with open(output_filename, 'w') as json_file:
             json.dump(json_data, json_file, indent=4)
@@ -378,7 +444,7 @@ class SnapshotReader(Utilities,Paths):
         Returns:
         dict: Header information
         """
-        compressed_path = os.path.join(self.sim_path, self.sim_stem, f'r{self.real}', 'compressed')
+        compressed_path = self.sim_path + os.path.join(self.sim_stem, f'r{self.real}', 'compressed')
         header_file = os.path.join(compressed_path, f"{self.compressed_fileroot}_info.json")
         
         if not os.path.exists(header_file):
