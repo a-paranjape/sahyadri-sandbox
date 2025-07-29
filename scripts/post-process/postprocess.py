@@ -317,7 +317,7 @@ def do_this_snap(snap):
 
     if add_value:
         # more inclusive catalog for .vahc file
-        hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True)
+        hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True, sorthalos=False)
         av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
                       ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
         va = av.add_value(write_vahc=True)
