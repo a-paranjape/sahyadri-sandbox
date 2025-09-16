@@ -46,9 +46,8 @@ class SnapshotReader(Utilities,Paths):
         self.subsamples=subsamples
         self.compressed_fileroot='comp_snapshot_{0:03d}'.format(self.snap) 
         
-        self.snapshot_file = self.sim_path + self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap)
-        self.snapdir = self.sim_path + self.sim_stem + '/r'+str(self.real) + '/snapdir_{0:03d}'.format(self.snap)
-
+        self.snapshot_file =  self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap)
+        self.snapdir =  self.sim_stem + '/r'+str(self.real) + '/snapdir_{0:03d}'.format(self.snap)
         #read header only if this is set to true, just so that even if snapshot is not available then we should be able to use this function for rest of the file path defintions
         self.read_header=read_header
         if(self.read_header):
@@ -59,7 +58,7 @@ class SnapshotReader(Utilities,Paths):
             self.snapshot_ext = '.hdf5' 
         elif os.path.exists(self.snapshot_file+'.0.hdf5'):
             self.snapshot_ext = '.0.hdf5'
-        elif(os.path.exists(self.snapdir)): #If snapshots have its own directory [eg: 2048 sahyadri runs]
+        elif(os.path.exists(self.snapdir)):
             if(os.path.exists(self.snapdir+'/snapshot_{0:03d}.hdf5'.format(self.snap))):
                 self.snapshot_file=self.snapdir+'/snapshot_{0:03d}'.format(self.snap)
                 self.snapshot_ext = '.hdf5'
@@ -68,8 +67,9 @@ class SnapshotReader(Utilities,Paths):
                 self.snapshot_ext = '.0.hdf5'
 
         else:
-            raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
-                self.sim_path,self.snapshot_file))
+            #raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
+                #self.sim_path,self.snapshot_file))
+            raise Exception('File not found!\n sim_path=%s'%self.snapdir+'snapshot file:%s'%self.snapshot_file)
 
         if self.verbose:
             self.print_this('Snapshot Reader:\n... preparing to read file: '+self.snapshot_file,self.logfile)
@@ -224,7 +224,7 @@ class SnapshotReader(Utilities,Paths):
         """
         import Nbody_Compression as NbodyCompress 
         if self.verbose:
-            self.print_this('Compressing snapshot data and saving header...', self.logfile)
+            self.print_this(f'{ltime()} Begin Compressing snapshot data and saving header...', self.logfile)
 
         # Ensure header is read
         if not hasattr(self, 'scale'):
@@ -392,7 +392,7 @@ class SnapshotReader(Utilities,Paths):
         else:
             return str(obj)
 
-    def hdf5_to_json(self, output_filename,subsamples):
+    def hdf5_to_json(self, output_filename,compression_dic):
         """
         Read Config, Header, and Parameters groups from the HDF5 file and write them to a JSON file.
         
@@ -465,9 +465,9 @@ class SnapshotReader(Utilities,Paths):
 class HaloReader(SnapshotReader):
     """ Reader for (ROCKSTAR) halo catalog. """
     ###############################################
-    def __init__(self,sim_stem='scm1024',real=1,snap=200,logfile=None,verbose=True):
+    def __init__(self,sim_stem='scm1024',real=1,snap=200,logfile=None,verbose=True,read_header=True):
 
-        SnapshotReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose)
+        SnapshotReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose,read_header=read_header)
 
         self.halocat_stem = self.sim_stem + '/r'+str(self.real)+'/' + 'out_' + str(self.snap)        
 
@@ -577,7 +577,7 @@ class HaloReader(SnapshotReader):
         rootin='out_' + str(self.snap)
 
         #output directory: set this to None if want to use input directory for output
-        outdir=indir
+        outdir=indir+'compressed/'
         #outdir=None
 
         fits_exists=False
@@ -605,7 +605,7 @@ class HaloReader(SnapshotReader):
 
     
     ###############################################
-    def prep_halos(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False, sorthalos=True):
+    def prep_halos(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False, sorthalos=True, sortdef=None):
         """ Reads halo (+ vahc) (+ext propperties only for fits) catalogs for given realisation and snapshot. 
              Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
              where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
@@ -614,11 +614,14 @@ class HaloReader(SnapshotReader):
              Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
              Halos will be sorted by (increasing) massdef.
              use_fits: True then load information from the .fits.gz file otherwise load from the .tree/.vahc files
-             sorthalos: if True, sorts the halos based on massdef. otherwise keeps the ordering like the input file. Default is True
+             sorthalos: if True, sorts the halos based on sortdef. otherwise keeps the ordering like the input file. Default is True
+             sortdef: the property of the halo based on which they are sorted. If none, taken to be massdef
         """
+        if sortdef is None:
+            sortdef=massdef
 
         if(use_fits):
-            return self.prep_halos_fits(va=va,ext=ext,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos, sorthalos=sorthalos)
+            return self.prep_halos_fits(va=va,ext=ext,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos, sorthalos=sorthalos, sortdef=sortdef)
 
         if self.verbose:
             self.print_this("... preparing halo data",self.logfile)
@@ -664,8 +667,8 @@ class HaloReader(SnapshotReader):
         
         if (sorthalos is True):
             if self.verbose:
-                self.print_this("... ... sorting by "+massdef,self.logfile)
-            sorter = halos[massdef].argsort()
+                self.print_this("... ... sorting by "+sortdef,self.logfile)
+            sorter = halos[sortdef].argsort()
             halos = halos[sorter]
             hpos = hpos[sorter]
             if va:
@@ -676,11 +679,15 @@ class HaloReader(SnapshotReader):
 
         return (hpos,halos,vahc) if va else (hpos,halos)
     ###############################################
+    def fits_basic_exits(self):
+        '''Tests if the basic fits file already exists of not'''
+        halo_basic=self.halo_path + self.halocat_stem + '_basic.fits.gz'
+        return os.path.isfile(halo_basic)
 
 
     ###############################################
     #prepare halos with fits
-    def prep_halos_fits(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False, sorthalos=True):
+    def prep_halos_fits(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False, sorthalos=True, sortdef=None):
             """ Reads halo (+ vahc using va=True) (+extended properties using ext=True) catalogs for given realisation and snapshot. 
                  Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
                  where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
@@ -689,6 +696,8 @@ class HaloReader(SnapshotReader):
                  Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
                  Halos will be sorted by (increasing) massdef.
                  sorthalos: sorts halos according to massdef if set to True. Default is True
+                 sortdef: the property of the halo based on which they are sorted. If none, taken to be massdef
+
             """
 
             #make sure mass definition follow the same convention as in the header/fits
@@ -754,8 +763,8 @@ class HaloReader(SnapshotReader):
 
             if (sorthalos is True):
                 if self.verbose:
-                    self.print_this("... ... sorting by "+massdef,self.logfile)
-                sorter = halos[massdef].argsort()
+                    self.print_this("... ... sorting by "+sortdef,self.logfile)
+                sorter = halos[sortdef].argsort()
                 halos = halos[sorter]
                 hpos = hpos[sorter]
                 if va:
