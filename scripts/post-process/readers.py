@@ -33,7 +33,6 @@ class SnapshotReader(Utilities,Paths):
         '''use_compressed will read using compressed files, in this case one could give a series of subsamples to accumulate all the file for outputs. This should match the subsamples given while compressing'''
         # code below inspired by Pylians (https://github.com/franciscovillaescusa/Pylians3/blob/master/library/readgadget.py)
         # and simplified to focus on Gadget-4 HDF5 snapshots.
-        
         Paths.__init__(self)
         Utilities.__init__(self)
         
@@ -47,8 +46,8 @@ class SnapshotReader(Utilities,Paths):
         self.subsamples=subsamples
         self.compressed_fileroot='comp_snapshot_{0:03d}'.format(self.snap) 
         
-        self.snapshot_file = self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap)
-        self.snapdir = self.sim_stem + '/r'+str(self.real) + '/snapdir_{0:03d}'.format(self.snap)
+        self.snapshot_file = self.sim_path + self.sim_stem + '/r'+str(self.real) + '/snapshot_{0:03d}'.format(self.snap)
+        self.snapdir = self.sim_path + self.sim_stem + '/r'+str(self.real) + '/snapdir_{0:03d}'.format(self.snap)
 
         #read header only if this is set to true, just so that even if snapshot is not available then we should be able to use this function for rest of the file path defintions
         self.read_header=read_header
@@ -60,16 +59,18 @@ class SnapshotReader(Utilities,Paths):
             self.snapshot_ext = '.hdf5' 
         elif os.path.exists(self.snapshot_file+'.0.hdf5'):
             self.snapshot_ext = '.0.hdf5'
-        elif(os.path.exists(self.snapdir)): #If snapshots have its own directory [eg: 2048 sahyadri runs]
+        elif(os.path.exists(self.snapdir)):
             if(os.path.exists(self.snapdir+'/snapshot_{0:03d}.hdf5'.format(self.snap))):
                 self.snapshot_file=self.snapdir+'/snapshot_{0:03d}'.format(self.snap)
                 self.snapshot_ext = '.hdf5'
             elif(os.path.exists(self.snapdir+'/snapshot_{0:03d}.0.hdf5'.format(self.snap))):
                 self.snapshot_file=self.snapdir+'/snapshot_{0:03d}'.format(self.snap)
                 self.snapshot_ext = '.0.hdf5'
+
         else:
             raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
                 self.sim_path,self.snapshot_file))
+
         if self.verbose:
             self.print_this('Snapshot Reader:\n... preparing to read file: '+self.snapshot_file,self.logfile)
             
@@ -77,6 +78,7 @@ class SnapshotReader(Utilities,Paths):
             header_info=self.read_compressed_header()
             self.compression_dic=header_info['Header']['compression_dic']
             self.subsamples=self.compression_dic['subsamples']
+
         else:
             f = h5py.File(self.snapshot_file+self.snapshot_ext,'r')
             header_info={}
@@ -112,7 +114,7 @@ class SnapshotReader(Utilities,Paths):
 
     ###############################################
     def read_block(self,block='pos',down_to=0,seed=None,subsamples=[],raw_nfile=[]):
-        """ Read positions, velocities or IDs of one complete snapshot. 
+        """ Read positions, velocities or IDs of one complete snapshot.
         if use_compressed =True then you can use subsamples list to select which subsample to read, by default it will read all the subsamples
         if use_compressed=False and snapshot is in multiple files then you can use raw_nfile to chose which files to read, by default it will read all file. This is relevant only for simulations with multiple file per snapshot"""
         if block not in ['pos','vel','ids','potential']:
@@ -124,7 +126,7 @@ class SnapshotReader(Utilities,Paths):
                 subsamples=self.subsamples
             res_dic=self.load_compressed(subsamples,load_quant=[transform_quant[block]])
             return res_dic[transform_quant[block]]
-        #Rest of the function execute only for raw uncompressed files
+
         prefix = 'PartType%d/'%self.ptype
         if block == 'pos':
             suffix = 'Coordinates'
@@ -229,10 +231,10 @@ class SnapshotReader(Utilities,Paths):
             self.read_snapshot_header()
 
         # Prepare the full path for compressed files
-        compressed_path = os.path.join(self.sim_path, self.sim_stem, f'r{self.real}', 'compressed')
+        compressed_path = self.sim_path +  os.path.join(self.sim_stem, f'r{self.real}', 'compressed')
         os.makedirs(compressed_path, exist_ok=True)
         full_fileroot = os.path.join(compressed_path, self.compressed_fileroot)
-
+        
 
         # Compression related setting
         Ndata=self.npart
@@ -252,14 +254,15 @@ class SnapshotReader(Utilities,Paths):
             json_data=self.hdf5_to_json(json_filename,compression_dic)
             if self.verbose:
                 self.print_this(f'{ltime()} Snapshot information saved to: {json_filename}', self.logfile)
-        
+
 
 
         # Create subsamples
         subsample_indices = NbodyCompress.create_subsamples(Ndata, subsamples)
-        self.print_this('{ltime()} Created Subsample indices',self.logfile)
-        for ii, indices in enumerate(subsample_indices):
-            self.print_this(f'{ltime()} sub {subsamples[ii]}, {indices.size} {indices.min()} {indices.max()}',self.logfile)
+        self.print_this(f'{ltime()} Created Subsample indices',self.logfile)
+        #for ii, indices in enumerate(subsample_indices):
+        #    self.print_this(f'{ltime()} sub {subsamples[ii]}, {indices.size} {indices.min()} {indices.max()}',self.logfile)
+
        
         transform_quant={'positions':'pos','velocities':'vel','potentials':'potential','ids':'ids'}
         sort_indices_dic={}
@@ -272,6 +275,7 @@ class SnapshotReader(Utilities,Paths):
                 original_quant= original_quant.T
             tmp_shape=original_quant.shape
             self.print_this(f'{ltime()} Loaded raw values of {quant}, array shape {tmp_shape}',self.logfile)
+
 
             # Compress and save each subsample
             for ii, indices in enumerate(subsample_indices):
@@ -288,44 +292,46 @@ class SnapshotReader(Utilities,Paths):
                 attribute_dic={'Ndata':indices.size,'L':Lbox,'Ngrid':Ngrid,'ref_snapshot':ref_snapshot,
                          'vmax':vmax,'pmax':pmax,'subsamp_percent':subsamples[ii],
                          'little_endian':little_endian,'byteorder':sys.byteorder}
-                
+
                 chunk_size=int(0.1*indices.size)
                 if(chunk_size%2==1):
                     chunk_size=chunk_size+1
 
                 if(quant=='positions'):
                     if(not optimized):
-                        compressed_quant,full_counts_dic, sort_indices_dic[ii]=NbodyCompress.compress_nbody_data(original_quant[indices], 
+                        compressed_quant,full_counts_dic, sort_indices_dic[ii]=NbodyCompress.compress_nbody_data(original_quant[indices],
                           Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
                           full_count_bit_depth=full_count_bit_depth,little_endian=little_endian,npart=self.npart)
                     else:
                         self.print_this(f'Using optimized version of compression for positions chunk_size={chunk_size}',self.logfile)
-                        compressed_quant,full_counts_dic, sort_indices_dic[ii]=NbodyCompress.compress_nbody_data_optimized(original_quant[indices], 
+                        compressed_quant,full_counts_dic, sort_indices_dic[ii]=NbodyCompress.compress_nbody_data_optimized(original_quant[indices],
                           Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
                           full_count_bit_depth=full_count_bit_depth,little_endian=little_endian,npart=self.npart,chunk_size=chunk_size)
                     attribute_dic['full_count_bit_depth']=full_count_bit_depth
                     attribute_dic['full_count_dtype']= '%s'%full_counts_dic['dtype']
                 else:
                     if(not optimized):
-                        compressed_quant=NbodyCompress.compress_nbody_data(original_quant[indices], 
+                        compressed_quant=NbodyCompress.compress_nbody_data(original_quant[indices],
                           Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
                           full_count_bit_depth=full_count_bit_depth,little_endian=little_endian,npart=self.npart)
                     else:
                         self.print_this(f'Using optimized version of compression for {quant} chunk_size={chunk_size}',self.logfile)
-                        compressed_quant=NbodyCompress.compress_nbody_data_optimized(original_quant[indices], 
+                        compressed_quant=NbodyCompress.compress_nbody_data_optimized(original_quant[indices],
                           Lbox, Ngrid, vmax, pmax,quant=quant,sort_indices=sort_indices_dic[ii],
                           full_count_bit_depth=full_count_bit_depth,little_endian=little_endian,npart=self.npart,chunk_size=chunk_size)
                     full_counts_dic=None
-                    
-                NbodyCompress.save_compressed_data(file_prefix, compressed_quant, attribute_dic, 
+
+                NbodyCompress.save_compressed_data(file_prefix, compressed_quant, attribute_dic,
                                               full_counts_dic=full_counts_dic, quant=quant,verbose=False)
+
                 if self.verbose:
                     this_fname=NbodyCompress.compressed_filename(file_prefix, quant)
                     self.print_this(f'{ltime()} sub-{ii} Compression complete {this_fname}', self.logfile)
-        
+
 
         return
         #end of compression function
+
 
     def load_compressed(self, subsamples,load_quant=['positions','velocities','potentials','ids']):
         """
@@ -344,7 +350,7 @@ class SnapshotReader(Utilities,Paths):
 
 
         # Prepare the full path for compressed files
-        compressed_path = os.path.join(self.sim_path, self.sim_stem, f'r{self.real}', 'compressed')
+        compressed_path = self.sim_path + os.path.join(self.sim_stem, f'r{self.real}', 'compressed')
         full_fileroot = os.path.join(compressed_path, self.compressed_fileroot)
 
         decomp_dic={}
@@ -353,7 +359,6 @@ class SnapshotReader(Utilities,Paths):
             for ii, indices in enumerate(subsamples):
                 subsample_dir=f"{compressed_path}/subsample{subsamples[ii]}/"
                 this_root=f"{subsample_dir}/{self.compressed_fileroot}_subsample{subsamples[ii]}"
-                #this_root=f"{full_fileroot}_subsample{subsamples[ii]}"
                 if(qq==0 and ii==0):
                     attribute_dic = NbodyCompress.load_compressed_data(this_root,load_quant=['attributes'])
                 tmp_dic = NbodyCompress.decompress_nbody_data(this_root,subsamples[ii], attribute_dic,load_quant=[quant])
@@ -387,7 +392,7 @@ class SnapshotReader(Utilities,Paths):
         else:
             return str(obj)
 
-    def hdf5_to_json(self, output_filename,compression_dic):
+    def hdf5_to_json(self, output_filename,subsamples):
         """
         Read Config, Header, and Parameters groups from the HDF5 file and write them to a JSON file.
         
@@ -418,6 +423,7 @@ class SnapshotReader(Utilities,Paths):
                             data = dset[:]
                             json_data[group_name][dset_name] = self.json_serializable(data)
         #Also add the subsamples in the header
+        json_data['Header']['subsamples']= subsamples
         json_data['Header']['compression_dic']= compression_dic
         # Write to JSON file
         with open(output_filename, 'w') as json_file:
@@ -438,7 +444,7 @@ class SnapshotReader(Utilities,Paths):
         Returns:
         dict: Header information
         """
-        compressed_path = os.path.join(self.sim_path, self.sim_stem, f'r{self.real}', 'compressed')
+        compressed_path = self.sim_path + os.path.join(self.sim_stem, f'r{self.real}', 'compressed')
         header_file = os.path.join(compressed_path, f"{self.compressed_fileroot}_info.json")
         
         if not os.path.exists(header_file):
@@ -459,9 +465,9 @@ class SnapshotReader(Utilities,Paths):
 class HaloReader(SnapshotReader):
     """ Reader for (ROCKSTAR) halo catalog. """
     ###############################################
-    def __init__(self,sim_stem='scm1024',real=1,snap=200,logfile=None,verbose=True):
+    def __init__(self,sim_stem='scm1024',real=1,snap=200,logfile=None,verbose=True,read_header=True):
 
-        SnapshotReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose)
+        SnapshotReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose,read_header=read_header)
 
         self.halocat_stem = self.sim_stem + '/r'+str(self.real)+'/' + 'out_' + str(self.snap)        
 
@@ -571,7 +577,7 @@ class HaloReader(SnapshotReader):
         rootin='out_' + str(self.snap)
 
         #output directory: set this to None if want to use input directory for output
-        outdir=indir
+        outdir=indir+'compressed/'
         #outdir=None
 
         fits_exists=False
@@ -597,9 +603,9 @@ class HaloReader(SnapshotReader):
             return
     ###############################################
 
-    
+
     ###############################################
-    def prep_halos(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False):
+    def prep_halos(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False,use_fits=False, sorthalos=True, sortdef=None):
         """ Reads halo (+ vahc) (+ext propperties only for fits) catalogs for given realisation and snapshot. 
              Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
              where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
@@ -608,10 +614,14 @@ class HaloReader(SnapshotReader):
              Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
              Halos will be sorted by (increasing) massdef.
              use_fits: True then load information from the .fits.gz file otherwise load from the .tree/.vahc files
+             sorthalos: if True, sorts the halos based on sortdef. otherwise keeps the ordering like the input file. Default is True
+             sortdef: the property of the halo based on which they are sorted. If none, taken to be massdef
         """
+        if sortdef is None:
+            sortdef=massdef
 
         if(use_fits):
-            return self.prep_halos_fits(va=va,ext=ext,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos)
+            return self.prep_halos_fits(va=va,ext=ext,QE=QE,massdef=massdef,Npmin=Npmin,keep_subhalos=keep_subhalos, sorthalos=sorthalos, sortdef=sortdef)
 
         if self.verbose:
             self.print_this("... preparing halo data",self.logfile)
@@ -654,24 +664,30 @@ class HaloReader(SnapshotReader):
         del cond_clean
         gc.collect()
 
-        if self.verbose:
-            self.print_this("... ... sorting by "+massdef,self.logfile)
-        sorter = halos[massdef].argsort()
-        halos = halos[sorter]
-        hpos = hpos[sorter]
-        if va:
-            vahc = vahc[sorter]
+        
+        if (sorthalos is True):
+            if self.verbose:
+                self.print_this("... ... sorting by "+sortdef,self.logfile)
+            sorter = halos[sortdef].argsort()
+            halos = halos[sorter]
+            hpos = hpos[sorter]
+            if va:
+                vahc = vahc[sorter]
 
-        del sorter
+            del sorter
         gc.collect()
 
         return (hpos,halos,vahc) if va else (hpos,halos)
     ###############################################
+    def fits_basic_exits(self):
+        '''Tests if the basic fits file already exists of not'''
+        halo_basic=self.halo_path + self.halocat_stem + '_basic.fits.gz'
+        return os.path.isfile(halo_basic)
 
 
     ###############################################
     #prepare halos with fits
-    def prep_halos_fits(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False):
+    def prep_halos_fits(self,va=False,ext=False,QE=0.5,massdef='mvir',Npmin=100,keep_subhalos=False, sorthalos=True, sortdef=None):
             """ Reads halo (+ vahc using va=True) (+extended properties using ext=True) catalogs for given realisation and snapshot. 
                  Cleans catalog by selecting relaxed objects in range max(0,1-QE) <= 2T/|U| <= 1+QE 
                  where QE > 0 (default QE=0.5; Bett+07). Use QE=None to skip cleaning.
@@ -679,7 +695,12 @@ class HaloReader(SnapshotReader):
                  Optionally removes subhalos (set keep_subhalos=False).
                  Returns array of shape (Ndata,3) for positions (Mpc/h); structured array(s) for full halo properties (+ vahc).
                  Halos will be sorted by (increasing) massdef.
+                 sorthalos: sorts halos according to massdef if set to True. Default is True
+                 sortdef: the property of the halo based on which they are sorted. If none, taken to be massdef
             """
+            if sortdef is None:
+                sortdef=massdef
+
 
             #make sure mass definition follow the same convention as in the header/fits
             if(massdef[0]=='m'):
@@ -742,15 +763,16 @@ class HaloReader(SnapshotReader):
             del cond_clean
             gc.collect()
 
-            if self.verbose:
-                self.print_this("... ... sorting by "+massdef,self.logfile)
-            sorter = halos[massdef].argsort()
-            halos = halos[sorter]
-            hpos = hpos[sorter]
-            if va:
-                vahc = vahc[sorter]
+            if (sorthalos is True):
+                if self.verbose:
+                    self.print_this("... ... sorting by "+sortdef,self.logfile)
+                sorter = halos[sortdef].argsort()
+                halos = halos[sorter]
+                hpos = hpos[sorter]
+                if va:
+                    vahc = vahc[sorter]
 
-            del sorter
+                del sorter
             gc.collect()
             fbasic.close()
 
