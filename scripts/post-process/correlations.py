@@ -215,7 +215,7 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
             cf = np.zeros((self.L_Max,self.n_s),dtype=float)
             for L in range(self.L_Max):
                 ell = 2*L
-                cf[L] = 0.5*(2*ell+1)*np.trapezoid(self.Pell[L]*cf_s,dx=self.dmu)
+                cf[L] = 0.5*(2*ell+1)*np.trapezoid(self.Pell[L]*cf_s,dx=self.dmu,axis=1)
         else:
             cf = 1.0*cf_s
 
@@ -333,16 +333,23 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
 class PowerSpectrum(Utilities,Paths,Constants):
     """ Power spectrum and various (Fourier) fields from particle data in cubic periodic box. """    
     ###############################################
-    def __init__(self,grid=256,Lbox=200.0,lgbin=True,nbin=30,KSEP=3,NFAC=10,logfile=None,verbose=True):
+    def __init__(self,grid=256,Lbox=200.0,lgbin=True,nbin=30,KSEP=3,NFAC=10,logfile=None,verbose=True,
+                 kmin=None,kmax=None,anisotropic=False,n_mu=161,los=2,L_Max=3):
         """ Initialise the following:
             -- grid: resolution at which to compute density in case of particles
             -- Lbox: box size along one dimension
-            -- lgbin: use logarithmic (True, default) or linear+log (False) binning
+            -- lgbin: use logarithmic (True, default) or linear+log (False) or linear (None) binning
             -- nbin: number of bins in k
+            -- kmin,kmax: if not None, should be floats giving min,max of k range for Pk binning.
             -- KSEP: dynamic range separator for linear+log binning.
             -- NFAC: factor to separate number of bins for linear+log binning.
+            -- anisotropic: bool. if True, set up arrays for anisotropic power spectrum calculation
+            below only used if anisotropic==True
+            -- n_mu : number of bins in mu, for anisotropic power spectrum (converged at 161). 
+            -- los : int 0,1,2, line of sight direction
+            -- L_Max : int >= 1, number of even multipoles to return
             Additionally defines the variables/arrays:
-            cell_size,Delta_k,kmin,kmax,kbin,ktab,(dlnk or dk)
+            cell_size,Delta_k,kmin,kmax,kbin,ktab,(dlnk or dk) [mubin,mutab (if anisotropic==True)]
             Methods: 
             density_field,fourier_transform_density,
             tidal_tensor_field,density_hessian_field,Pk_grid            
@@ -368,15 +375,35 @@ class PowerSpectrum(Utilities,Paths,Constants):
         self.cell_size = self.Lbox/self.grid
         self.Delta_k = 2*np.pi/self.Lbox
         self.grid_inv = 2*np.pi/self.grid
+
+        self.anisotropic = anisotropic
+        self.n_mu = n_mu
+        self.los = los
+        self.L_Max = L_Max
+        if self.anisotropic:
+            self.mubin = np.linspace(-1.0,1.0,self.n_mu+1)
+            self.mutab = 0.5*(self.mubin[1:]+self.mubin[:-1])
+            self.dmu = self.mubin[1] - self.mubin[0] 
+            self.Pell = np.ones((self.L_Max,self.n_mu),dtype=float)
+            for L in range(self.L_Max):
+                self.Pell[L] = sysp.legendre_p(2*L,self.mutab)[0]
         
-        self.kmin = 1.0*self.Delta_k
+        self.kmin = 1.0*self.Delta_k if kmin is None else kmin
         self.kNy = np.pi/self.cell_size # don't change this!
-        if self.lgbin:
+        self.kmax = 1.0*self.kNy if kmax is None else kmax
+        if self.lgbin is None:
+            if self.verbose:
+                self.print_this('... using linear binning',self.logfile)
+            self.kbin = np.linspace(self.kmin,self.kmax,self.nbin+1)
+            self.dk = self.kbin[1] - self.kbin[0]
+            self.ktab = 0.5*(self.kbin[1:]+self.kbin[:-1])            
+        elif self.lgbin:
             if self.verbose:
                 self.print_this('... using log binning',self.logfile)
-            self.dlnk = np.log(self.kNy/self.kmin)/(self.nbin)
+            self.dlnk = np.log(self.kmax/self.kmin)/(self.nbin)
             self.kbin = self.kmin*np.exp(self.dlnk*np.arange(self.nbin+1,dtype=float))
             self.ktab = np.sqrt(self.kbin[1:]*self.kbin[:-1])
+            self.dlnk = np.log(self.kbin[1]/self.kbin[0])
         else:
             if self.dynran > self.KSEP: 
                 self.KSEP = int(self.dynran/2) 
@@ -406,7 +433,6 @@ class PowerSpectrum(Utilities,Paths,Constants):
         self.krange = np.arange(self.grid,dtype=int)
         self.K1,self.K2,self.K3 = np.meshgrid(self.krange,self.krange,self.krange,
                                               sparse=True,indexing='ij')
-
         # map upper half axes to negative values
         self.K1[self.K1 >= self.grid/2] = self.K1[self.K1 >= self.grid/2] - self.grid
         self.K2[self.K2 >= self.grid/2] = self.K2[self.K2 >= self.grid/2] - self.grid
@@ -426,22 +452,58 @@ class PowerSpectrum(Utilities,Paths,Constants):
         self.KK = self.K1**2 + self.K2**2 + self.K3**2
         # shape (~grid,~grid,~grid)
 
+        if self.anisotropic:
+            # self.MU = self.K1.copy() if self.los==0 else (self.K2.copy() if self.los==1 else self.K3.copy())
+            # self.MU = self.MU/np.sqrt(self.KK + self.TINY)
+            if self.los==0:
+                self.MU = self.K1/np.sqrt(self.KK + self.TINY)
+            elif self.los==1:
+                self.MU = self.K2/np.sqrt(self.KK + self.TINY)
+            elif self.los==2:
+                self.MU = self.K3/np.sqrt(self.KK + self.TINY)
+
         if self.verbose:
             self.print_this('... setting up index arrays',self.logfile)
 
-        self.IND = [[]]
-        for k in range(self.nbin-1):
+        self.IND = []
+        for k in range(self.nbin):
             self.IND.append([])
             
+        if self.anisotropic:
+            self.IND_MU = []
+            for k in range(self.nbin):
+                ind = []
+                for mu in range(self.n_mu):
+                    ind.append([])
+                self.IND_MU.append(ind)
+                ind = None
+            
         self.I_SIZE = np.zeros(self.nbin,dtype=int)
+        if self.anisotropic:
+            self.I_MU_SIZE = np.zeros((self.nbin,self.n_mu),dtype=int)
+            
         for k in range(self.nbin):
             cond = ((self.KK >= self.k2_compare[k]) & (self.KK < self.k2_compare[k+1]))
             self.IND[k] = np.where(cond)
             self.I_SIZE[k] = self.IND[k][0].size
             del cond
-            gc.collect()
+            gc.collect()            
         self.I_SIZE_MAX = np.max(self.I_SIZE)
 
+        if self.anisotropic:
+            for k in range(self.nbin):
+                cond_k = ((self.KK >= self.k2_compare[k]) & (self.KK < self.k2_compare[k+1]))
+                for mu in range(self.n_mu):
+                    cond_last = (self.MU < self.mubin[mu+1]) if mu != self.n_mu-1 else (self.MU <= self.mubin[mu+1])
+                    cond = cond_k & (self.MU >= self.mubin[mu]) & cond_last
+                    self.IND_MU[k][mu] = np.where(cond)
+                    self.I_MU_SIZE[k,mu] = self.IND_MU[k][mu][0].size
+                    cond = None
+                    cond_last = None
+                cond_k = None
+                gc.collect()            
+            self.I_MU_SIZE_MAX = np.max(self.I_MU_SIZE)
+        
         if self.verbose:
             self.print_this('... done with setup',self.logfile)
     ###############################################
@@ -700,21 +762,27 @@ class PowerSpectrum(Utilities,Paths,Constants):
         
 
     ###############################################
-    def Pk_grid(self,input_array,input_array2=None,input_is_density=False,input_is_FTdensity=False,CIC=True):
+    def Pk_grid(self,input_array,input_array2=None,input_is_density=False,input_is_FTdensity=False,
+                CIC=True,aniso=False,nbar=None):
         """ Use FFT to compute Fourier transform of density and its power spectrum. 
 
             Assumes density.shape = (self.grid,self.grid,self.grid); density is real.
             If input is positions, then density is computed using self.density_field
 
-            Returns P(k) = |FTdensity|^2 or Re(FTdensity.FTdensity2*) on self.ktab.
+            Returns 
+            -- aniso=False:    P(k) = |FTdensity|^2 or Re(FTdensity.FTdensity2*) on self.ktab.
+            -- aniso=True : P_ell(k) = |FTdensity|^2 or Re(FTdensity.FTdensity2*) on self.ktab for ell=2L with L in range(self.L_Max).
+            Note: aniso is separate from self.anisotropic so as to allow isotropic and anisotropic calculations simultaneously.
         """
 
         cross = False if input_array2 is None else True
-
-        # density = input_array if input_is_density else self.density_field(input_array)
-        # if self.logfile==None: print '... Fourier transforming field 1'
-        # else: writelog(self.logfile,'... Fourier transforming field 1\n')
-        # FTdensity = self.fourier_transform_density(density)
+        
+        # for auto power, we may need externally specified number density for shot-noise subtraction
+        if (nbar is None) & (input_array2 is None):
+            if (input_is_density | input_is_FTdensity):
+                raise Exception("Please specify number density nbar [in same units as 1/Lbox^3] for shot-noise subtraction!")
+            else:
+                nbar = input_array.shape[1]/self.Lbox**3
 
         if not input_is_FTdensity:
             density = input_array if input_is_density else self.density_field(input_array)
@@ -724,9 +792,15 @@ class PowerSpectrum(Utilities,Paths,Constants):
         else:
             FTdensity = input_array
 
-        density_k = np.zeros((self.nbin,self.I_SIZE_MAX),dtype=complex)
-        for k in range(self.nbin):
-            density_k[k,:self.I_SIZE[k]] = FTdensity[self.IND[k]]
+        if aniso:
+            density_k = np.zeros((self.nbin,self.n_mu,self.I_MU_SIZE_MAX),dtype=complex)
+            for k in range(self.nbin):
+                for mu in range(self.n_mu):
+                    density_k[k,mu,:self.I_MU_SIZE[k,mu]] = FTdensity[self.IND_MU[k][mu]]
+        else:
+            density_k = np.zeros((self.nbin,self.I_SIZE_MAX),dtype=complex)
+            for k in range(self.nbin):
+                density_k[k,:self.I_SIZE[k]] = FTdensity[self.IND[k]]
         del FTdensity
         gc.collect()
 
@@ -739,28 +813,39 @@ class PowerSpectrum(Utilities,Paths,Constants):
             else:
                 FTdensity2 = np.conjugate(input_array2)
 
-            # density2 = input_array2 if input_is_density else self.density_field(input_array2)
-            # if self.verbose:
-            #     if self.logfile==None: print '... Fourier transforming field 2'
-            #     else: writelog(self.logfile,'... Fourier transforming field 2\n')
-            # FTdensity2 = np.conjugate(self.fourier_transform_density(density2))
-
-            density2_k = np.zeros((self.nbin,self.I_SIZE_MAX),dtype=complex)
-            for k in range(self.nbin):
-                density2_k[k,:self.I_SIZE[k]] = FTdensity2[self.IND[k]]
+            if aniso:
+                density2_k = np.zeros((self.nbin,self.n_mu,self.I_MU_SIZE_MAX),dtype=complex)
+                for k in range(self.nbin):
+                    for mu in range(self.n_mu):
+                        density2_k[k,mu,:self.I_MU_SIZE[k,mu]] = FTdensity2[self.IND_MU[k][mu]]
+            else:
+                density2_k = np.zeros((self.nbin,self.I_SIZE_MAX),dtype=complex)
+                for k in range(self.nbin):
+                    density2_k[k,:self.I_SIZE[k]] = FTdensity2[self.IND[k]]
             del FTdensity2
             gc.collect()
 
         if self.verbose:
-            self.print_this('... calculating P(k)',self.logfile)
-        Pk = np.zeros(self.nbin,dtype=float)
+            Pkstr = 'P(k,mu) multipoles' if aniso else 'P(k)'
+            self.print_this('... calculating '+Pkstr,self.logfile)
 
-        Pk = (np.sum(np.absolute(density_k)**2,axis=1)
+        Pk = (np.sum(np.absolute(density_k)**2,axis=-1)
               if not cross else
-              np.sum(np.real(density_k*density2_k),axis=1))
+              np.sum(np.real(density_k*density2_k),axis=-1))
 
-        Pk *= self.Lbox**3/(self.I_SIZE + self.TINY)
+        if aniso:
+            Pkmu = Pk.copy()
+            Pk = np.zeros((self.L_Max,self.nbin),dtype=float)
+            for L in range(self.L_Max):
+                ell = 2*L
+                Pk[L] = (2*ell+1)*np.sum(self.Pell[L]*Pkmu,axis=1) # sum (instead of 0.5*trapezoid) ensures correct masking of empty bins.
 
+        Pk *= self.Lbox**3/(self.I_SIZE + self.TINY) # works for iso and aniso
+        if aniso:
+            Pk[0] -= 1/nbar # shot-noise is isotropic
+        else:
+            Pk -= 1/nbar
+        
         del density_k
         if cross:
             del density2_k
