@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Technical Details — Sahyadri</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="site-nav"></div>
+
+<div class="page-wrapper">
+
+  <!-- Specs -->
+  <div class="section">
+    <h2 class="section-title">Technical Specifications</h2>
+    <p class="section-sub">Detailed specifications of the Sahyadri simulation suite.</p>
+    <hr class="section-rule">
+
+    <div class="grid-2" style="gap:24px">
+      <div class="card card-flat">
+        <div class="card-title accent-text" style="margin-bottom:14px">Simulation Setup</div>
+        <table class="spec-table">
+          <tr><td>Box Size</td><td>200 h⁻¹ Mpc (periodic)</td></tr>
+          <tr><td>Particles</td><td>2048³ dark matter</td></tr>
+          <tr><td>Particle Mass</td><td>8.1 × 10⁷ h⁻¹ M☉</td></tr>
+          <tr><td>Min Halo Mass</td><td>3.2 × 10⁹ h⁻¹ M☉</td></tr>
+          <tr><td>Resolution Threshold</td><td>40 particles</td></tr>
+          <tr><td>Snapshots</td><td>101 (z=12 → z=0)</td></tr>
+          <tr><td>N-body Code</td><td>GADGET-4</td></tr>
+          <tr><td>Halo Finder</td><td>Rockstar (phase-space)</td></tr>
+          <tr><td>Baseline Cosmology</td><td>Planck 2018</td></tr>
+        </table>
+      </div>
+
+      <div class="card card-flat">
+        <div class="card-title accent-text" style="margin-bottom:14px">Storage &amp; Compression</div>
+        <div class="mono-info">
+          <div>Per simulation: <strong class="text-strong">~8.6 TB</strong> (with IDs)</div>
+          <div>Total suite: <strong class="text-strong">~110 TB</strong></div>
+        </div>
+        <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border-light)">
+          <div style="font-weight:600;font-size:14px;color:var(--orange);margin-bottom:10px">Custom Compression</div>
+          <div class="mono-info">
+            <div>Positions: <span class="accent-text">8-bit</span> encoding</div>
+            <div>Velocities: <span class="accent-text">12-bit</span> encoding</div>
+            <div>Compression ratio: <span class="green-text">3× reduction</span></div>
+            <div>Accuracy loss: <span class="green-text">&lt;1%</span></div>
+            <div>Subsample partitioning enabled</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Resolution Comparison -->
+  <div class="section">
+    <h2 class="section-title">Resolution Comparison</h2>
+    <hr class="section-rule">
+
+    <div class="card card-flat" style="max-width:560px">
+      <div class="res-bar-wrap">
+        <div class="res-bar-label">
+          <span>Sahyadri</span>
+          <span>8.1 × 10⁷ h⁻¹M☉ (1×)</span>
+        </div>
+        <div class="res-bar-track"><div class="res-bar-fill" style="width:100%;background:var(--accent)"></div></div>
+      </div>
+      <div class="res-bar-wrap">
+        <div class="res-bar-label">
+          <span>AbacusSummit</span>
+          <span>~2 × 10⁹ h⁻¹M☉ (~25×)</span>
+        </div>
+        <div class="res-bar-track"><div class="res-bar-fill" style="width:55%;background:var(--orange)"></div></div>
+      </div>
+      <div class="res-bar-wrap">
+        <div class="res-bar-label">
+          <span>Quijote</span>
+          <span>~8 × 10⁹ h⁻¹M☉ (&gt;100×)</span>
+        </div>
+        <div class="res-bar-track"><div class="res-bar-fill" style="width:18%;background:#d32f2f"></div></div>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:12px;line-height:1.6">
+        Bar width represents relative resolving power (inversely proportional to particle mass). Longer is better.
+      </p>
+    </div>
+  </div>
+
+  <!-- Redshift Coverage -->
+  <div class="section">
+    <h2 class="section-title">Redshift Coverage</h2>
+    <p class="section-sub">101 snapshots provide dense temporal coverage from early times to the present day.</p>
+    <hr class="section-rule">
+
+    <div class="card card-flat">
+      <div style="display:flex;align-items:center;gap:12px;padding:8px 0;flex-wrap:wrap">
+        <span class="mono" style="font-size:12px;color:var(--text-muted);white-space:nowrap">z = 12</span>
+        <div style="flex:1;min-width:200px;height:10px;border-radius:5px;background:linear-gradient(90deg,#c8dde644 0%,#c8dde6 40%,var(--accent) 100%)"></div>
+        <span class="mono" style="font-size:12px;color:var(--accent);white-space:nowrap">z = 0</span>
+      </div>
+      <p class="card-text mt-20">
+        The primary science target lies at z &lt; 0.5, corresponding to the volume probed by
+        DESI BGS and 4MOST surveys. Dense snapshot spacing in this regime enables detailed
+        studies of late-time cosmic evolution, merger histories, and environmental processes.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<div id="site-footer"></div>
+<script src="js/main.js"></script>
+</body>
+</html>

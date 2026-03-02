@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Overview — Sahyadri</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="site-nav"></div>
+
+<div class="page-wrapper">
+
+  <!-- About -->
+  <div class="section">
+    <h2 class="section-title">About Sahyadri</h2>
+    <p class="section-sub">A suite of high-resolution N-body simulations designed for the next generation of galaxy surveys.</p>
+    <hr class="section-rule">
+
+    <div class="grid-2">
+      <div>
+        <p class="card-text" style="margin-bottom:14px">
+          Sahyadri is a suite of high-resolution N-body simulations targeting precision studies
+          of the low-redshift Universe (z &lt; 0.5). Named after the Sahyadri mountain range
+          (Western Ghats) of India, the suite is designed to complement next-generation
+          spectroscopic surveys including DESI Bright Galaxy Survey (BGS) and 4MOST.
+        </p>
+        <p class="card-text">
+          The suite bridges a critical gap: existing parameter-varying simulation suites
+          either prioritize large volumes at lower resolution (like Quijote and AbacusSummit)
+          or focus on detailed galaxy physics in small volumes. Sahyadri achieves the mass
+          resolution needed to resolve the faintest galaxies targeted by DESI BGS while
+          varying cosmological parameters for derivative-based inference.
+        </p>
+      </div>
+      <div class="card card-flat card-accent">
+        <div class="card-title accent-text">Key Advantage</div>
+        <p class="card-text" style="margin-bottom:16px">
+          Sahyadri resolves approximately <strong class="accent-text">40% more DESI BGS galaxies</strong> at z &lt; 0.15
+          than existing parameter-varying suites, corresponding to roughly
+          <strong class="accent-text">1.6 million additional galaxies</strong>.
+        </p>
+        <div style="background:rgba(255,255,255,0.6);border-radius:6px;padding:12px 14px" class="mono-info">
+          <div>Particle mass: <span class="accent-text">8.1 × 10⁷ h⁻¹ M☉</span></div>
+          <div>Min halo: <span class="accent-text">3.2 × 10⁹ h⁻¹ M☉</span> (40 particles)</div>
+          <div>vs AbacusSummit: <span class="green-text">~25× better</span></div>
+          <div>vs Quijote: <span class="green-text">&gt;100× better</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Parameter Variations -->
+  <div class="section">
+    <h2 class="section-title">Parameter Variations</h2>
+    <p class="section-sub">Six cosmological parameters varied around Planck 2018 baseline values with seed-matched initial conditions.</p>
+    <hr class="section-rule">
+
+    <div class="grid-6">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <span class="param-symbol">Ωₘ</span>
+          <span class="badge badge-complete"><span class="badge-dot"></span>Complete</span>
+        </div>
+        <div class="card-text" style="margin-top:6px">Matter Density</div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <span class="param-symbol">h</span>
+          <span class="badge badge-complete"><span class="badge-dot"></span>Complete</span>
+        </div>
+        <div class="card-text" style="margin-top:6px">Hubble Parameter</div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <span class="param-symbol">nₛ</span>
+          <span class="badge badge-complete"><span class="badge-dot"></span>Complete</span>
+        </div>
+        <div class="card-text" style="margin-top:6px">Scalar Spectral Index</div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <span class="param-symbol">Aₛ</span>
+          <span class="badge badge-progress"><span class="badge-dot"></span>In Progress</span>
+        </div>
+        <div class="card-text" style="margin-top:6px">Scalar Amplitude</div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <span class="param-symbol">Ωᵦ</span>
+          <span class="badge badge-progress"><span class="badge-dot"></span>In Progress</span>
+        </div>
+        <div class="card-text" style="margin-top:6px">Baryon Density</div>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <span class="param-symbol">Ωₖ</span>
+          <span class="badge badge-progress"><span class="badge-dot"></span>In Progress</span>
+        </div>
+        <div class="card-text" style="margin-top:6px">Curvature</div>
+      </div>
+    </div>
+
+    <div class="card card-flat card-warn mt-20">
+      <p class="card-text">
+        <strong class="orange-text">Seed-Matched Initial Conditions:</strong> All
+        parameter-varied simulations share the same random seed, ensuring that differences in
+        output are purely due to cosmological parameter changes. This enables clean numerical
+        derivatives essential for Fisher matrix analyses and gradient-based emulator training.
+      </p>
+    </div>
+  </div>
+
+  <!-- Companion -->
+  <div class="section">
+    <h2 class="section-title">Companion Suite: Sinhagad</h2>
+    <hr class="section-rule">
+    <div class="card card-flat">
+      <p class="card-text">
+        <strong class="text-strong">Sinhagad</strong> is the pilot suite that preceded Sahyadri,
+        using 256³ particles in the same box size. It served as a testing ground for the simulation
+        pipeline, analysis codes, and compression strategies. Results from Sinhagad validated the
+        approach before committing to the full-resolution Sahyadri runs.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<div id="site-footer"></div>
+<script src="js/main.js"></script>
+</body>
+</html>

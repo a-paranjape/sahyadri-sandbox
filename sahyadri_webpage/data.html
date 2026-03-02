@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Products — Sahyadri</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="site-nav"></div>
+
+<div class="page-wrapper">
+
+  <div class="section">
+    <h2 class="section-title">Data Products</h2>
+    <p class="section-sub">Comprehensive data products for cosmological analysis, available through our public data portal.</p>
+    <hr class="section-rule">
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Particle Snapshots</div>
+        <p class="card-text" style="margin-bottom:10px">Full particle data in custom compressed format (3× reduction, &lt;1% accuracy loss). Positions encoded at 8-bit, velocities at 12-bit precision with subsample partitioning.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="tag">HDF5</span><span class="tag">Compressed</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Halo Catalogs</div>
+        <p class="card-text" style="margin-bottom:10px">Rockstar phase-space halo catalogs with quality control flags. Includes mass, position, velocity, concentration, spin, and merger tree links.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="tag">ASCII</span><span class="tag">HDF5</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Matter Power Spectra</div>
+        <p class="card-text" style="margin-bottom:10px">Pre-computed P(k) for all snapshots and parameter variations. Validated against Halofit predictions with excellent agreement.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="tag">ASCII</span><span class="tag">NumPy</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Halo Mass Functions</div>
+        <p class="card-text" style="margin-bottom:10px">Differential and cumulative halo mass functions across all snapshots. Compared with Tinker fitting functions showing excellent consistency.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="tag">ASCII</span><span class="tag">NumPy</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Voronoi Volume Functions</div>
+        <p class="card-text" style="margin-bottom:10px">VVF measurements probing cosmic web geometry and void statistics. Demonstrated sensitivity to cosmological parameters, especially Ωₘ.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="tag">NumPy</span></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Analysis Tools &amp; Scripts</div>
+        <p class="card-text" style="margin-bottom:10px">Python analysis scripts, reading routines for compressed formats, example notebooks, and pipeline documentation.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="tag">Python</span><span class="tag">Jupyter</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">Data Access</h2>
+    <hr class="section-rule">
+    <div class="card card-flat card-accent">
+      <div class="card-title accent-text">Public Data Release</div>
+      <p class="card-text mt-16">
+        A public web portal is planned for browsing and downloading all data products.
+        The portal will include comprehensive documentation, quick-start guides,
+        example analysis notebooks, and API access for programmatic downloads.
+        Check back for updates or contact the team for early access.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<div id="site-footer"></div>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Learning Hub — Sahyadri</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="site-nav"></div>
+<div class="page-wrapper">
+
+  <div class="section">
+    <h2 class="section-title">Learning Hub</h2>
+    <p class="section-sub">Background material to help students and new researchers understand and use Sahyadri data products. Click any topic to expand.</p>
+    <hr class="section-rule">
+
+    <!-- Accordion is built by JS from main.js -->
+    <div id="accordionContainer"></div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">Getting Started</h2>
+    <hr class="section-rule">
+    <div class="code-block"><span class="comment"># Quick-start example: Reading a Sahyadri halo catalog</span>
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">from</span> sahyadri_tools <span class="kw">import</span> read_catalog, read_snapshot
+
+<span class="comment"># Load halo catalog at z=0 for fiducial cosmology</span>
+halos = <span class="fn">read_catalog</span>(<span class="str">"fiducial"</span>, snap=<span class="num">100</span>)
+
+<span class="comment"># Access halo properties</span>
+mass = halos[<span class="str">"mvir"</span>]    <span class="comment"># Virial mass [h-1 Msun]</span>
+pos  = halos[<span class="str">"pos"</span>]     <span class="comment"># Position [h-1 Mpc]</span>
+vel  = halos[<span class="str">"vel"</span>]     <span class="comment"># Velocity [km/s]</span>
+
+<span class="comment"># Filter resolved halos (>=40 particles)</span>
+mask = mass >= <span class="num">3.2e9</span>
+<span class="fn">print</span>(<span class="str">f"Resolved halos: {mass[mask].size}"</span>)</div>
+  </div>
+
+</div>
+<div id="site-footer"></div>
+<script src="js/main.js"></script>
+</body>
+</html>
