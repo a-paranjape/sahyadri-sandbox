@@ -77,7 +77,8 @@
         '<div class="footer-name">Sahyadri</div>' +
         '<div class="footer-desc">' +
           "High-resolution N-body simulations for precision low-redshift cosmology. " +
-          "Designed for DESI BGS, 4MOST, and next-generation survey science." +
+          "Designed for DESI BGS, 4MOST, and next-generation survey science. " +
+          "Run on Pegasus Cluster at IUCAA Pune." +
         "</div>" +
         '<div class="footer-copy">© 2025 Sahyadri Collaboration</div>' +
       "</footer>";
