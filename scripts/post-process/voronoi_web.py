@@ -46,8 +46,8 @@ class Voronoi(HaloReader,Constants):
         if self.verbose:
             print_string = "--------------------------------\n"
             print_string += "... simulation box size Lbox = {0:.1f} Mpc/h\n".format(self.Lbox)
-            print_string += ("... cosmology (Om,OLam,hubble) = ({0:.4f},{1:.4f},{2:.3f})\n"
-                             .format(self.Om,self.OLam,self.hubble))
+            print_string += ("... cosmology (Om,Olam,hubble) = ({0:.4f},{1:.4f},{2:.3f})\n"
+                             .format(self.Om,self.Olam,self.hubble))
             print_string += "... working at redshift z = {0:.3f} in realisation {1:d}".format(self.redshift,self.real)
             self.print_this(print_string,self.logfile)
             self.print_this("... initialisation complete\n--------------------------------",self.logfile)
