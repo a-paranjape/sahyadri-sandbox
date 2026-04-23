@@ -3,6 +3,7 @@ import scipy.spatial as spatial
 from readers import HaloReader
 from utilities import Constants
 import gc
+from correlations import PowerSpectrum
 
 class Voronoi(HaloReader,Constants):
     """ Voronoi methods for density estimation in halo (and, later, galaxy) catalogs."""
@@ -46,7 +47,7 @@ class Voronoi(HaloReader,Constants):
         if self.verbose:
             print_string = "--------------------------------\n"
             print_string += "... simulation box size Lbox = {0:.1f} Mpc/h\n".format(self.Lbox)
-            print_string += ("... cosmology (Om,Olam,hubble) = ({0:.4f},{1:.4f},{2:.3f})\n"
+            print_string += ("... cosmology (Om,OLam,hubble) = ({0:.4f},{1:.4f},{2:.3f})\n"
                              .format(self.Om,self.Olam,self.hubble))
             print_string += "... working at redshift z = {0:.3f} in realisation {1:d}".format(self.redshift,self.real)
             self.print_this(print_string,self.logfile)
@@ -232,4 +233,58 @@ class Voronoi(HaloReader,Constants):
             self.print_this("... ... done with kNN stats",self.logfile)
 
         return bins, knn_data_vector
+    ############################################################
+
+    #############################################################
+    def voronoi_to_grid(self,delta,ran_pos,ind_nbr,nbr_count,grid=128,powspec=None):
+        """ Use output of voronoi_periodic_box to generate density estimate on grid.
+             If powspec is not None, expect instance of PowerSpectrum using grid,
+             Returns delta_grid of shape (grid,grid,grid).
+        """
+        if self.verbose:
+            self.print_this("... gridding density contrast",self.logfile)
+        Nran = ind_nbr.size
+
+        delta_ran = -100.0*np.ones(Nran,dtype=float)
+        if self.verbose:
+            self.print_this("... ... looping over halos to set delta_ran",self.logfile)
+        # below is 'infinitely' faster than h-by-h boolean indexing
+        start_sl = 0
+        stop_sl = nbr_count[0]
+        for t in range(delta.size-1):
+            sl = slice(start_sl,stop_sl)
+            delta_ran[sl] = delta[t]
+            start_sl = 1*stop_sl
+            stop_sl += nbr_count[t+1]
+        stop_sl = None
+        sl = slice(start_sl,stop_sl)
+        delta_ran[sl] = delta[-1]
+        del sl,start_sl,stop_sl
+        gc.collect()
+
+        if self.verbose:
+            self.print_this("... ... histogramming on {0:d}^3 grid".format(grid),self.logfile)
+
+        if powspec is None:
+            powspec = PowerSpectrum(grid=grid,Lbox=self.Lbox,logfile=self.logfile,verbose=self.verbose)
+
+        delta_grid = powspec.wtd_ngp_field(ran_pos.T,weights=delta_ran)
+        # delta_grid contains sum of delta_ran in each cell
+        Nran_grid = powspec.wtd_ngp_field(ran_pos.T,weights=None)
+        # Nran_grid contains number of randoms in each cell
+
+        delta_grid /= (Nran_grid + self.TINY) # delta_grid contains mean delta_ran in each cell
+
+        del delta_ran,Nran_grid#,edges
+        gc.collect()
+
+        if self.verbose:
+            self.print_this("... ... stats: mean = {0:.3e}; std dev = {1:.3f}".format(delta_grid.mean(),
+                                                                                      delta_grid.std()),self.logfile)
+            self.print_this("... ... adjusting mean",self.logfile)
+        # delta_grid -= delta_grid.mean()
+        d_mean = delta_grid.mean()
+        delta_grid = (delta_grid - d_mean)/(1 + d_mean)
+
+        return delta_grid
     ############################################################
