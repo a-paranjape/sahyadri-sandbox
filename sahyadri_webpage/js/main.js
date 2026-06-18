@@ -16,7 +16,8 @@
     { id: "home",           href: "index.html",          label: "Home" },
     { id: "overview",       href: "overview.html",       label: "Overview" },
     { id: "technical",      href: "technical.html",      label: "Technical" },
-    { id: "data",           href: "data.html",           label: "Data Products" },
+/*    { id: "data",           href: "data.html",           label: "Data Products" },*/
+    { id: "download",       href: "downloads.html",      label: "Downloads" },
     { id: "science",        href: "science.html",        label: "Science" },
     { id: "learn",          href: "learn.html",          label: "Learning Hub" },
     { id: "visualizations", href: "visualizations.html", label: "Visualizations" },

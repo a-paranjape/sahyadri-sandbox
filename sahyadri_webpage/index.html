@@ -7,6 +7,56 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ---- Cosmic Web in Motion: three-up movie showcase (theme-agnostic, layered on style.css) ---- */
+    .viz-strip{ display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
+
+    .viz-tile{
+      position:relative; aspect-ratio:1 / 1; border-radius:10px; overflow:hidden;
+      cursor:pointer; background:#05060a;
+      border:1px solid color-mix(in srgb, currentColor 14%, transparent);
+    }
+    .viz-tile video{
+      position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+      transition:transform .45s ease;
+    }
+    .viz-tile:hover video{ transform:scale(1.04); }
+
+    .viz-cap{
+      position:absolute; left:10px; bottom:10px; z-index:2;
+      font-family:"IBM Plex Mono", monospace; font-size:.72rem; letter-spacing:.04em;
+      color:#fff; background:color-mix(in srgb, #000 50%, transparent);
+      padding:4px 9px; border-radius:5px;
+    }
+
+    .play-overlay{
+      position:absolute; inset:0; z-index:3; display:none; place-items:center;
+      background:color-mix(in srgb, #000 32%, transparent);
+    }
+    .viz-tile.paused .play-overlay{ display:grid; }
+    .play-overlay svg{ width:46px; height:46px; fill:#fff; opacity:.9; }
+
+    .miss-overlay{
+      position:absolute; inset:0; z-index:4; display:none; place-content:center;
+      text-align:center; padding:18px; line-height:1.7;
+      font-family:"IBM Plex Mono", monospace; font-size:.74rem;
+      color:color-mix(in srgb, #fff 70%, transparent); background:#0a0c12;
+    }
+    .viz-tile.broken video,
+    .viz-tile.broken .viz-cap,
+    .viz-tile.broken .play-overlay{ display:none; }
+    .viz-tile.broken .miss-overlay{ display:grid; }
+
+    @media (max-width:720px){
+      .viz-strip{ grid-template-columns:1fr; }
+      .viz-strip .viz-tile:nth-child(n+2){ display:none; }
+    }
+    @media (prefers-reduced-motion: reduce){
+      .viz-tile video{ transition:none; }
+      .viz-tile:hover video{ transform:none; }
+      .viz-tile{ cursor:default; }
+    }
+  </style>
 </head>
 <body>
 
@@ -25,7 +75,7 @@
     </p>
     <div class="hero-actions">
       <a class="btn-primary" href="overview.html">Explore the Suite</a>
-      <a class="btn-secondary" href="data.html">Access Data</a>
+      <a class="btn-secondary" href="downloads.html">Access Data</a>
     </div>
     <div class="stats-row mt-40" style="max-width:640px;width:100%">
       <div class="stat-item">
@@ -43,6 +93,33 @@
       <div class="stat-item">
         <div class="stat-value">110<small>TB</small></div>
         <div class="stat-label">Total Storage</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cosmic Web in Motion -->
+  <div class="section">
+    <h2 class="section-title">Cosmic Web in Motion</h2>
+    <p class="section-sub">Live volume renders of the Sahyadri density field — the full box, a single filament, and a zoom onto one collapsing halo.</p>
+    <hr class="section-rule">
+    <div class="viz-strip" id="vizStrip">
+      <div class="viz-tile" data-view="full">
+        <video class="viz-vid" muted loop playsinline preload="none" data-src="visualizations/sah_full_fast.mp4"></video>
+        <span class="viz-cap">Full box</span>
+        <div class="play-overlay" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <div class="miss-overlay">file not found<br><span class="mf"></span></div>
+      </div>
+      <div class="viz-tile" data-view="fil">
+        <video class="viz-vid" muted loop playsinline preload="none" data-src="visualizations/sah_fil_fast.mp4"></video>
+        <span class="viz-cap">Filament</span>
+        <div class="play-overlay" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <div class="miss-overlay">file not found<br><span class="mf"></span></div>
+      </div>
+      <div class="viz-tile" data-view="zoom">
+        <video class="viz-vid" muted loop playsinline preload="none" data-src="visualizations/sah_zoom_fast.mp4"></video>
+        <span class="viz-cap">Zoom-in</span>
+        <div class="play-overlay" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+        <div class="miss-overlay">file not found<br><span class="mf"></span></div>
       </div>
     </div>
   </div>
@@ -87,5 +164,54 @@
 
 <div id="site-footer"></div>
 <script src="js/main.js"></script>
+<script>
+/* ---- Cosmic Web in Motion: autoplay loops, click-to-pause, mobile = one clip only ---- */
+(function () {
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var mqMobile = window.matchMedia("(max-width: 720px)");
+  var tiles = Array.prototype.slice.call(document.querySelectorAll("#vizStrip .viz-tile"));
+  if (!tiles.length) return;
+
+  tiles.forEach(function (tile) {
+    var v = tile.querySelector("video");
+    var mf = tile.querySelector(".mf");
+    var file = (v.dataset.src || "").split("/").pop();
+    if (mf) mf.textContent = file;
+
+    v.addEventListener("error", function () { tile.classList.add("broken"); });
+
+    if (reduced) {
+      v.controls = true;            // let the visitor start it themselves
+    } else {
+      tile.addEventListener("click", function () {
+        if (tile.classList.contains("broken")) return;
+        if (v.paused) { v.play().catch(function(){}); tile.classList.remove("paused"); }
+        else { v.pause(); tile.classList.add("paused"); }
+      });
+    }
+  });
+
+  // Only load/play tiles that are actually visible. On mobile, tiles 2+ are hidden,
+  // so we drop their src to avoid downloading them.
+  function visible(i) { return !(mqMobile.matches && i > 0); }
+
+  function apply() {
+    tiles.forEach(function (tile, i) {
+      var v = tile.querySelector("video");
+      if (visible(i)) {
+        if (!v.getAttribute("src")) { v.setAttribute("src", v.dataset.src); v.load(); }
+        if (!reduced) v.play().catch(function(){});
+      } else {
+        v.pause();
+        if (v.getAttribute("src")) { v.removeAttribute("src"); v.load(); }
+      }
+    });
+  }
+
+  apply();
+  if (mqMobile.addEventListener) mqMobile.addEventListener("change", apply);
+  else if (mqMobile.addListener) mqMobile.addListener(apply);
+})();
+</script>
 </body>
 </html>

@@ -7,6 +7,43 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ---- additive styles for the movie player (mirrors the page's card/label system) ---- */
+    .viz-video-wrap{ margin-top:4px; }
+    .movie-player{ width:100%; display:block; border-radius:8px; background:#000; }
+    .movie-player.is-broken{ display:none; }
+    .movie-missing{
+      display:none; padding:48px 24px; text-align:center; line-height:1.7;
+      font-family:"IBM Plex Mono", monospace; font-size:.82rem;
+      color:color-mix(in srgb, currentColor 55%, transparent);
+      border:1px solid color-mix(in srgb, currentColor 14%, transparent);
+      background:color-mix(in srgb, currentColor 3%, transparent);
+      border-radius:8px;
+    }
+    .movie-missing.show{ display:block; }
+    .movie-controls{
+      display:flex; flex-wrap:wrap; gap:12px; align-items:center;
+      justify-content:space-between; margin-top:14px;
+    }
+    .seg-group{
+      display:inline-flex; gap:2px; padding:3px; border-radius:9px;
+      border:1px solid color-mix(in srgb, currentColor 16%, transparent);
+    }
+    .seg-btn{
+      font-family:"IBM Plex Mono", monospace; font-size:.8rem; letter-spacing:.02em;
+      color:color-mix(in srgb, currentColor 62%, transparent);
+      background:transparent; border:0; padding:7px 14px; border-radius:6px;
+      cursor:pointer; transition:background .15s, color .15s;
+    }
+    .seg-btn:hover{ color:inherit; background:color-mix(in srgb, currentColor 7%, transparent); }
+    .seg-btn[aria-pressed="true"]{
+      color:#fff;
+      background:var(--accent, var(--accent-blue, var(--primary, #2f6fb0)));
+    }
+    @media (max-width:560px){
+      .movie-controls{ justify-content:flex-start; }
+    }
+  </style>
 </head>
 <body>
 <div id="site-nav"></div>
@@ -18,18 +55,25 @@
     <hr class="section-rule">
 
     <div class="card card-flat mb-24">
-      <div class="card-title" style="margin-bottom:4px">Cosmic Web Evolution</div>
+      <div class="card-title" style="margin-bottom:4px">Cosmic Web in Motion</div>
       <p class="card-text mb-16">
-        Projected dark-matter density slices showing structure growth from z = 12 to the present day.
-        Use the slider to step through redshift snapshots.
+        Time-lapse volume renders of the density field. Switch the view — the full box, a single
+        filament threading two nodes, or a zoom onto one collapsing halo — and choose a playback speed.
       </p>
-      <div class="viz-slider-wrap">
-        <div class="viz-img-container" id="vizImages"></div>
-        <div class="viz-controls">
-          <span class="viz-label" id="vizZLabel">z = 0.0</span>
-          <input type="range" id="vizSlider" min="0" max="8" step="1" value="0">
-          <span class="viz-label" id="vizEpochLabel">Present</span>
+      <div class="viz-video-wrap">
+        <video id="movie" class="movie-player" controls preload="metadata" playsinline></video>
+        <div class="movie-missing" id="movieMissing">
+          Can&rsquo;t load <span id="movieMissFile"></span><br>
+          check that the movie files are present under <code>visualizations/</code> and reload.
         </div>
+        <div class="movie-controls">
+          <div class="seg-group" id="movieViews" role="group" aria-label="View"></div>
+          <div class="seg-group" id="movieSpeeds" role="group" aria-label="Speed">
+            <button class="seg-btn" data-speed="slow" aria-pressed="true">slow</button>
+            <button class="seg-btn" data-speed="fast" aria-pressed="false">fast</button>
+          </div>
+        </div>
+        <p class="chart-caption">Now playing: <span id="movieNow"></span></p>
       </div>
     </div>
 
@@ -68,5 +112,68 @@
 </div>
 <div id="site-footer"></div>
 <script src="js/main.js"></script>
+<script>
+/* ---- movie player (Cosmic Web in Motion) ---- */
+(function () {
+  // Media lives under visualizations/ — same as the image src's on this page.
+  var MOVIE_BASE = "visualizations/";
+  var VIEWS = [
+    { id: "full", label: "Full box", slow: "sah_full_slow.mp4", fast: "sah_full_fast.mp4" },
+    { id: "fil",  label: "Filament", slow: "sah_fil_slow.mp4",  fast: "sah_fil_fast.mp4"  },
+    { id: "zoom", label: "Zoom-in",  slow: "sah_zoom_slow.mp4", fast: "sah_zoom_fast.mp4" }
+  ];
+
+  var video    = document.getElementById("movie");
+  var viewsBox = document.getElementById("movieViews");
+  var speedBtns = Array.prototype.slice.call(document.querySelectorAll("#movieSpeeds .seg-btn"));
+  var nowEl    = document.getElementById("movieNow");
+  var missEl   = document.getElementById("movieMissing");
+  var missFile = document.getElementById("movieMissFile");
+  if (!video) return;
+
+  var curView = VIEWS[0];
+  var curSpeed = "slow";
+
+  VIEWS.forEach(function (v, i) {
+    var b = document.createElement("button");
+    b.className = "seg-btn";
+    b.textContent = v.label;
+    b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
+    b.addEventListener("click", function () {
+      curView = v;
+      Array.prototype.forEach.call(viewsBox.children, function (c) { c.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      load();
+    });
+    viewsBox.appendChild(b);
+  });
+
+  speedBtns.forEach(function (b) {
+    b.addEventListener("click", function () {
+      curSpeed = b.getAttribute("data-speed");
+      speedBtns.forEach(function (s) { s.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      load();
+    });
+  });
+
+  function load() {
+    var file = curView[curSpeed];
+    video.classList.remove("is-broken");
+    missEl.classList.remove("show");
+    video.src = MOVIE_BASE + file;
+    video.load();
+    nowEl.textContent = file;
+    missFile.textContent = file;
+  }
+
+  video.addEventListener("error", function () {
+    video.classList.add("is-broken");
+    missEl.classList.add("show");
+  });
+
+  load();
+})();
+</script>
 </body>
 </html>

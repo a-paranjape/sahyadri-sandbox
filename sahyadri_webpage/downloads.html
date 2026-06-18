@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Products &mdash; Sahyadri</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+  .dp{
+    --dp-surface:#fff; --dp-ink:#1b1d27; --dp-muted:#5c6376;
+    --dp-line:#e4e7f0; --dp-line-strong:#cdd2e2;
+    --dp-accent:#2e3a8c; --dp-accent-2:#4a57b8; --dp-accent-soft:#edeffb;
+    --dp-warn:#9a6b12; --dp-warn-soft:#fdf4e0;
+    --dp-term-bg:#0f1320; --dp-term-ink:#d7ddf0; --dp-term-dim:#7c869f;
+    --dp-term-green:#7fe0a3; --dp-term-amber:#f0c462; --dp-term-blue:#82b6ff;
+    --dp-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+    --dp-sans:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+    --dp-radius:12px;
+    font-family:var(--dp-sans); color:var(--dp-ink);
+  }
+  .dp, .dp *{ box-sizing:border-box; }
+  .dp code{ font-family:var(--dp-mono); font-size:.92em; }
+
+  .dp .builder{ display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
+  @media(max-width:860px){ .dp .builder{ grid-template-columns:1fr; } }
+  .dp .panel{ background:var(--dp-surface); border:1px solid var(--dp-line); border-radius:var(--dp-radius); padding:20px; }
+  .dp .panel h3{ margin:0 0 4px; font-size:1.02rem; }
+  .dp .panel .hint{ color:var(--dp-muted); font-size:.84rem; margin:0 0 16px; }
+  .dp .field{ margin-bottom:18px; }
+  .dp .field>label.flabel{ display:block; font-weight:600; font-size:.86rem; margin-bottom:8px; }
+  .dp .seg{ display:inline-flex; border:1px solid var(--dp-line-strong); border-radius:8px; overflow:hidden; }
+  .dp .seg button{ border:none; background:var(--dp-surface); padding:8px 16px; font:inherit; font-size:.88rem; cursor:pointer; color:var(--dp-muted); }
+  .dp .seg button[aria-pressed="true"]{ background:var(--dp-accent); color:#fff; }
+  .dp .checks{ display:flex; flex-wrap:wrap; gap:8px; }
+  .dp .checks label{ display:inline-flex; align-items:center; gap:7px; font-size:.85rem; border:1px solid var(--dp-line-strong); border-radius:8px; padding:7px 11px; cursor:pointer; background:var(--dp-surface); user-select:none; }
+  .dp .checks label:has(input:checked){ border-color:var(--dp-accent); background:var(--dp-accent-soft); color:var(--dp-accent); font-weight:600; }
+  .dp .checks label.disabled{ opacity:.45; cursor:not-allowed; }
+  .dp .checks input{ accent-color:var(--dp-accent); }
+  .dp select, .dp input[type=text]{ width:100%; font:inherit; font-size:.9rem; padding:9px 11px; border:1px solid var(--dp-line-strong); border-radius:8px; background:var(--dp-surface); color:var(--dp-ink); }
+  .dp .cosmo-list{ max-height:168px; overflow:auto; border:1px solid var(--dp-line); border-radius:8px; padding:6px; }
+  .dp .cosmo-list label{ display:flex; gap:8px; align-items:flex-start; padding:6px 7px; border-radius:6px; font-size:.84rem; cursor:pointer; }
+  .dp .cosmo-list label:hover{ background:var(--dp-accent-soft); }
+  .dp .cosmo-list .cn{ font-family:var(--dp-mono); font-size:.82rem; }
+  .dp .cosmo-list .cd{ color:var(--dp-muted); font-size:.78rem; }
+  .dp .presets{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+  .dp .presets button{ font:inherit; font-size:.8rem; padding:6px 11px; border:1px solid var(--dp-line-strong); background:var(--dp-surface); border-radius:99px; cursor:pointer; color:var(--dp-accent); }
+  .dp .presets button:hover{ background:var(--dp-accent-soft); }
+  .dp .resolved{ font-size:.8rem; color:var(--dp-muted); margin-top:8px; min-height:1.2em; }
+  .dp .resolved b{ color:var(--dp-ink); font-family:var(--dp-mono); }
+
+  .dp .term{ background:var(--dp-term-bg); border-radius:var(--dp-radius); overflow:hidden; border:1px solid #232a44; display:flex; flex-direction:column; min-height:340px; }
+  .dp .term-bar{ display:flex; align-items:center; gap:8px; padding:11px 14px; background:#161b2e; border-bottom:1px solid #232a44; }
+  .dp .term-bar .dot{ width:11px; height:11px; border-radius:50%; }
+  .dp .dot.r{ background:#ec6a5e; } .dp .dot.y{ background:#f3bf4f; } .dp .dot.g{ background:#61c454; }
+  .dp .term-bar .tt{ margin-left:8px; font-family:var(--dp-mono); font-size:.76rem; color:var(--dp-term-dim); }
+  .dp .term-bar .count{ margin-left:auto; font-family:var(--dp-mono); font-size:.74rem; color:var(--dp-term-amber); }
+  .dp .term-body{ font-family:var(--dp-mono); font-size:.8rem; color:var(--dp-term-ink); padding:14px 16px; overflow:auto; flex:1; white-space:pre; line-height:1.7; tab-size:2; }
+  .dp .term-body .cmt{ color:var(--dp-term-dim); }
+  .dp .term-body .grn{ color:var(--dp-term-green); }
+  .dp .term-body .amb{ color:var(--dp-term-amber); }
+  .dp .term-body .blu{ color:var(--dp-term-blue); }
+  .dp .term-actions{ display:flex; gap:10px; padding:12px 14px; border-top:1px solid #232a44; background:#13182a; }
+  .dp .term-actions button{ font:inherit; font-size:.82rem; font-family:var(--dp-mono); padding:8px 14px; border-radius:7px; border:1px solid #2c3556; background:#222a47; color:#dfe3fb; cursor:pointer; }
+  .dp .term-actions button:hover{ background:#2c3766; }
+  .dp .term-actions .grow{ flex:1; }
+  .dp .term-actions label.mirror{ display:inline-flex; align-items:center; gap:7px; color:var(--dp-term-dim); font-family:var(--dp-mono); font-size:.78rem; cursor:pointer; }
+
+  .dp .tree{ font-family:var(--dp-mono); font-size:.82rem; background:var(--dp-surface); border:1px solid var(--dp-line); border-radius:var(--dp-radius); padding:18px 20px; overflow-x:auto; line-height:1.85; color:var(--dp-ink); white-space:pre; tab-size:2; }
+  .dp .tree .br{ color:var(--dp-accent); font-weight:600; }
+  .dp .tree .ph{ color:var(--dp-warn); }
+  .dp .tree .cm{ color:var(--dp-muted); }
+
+  .dp .grp-h{ font-size:1.02rem; margin:26px 0 12px; display:flex; align-items:center; gap:10px; }
+  .dp .grp-h .badge{ font-family:var(--dp-mono); font-size:.7rem; padding:3px 8px; border-radius:5px; background:var(--dp-accent-soft); color:var(--dp-accent); }
+  .dp details.fcard{ border:1px solid var(--dp-line); border-radius:10px; margin-bottom:10px; background:var(--dp-surface); }
+  .dp details.fcard summary{ cursor:pointer; padding:14px 16px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; list-style:none; }
+  .dp details.fcard summary::-webkit-details-marker{ display:none; }
+  .dp details.fcard summary::before{ content:"\25B8"; color:var(--dp-accent-2); font-size:.8rem; transition:transform .15s; }
+  .dp details.fcard[open] summary::before{ transform:rotate(90deg); }
+  .dp .fname{ font-weight:600; }
+  .dp .fpath{ font-family:var(--dp-mono); font-size:.78rem; background:var(--dp-accent-soft); color:var(--dp-accent); padding:3px 8px; border-radius:5px; }
+  .dp .fmeta{ margin-left:auto; color:var(--dp-muted); font-size:.8rem; }
+  .dp .fdesc{ margin:2px 16px 8px; color:var(--dp-muted); font-size:.9rem; }
+  .dp .pending{ margin:0 16px 16px; color:var(--dp-warn); background:var(--dp-warn-soft); border-radius:8px; padding:10px 12px; font-size:.85rem; }
+  .dp .coltab{ width:calc(100% - 32px); margin:0 16px 16px; border-collapse:collapse; font-size:.82rem; }
+  .dp .coltab th{ text-align:left; background:#2a3050; color:#fff; padding:8px 10px; position:sticky; top:0; }
+  .dp .coltab td{ padding:7px 10px; border-bottom:1px solid var(--dp-line); vertical-align:top; }
+  .dp .coltab tr:nth-child(even) td{ background:#fafbfe; }
+  .dp .coltab .cn{ font-family:var(--dp-mono); }
+  .dp .dt{ font-family:var(--dp-mono); font-size:.74rem; background:#f1c40f33; border:1px solid #f1c40f66; color:#8a6d00; padding:1px 5px; border-radius:4px; }
+
+  .dp pre.code{ background:var(--dp-term-bg); color:var(--dp-term-ink); font-family:var(--dp-mono); font-size:.82rem; border-radius:var(--dp-radius); padding:18px 20px; overflow-x:auto; line-height:1.7; border:1px solid #232a44; }
+  .dp pre.code .cmt{ color:var(--dp-term-dim); }
+  .dp pre.code .kw{ color:var(--dp-term-blue); }
+  .dp pre.code .st{ color:var(--dp-term-green); }
+
+  .dp .snap-tools{ display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+  .dp .snap-tools input{ max-width:240px; }
+  .dp .snap-tools .note{ color:var(--dp-muted); font-size:.82rem; }
+  .dp .snap-scroll{ max-height:420px; overflow:auto; border:1px solid var(--dp-line); border-radius:var(--dp-radius); }
+  .dp table.snap{ width:100%; border-collapse:collapse; font-size:.85rem; }
+  .dp table.snap th{ position:sticky; top:0; background:#2a3050; color:#fff; padding:9px 14px; text-align:right; font-family:var(--dp-mono); font-size:.78rem; }
+  .dp table.snap th:first-child{ text-align:left; }
+  .dp table.snap td{ padding:7px 14px; border-bottom:1px solid var(--dp-line); text-align:right; font-family:var(--dp-mono); }
+  .dp table.snap td:first-child{ text-align:left; font-weight:600; }
+  .dp table.snap tr:nth-child(even) td{ background:#fafbfe; }
+  .dp table.snap tr.z0 td{ background:var(--dp-accent-soft); }
+
+  .dp .toast{ position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--dp-ink); color:#fff; padding:11px 18px; border-radius:8px; font-size:.85rem; opacity:0; pointer-events:none; transition:.25s; font-family:var(--dp-mono); z-index:50; }
+  .dp .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+  .dp :focus-visible{ outline:2px solid var(--dp-accent-2); outline-offset:2px; }
+  @media (prefers-reduced-motion: reduce){ .dp *{ transition:none !important; } }
+</style>
+</head>
+<body>
+
+<div id="site-nav"></div>
+
+<div class="page-wrapper">
+  <div class="dp">
+
+  <div class="section" id="builder">
+    <h2 class="section-title">Download builder</h2>
+    <p class="section-sub">Pick a product family, cosmologies, file contents, and snapshots. The terminal
+       on the right builds the full URL list and a ready-to-run <code>wget</code> script as you go.<br>
+
+       By default the script recreates the server's directory layout on your machine<br>
+       <code>sahyadri_sims/halos/sahyadri/&lt;cosmo&gt;/r1/compressed/&hellip;</code> <br> 
+       so the cosmology stays in the
+       path and files from different cosmologies or snapshots never overwrite one another. Untick
+       <em>mirror server dirs</em> to drop everything into a single folder instead.</p>
+    <hr class="section-rule">
+<div class="builder">
+      <div class="panel">
+        <div class="field">
+          <label class="flabel">Product family</label>
+          <div class="seg" id="famSeg" role="group" aria-label="Product family">
+            <button data-fam="halos" aria-pressed="true">Halo catalogs</button>
+            <button data-fam="particles" aria-pressed="false">Particle subsamples</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="flabel">Cosmologies</label>
+          <div class="presets">
+            <button type="button" data-cosmo-all>Select all</button>
+            <button type="button" data-cosmo-fid>Fiducial only</button>
+            <button type="button" data-cosmo-none>Clear</button>
+          </div>
+          <div class="cosmo-list" id="cosmoList"></div>
+        </div>
+
+        <div class="field" id="contentField">
+          <label class="flabel" id="contentLabel">File contents</label>
+          <div class="checks" id="contentChecks"></div>
+        </div>
+
+        <div class="field" id="subField" hidden>
+          <label class="flabel">Subsample (per-cent of particles)</label>
+          <div class="checks" id="subChecks"></div>
+          <p class="hint" style="margin:8px 0 0">Only the 1% subsample is currently public; larger
+             fractions are available on request.</p>
+        </div>
+
+        <div class="field">
+          <label class="flabel">Snapshots</label>
+          <div class="presets" id="snapPresets">
+            <button type="button" data-snap="100">z = 0 only</button>
+            <button type="button" data-snap="all">All (0&ndash;100)</button>
+            <button type="button" data-snap="0,25,50,75,100">Coarse sample</button>
+          </div>
+          <input type="text" id="snapInput" placeholder="e.g. 100  or  90-100  or  0,25,50,100"
+                 value="100" aria-label="Snapshot numbers">
+          <div class="resolved" id="snapResolved"></div>
+        </div>
+      </div>
+
+      <!-- terminal -->
+      <div class="term">
+        <div class="term-bar">
+          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+          <span class="tt">download_sahyadri.sh</span>
+          <span class="count" id="fileCount">0 files</span>
+        </div>
+        <div class="term-body" id="termOut" aria-live="polite"></div>
+        <div class="term-actions">
+          <label class="mirror"><input type="checkbox" id="mirror" checked> mirror server dirs</label>
+          <span class="grow"></span>
+          <button type="button" id="copyBtn">Copy script</button>
+          <button type="button" id="dlBtn">Download .sh</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section" id="paths">
+    <h2 class="section-title">Directory layout</h2>
+    <p class="section-sub">Everything lives under the base URL
+       <code>http://sahyadri.tifr.res.in/data/sahyadri_sims/</code>. The first split is
+       <code>halos/</code> (Rockstar catalogs) vs <code>sims/</code> (particle data).
+       <span style="color:var(--warn)">Orange</span> tokens are placeholders.</p>
+    <hr class="section-rule">
+<div class="tree">
+<span class="cm"># base</span>
+http://sahyadri.tifr.res.in/data/sahyadri_sims/
+├─ <span class="br">halos/</span>sahyadri/<span class="ph">&lt;sim_cosmo&gt;</span>/r1/compressed/
+│    ├─ out_<span class="ph">&lt;snap&gt;</span>_basic.fits.gz      <span class="cm"># snap = 0..100, no zero-padding</span>
+│    ├─ out_<span class="ph">&lt;snap&gt;</span>_extended.fits.gz
+│    ├─ out_<span class="ph">&lt;snap&gt;</span>_vahc.fits.gz
+│    └─ out_<span class="ph">&lt;snap&gt;</span>_tens.fits.gz
+└─ <span class="br">sims/</span>sahyadri/<span class="ph">&lt;sim_cosmo&gt;</span>/r1/compressed/
+     └─ subsample<span class="ph">&lt;x&gt;</span>/                       <span class="cm"># x in 1,3,5,9,10,12,15,20,25 (sum=100)</span>
+          ├─ comp_snapshot_<span class="ph">&lt;NNN&gt;</span>_subsample<span class="ph">&lt;x&gt;</span>_ids.h5        <span class="cm"># NNN = 3-digit, zero-padded</span>
+          ├─ comp_snapshot_<span class="ph">&lt;NNN&gt;</span>_subsample<span class="ph">&lt;x&gt;</span>_positions.h5
+          └─ comp_snapshot_<span class="ph">&lt;NNN&gt;</span>_subsample<span class="ph">&lt;x&gt;</span>_velocities.h5
+    </div>
+
+    <h3 class="grp-h">Available cosmologies <span class="badge">sim_cosmo</span></h3>
+    <div class="snap-scroll" style="max-height:none">
+      <table class="snap" style="font-size:.85rem">
+        <thead><tr><th style="text-align:left">sim_cosmo</th><th style="text-align:left">Definition (relative to fiducial)</th></tr></thead>
+        <tbody><tr><td class="cn">default2048</td><td>Fiducial: Ωₘ=0.3138, nₛ=0.9649, h=0.6736, Aₛ=2.09×10⁻⁹, w=0, Ωₖ=0</td></tr>
+<tr><td class="cn">var_As_m2048</td><td>Aₛ → 0.90 × fiducial</td></tr>
+<tr><td class="cn">var_As_p2048</td><td>Aₛ → 1.10 × fiducial</td></tr>
+<tr><td class="cn">var_Om_m2048</td><td>Ωₘ → 0.95 × fiducial</td></tr>
+<tr><td class="cn">var_Om_p2048</td><td>Ωₘ → 1.05 × fiducial</td></tr>
+<tr><td class="cn">var_h_m2048</td><td>h → 0.95 × fiducial</td></tr>
+<tr><td class="cn">var_h_p2048</td><td>h → 1.05 × fiducial</td></tr>
+<tr><td class="cn">var_ns_m2048</td><td>nₛ → 0.95 × fiducial</td></tr>
+<tr><td class="cn">var_ns_p2048</td><td>nₛ → 1.05 × fiducial</td></tr>
+<tr><td class="cn">var_w_m2048</td><td>w → −0.5</td></tr>
+<tr><td class="cn">var_w_p2048</td><td>w → +0.5</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section" id="files">
+    <h2 class="section-title">File contents</h2>
+    <p class="section-sub">Halo catalogs are gzip-compressed FITS binary tables (one row per halo, matched by
+       <code>id</code>/<code>haloID</code> across files). Particle files are algorithmically compressed
+       and require the Sahyadri reader. Expand a file to see its fields.</p>
+    <hr class="section-rule">
+<h3 class="grp-h">Halo catalogs <span class="badge">FITS.gz &middot; astropy</span></h3>
+    
+      <details class="fcard">
+        <summary><span class="fname">Basic catalog</span>
+          <code class="fpath">out_&lt;snap&gt;_basic.fits.gz</code>
+          <span class="fmeta">21 columns</span></summary>
+        <p class="fdesc">Essential halo properties — masses, radii, positions, velocities, basic shapes.</p>
+        <table class="coltab"><thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td class="cn">id</td><td><span class="dt">i8</span></td><td>Unique halo identifier</td></tr>
+<tr><td class="cn">pid</td><td><span class="dt">i8</span></td><td>Parent halo ID (-1 if no parent, i.e., distinct halo)</td></tr>
+<tr><td class="cn">Mvir</td><td><span class="dt">f4</span></td><td>Virial mass in M☉/h</td></tr>
+<tr><td class="cn">Rvir</td><td><span class="dt">f4</span></td><td>Virial radius in kpc/h</td></tr>
+<tr><td class="cn">rs</td><td><span class="dt">f4</span></td><td>Scale radius in kpc/h (NFW profile fitting)</td></tr>
+<tr><td class="cn">vrms</td><td><span class="dt">f4</span></td><td>Velocity dispersion in km/s</td></tr>
+<tr><td class="cn">x</td><td><span class="dt">f4</span></td><td>Halo center x-coordinate in Mpc/h</td></tr>
+<tr><td class="cn">y</td><td><span class="dt">f4</span></td><td>Halo center y-coordinate in Mpc/h</td></tr>
+<tr><td class="cn">z</td><td><span class="dt">f4</span></td><td>Halo center z-coordinate in Mpc/h</td></tr>
+<tr><td class="cn">vx</td><td><span class="dt">f4</span></td><td>Halo velocity x-component in km/s</td></tr>
+<tr><td class="cn">vy</td><td><span class="dt">f4</span></td><td>Halo velocity y-component in km/s</td></tr>
+<tr><td class="cn">vz</td><td><span class="dt">f4</span></td><td>Halo velocity z-component in km/s</td></tr>
+<tr><td class="cn">Mvir_all</td><td><span class="dt">f4</span></td><td>Total mass including unbound particles in M☉/h</td></tr>
+<tr><td class="cn">M200b</td><td><span class="dt">f4</span></td><td>Mass within radius where density = 200 × background density in M☉/h</td></tr>
+<tr><td class="cn">M200c</td><td><span class="dt">f4</span></td><td>Mass within radius where density = 200 × critical density in M☉/h</td></tr>
+<tr><td class="cn">M500c</td><td><span class="dt">f4</span></td><td>Mass within radius where density = 500 × critical density in M☉/h</td></tr>
+<tr><td class="cn">M2500c</td><td><span class="dt">f4</span></td><td>Mass within radius where density = 2500 × critical density in M☉/h</td></tr>
+<tr><td class="cn">T/|U|</td><td><span class="dt">f4</span></td><td>Ratio of kinetic to potential energy</td></tr>
+<tr><td class="cn">Mpeak</td><td><span class="dt">f4</span></td><td>Maximum mass ever achieved by this halo in M☉/h</td></tr>
+<tr><td class="cn">Vpeak</td><td><span class="dt">f4</span></td><td>Maximum circular velocity ever achieved in km/s</td></tr>
+<tr><td class="cn">b1</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr></tbody></table>
+      </details>
+      <details class="fcard">
+        <summary><span class="fname">Extended catalog</span>
+          <code class="fpath">out_&lt;snap&gt;_extended.fits.gz</code>
+          <span class="fmeta">58 columns</span></summary>
+        <p class="fdesc">Detailed evolution & morphology — merger-tree links, accretion history, spin, shapes.</p>
+        <table class="coltab"><thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td class="cn">scale</td><td><span class="dt">f4</span></td><td>Scale factor a = 1/(1+z) at this snapshot</td></tr>
+<tr><td class="cn">desc_scale</td><td><span class="dt">f4</span></td><td>Scale factor of descendant snapshot</td></tr>
+<tr><td class="cn">desc_id</td><td><span class="dt">f4</span></td><td>ID of descendant halo</td></tr>
+<tr><td class="cn">num_prog</td><td><span class="dt">f4</span></td><td>Number of progenitor halos</td></tr>
+<tr><td class="cn">upid</td><td><span class="dt">i8</span></td><td>ID of parent halo (if subhalo)</td></tr>
+<tr><td class="cn">desc_pid</td><td><span class="dt">f4</span></td><td>Parent ID of descendant</td></tr>
+<tr><td class="cn">phantom</td><td><span class="dt">f4</span></td><td>Phantom flag (interpolated halo)</td></tr>
+<tr><td class="cn">sam_Mvir</td><td><span class="dt">f4</span></td><td>Virial mass from semi-analytic model</td></tr>
+<tr><td class="cn">mmp?</td><td><span class="dt">f4</span></td><td>Most massive progenitor flag</td></tr>
+<tr><td class="cn">scale_of_last_MM</td><td><span class="dt">f4</span></td><td>Scale factor of last major merger</td></tr>
+<tr><td class="cn">vmax</td><td><span class="dt">f4</span></td><td>Maximum circular velocity in km/s</td></tr>
+<tr><td class="cn">Jx</td><td><span class="dt">f4</span></td><td>Angular momentum x-component</td></tr>
+<tr><td class="cn">Jy</td><td><span class="dt">f4</span></td><td>Angular momentum y-component</td></tr>
+<tr><td class="cn">Jz</td><td><span class="dt">f4</span></td><td>Angular momentum z-component</td></tr>
+<tr><td class="cn">Spin</td><td><span class="dt">f4</span></td><td>Peebles spin parameter</td></tr>
+<tr><td class="cn">Breadth_first_ID</td><td><span class="dt">f4</span></td><td>ID in breadth-first tree traversal</td></tr>
+<tr><td class="cn">Depth_first_ID</td><td><span class="dt">f4</span></td><td>ID in depth-first tree traversal</td></tr>
+<tr><td class="cn">Tree_root_ID</td><td><span class="dt">f4</span></td><td>Root ID of merger tree</td></tr>
+<tr><td class="cn">Orig_halo_ID</td><td><span class="dt">f4</span></td><td>Original halo ID from simulation</td></tr>
+<tr><td class="cn">Snap_idx</td><td><span class="dt">f4</span></td><td>Snapshot index</td></tr>
+<tr><td class="cn">Next_coprogenitor_depthfirst_ID</td><td><span class="dt">f4</span></td><td>Next co-progenitor in depth-first order</td></tr>
+<tr><td class="cn">Last_progenitor_depthfirst_ID</td><td><span class="dt">f4</span></td><td>Last progenitor in depth-first order</td></tr>
+<tr><td class="cn">Last_mainleaf_depthfirst_ID</td><td><span class="dt">f4</span></td><td>Last main leaf in depth-first order</td></tr>
+<tr><td class="cn">Tidal_Force</td><td><span class="dt">f4</span></td><td>Tidal force strength</td></tr>
+<tr><td class="cn">Tidal_ID</td><td><span class="dt">f4</span></td><td>ID of most significant tidal perturber</td></tr>
+<tr><td class="cn">Rs_Klypin</td><td><span class="dt">f4</span></td><td>Scale radius using Klypin vmax method in kpc/h</td></tr>
+<tr><td class="cn">Xoff</td><td><span class="dt">f4</span></td><td>Center offset from bulk position</td></tr>
+<tr><td class="cn">Voff</td><td><span class="dt">f4</span></td><td>Velocity offset from bulk velocity</td></tr>
+<tr><td class="cn">Spin_Bullock</td><td><span class="dt">f4</span></td><td>Bullock spin parameter</td></tr>
+<tr><td class="cn">b_to_a</td><td><span class="dt">f4</span></td><td>Intermediate to major axis ratio</td></tr>
+<tr><td class="cn">c_to_a</td><td><span class="dt">f4</span></td><td>Minor to major axis ratio</td></tr>
+<tr><td class="cn">A[x]</td><td><span class="dt">f4</span></td><td>Major axis direction x-component</td></tr>
+<tr><td class="cn">A[y]</td><td><span class="dt">f4</span></td><td>Major axis direction y-component</td></tr>
+<tr><td class="cn">A[z]</td><td><span class="dt">f4</span></td><td>Major axis direction z-component</td></tr>
+<tr><td class="cn">M_pe_Behroozi</td><td><span class="dt">f4</span></td><td>Pseudo-evolution mass (Behroozi method)</td></tr>
+<tr><td class="cn">M_pe_Diemer</td><td><span class="dt">f4</span></td><td>Pseudo-evolution mass (Diemer method)</td></tr>
+<tr><td class="cn">Halfmass_Radius</td><td><span class="dt">f4</span></td><td>Radius containing half the halo mass</td></tr>
+<tr><td class="cn">Macc</td><td><span class="dt">f4</span></td><td>Mass at accretion time</td></tr>
+<tr><td class="cn">Vacc</td><td><span class="dt">f4</span></td><td>Vmax at accretion time</td></tr>
+<tr><td class="cn">Halfmass_Scale</td><td><span class="dt">f4</span></td><td>Scale factor when half current mass was assembled</td></tr>
+<tr><td class="cn">Acc_Rate_Inst</td><td><span class="dt">f4</span></td><td>Instantaneous accretion rate</td></tr>
+<tr><td class="cn">Acc_Rate_100Myr</td><td><span class="dt">f4</span></td><td>Accretion rate over 100 Myr</td></tr>
+<tr><td class="cn">Acc_Rate_1*Tdyn</td><td><span class="dt">f4</span></td><td>Accretion rate over 1 dynamical time</td></tr>
+<tr><td class="cn">Acc_Rate_2*Tdyn</td><td><span class="dt">f4</span></td><td>Accretion rate over 2 dynamical times</td></tr>
+<tr><td class="cn">Acc_Rate_Mpeak</td><td><span class="dt">f4</span></td><td>Accretion rate when mass was at peak</td></tr>
+<tr><td class="cn">Acc_Log_Vmax_Inst</td><td><span class="dt">f4</span></td><td>Instantaneous log(Vmax) accretion rate</td></tr>
+<tr><td class="cn">Acc_Log_Vmax_1*Tdyn</td><td><span class="dt">f4</span></td><td>Log(Vmax) accretion rate over 1 Tdyn</td></tr>
+<tr><td class="cn">Mpeak_Scale</td><td><span class="dt">f4</span></td><td>Scale factor when mass peaked</td></tr>
+<tr><td class="cn">Acc_Scale</td><td><span class="dt">f4</span></td><td>Scale factor at accretion</td></tr>
+<tr><td class="cn">First_Acc_Scale</td><td><span class="dt">f4</span></td><td>Scale factor of first accretion</td></tr>
+<tr><td class="cn">First_Acc_Mvir</td><td><span class="dt">f4</span></td><td>Virial mass at first accretion</td></tr>
+<tr><td class="cn">First_Acc_Vmax</td><td><span class="dt">f4</span></td><td>Vmax at first accretion</td></tr>
+<tr><td class="cn">Vmax@Mpeak</td><td><span class="dt">f4</span></td><td>Vmax when mass was at its peak</td></tr>
+<tr><td class="cn">Tidal_Force_Tdyn</td><td><span class="dt">f4</span></td><td>Tidal force over dynamical time</td></tr>
+<tr><td class="cn">Log_</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
+<tr><td class="cn">Time_to_future_merger</td><td><span class="dt">f4</span></td><td>Time until next major merger</td></tr>
+<tr><td class="cn">Future_merger_MMP_ID</td><td><span class="dt">f4</span></td><td>ID of future merger partner</td></tr>
+<tr><td class="cn">Spin_at_Mpeak_Scale</td><td><span class="dt">f4</span></td><td>Spin parameter when mass peaked</td></tr></tbody></table>
+      </details>
+      <details class="fcard">
+        <summary><span class="fname">VAHC catalog</span>
+          <code class="fpath">out_&lt;snap&gt;_vahc.fits.gz</code>
+          <span class="fmeta">28 columns</span></summary>
+        <p class="fdesc">Value-added: tidal-tensor eigenvalues at fixed multiples of R₂₀₀b and fixed physical scales.</p>
+        <table class="coltab"><thead><tr><th>Column</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td class="cn">haloID</td><td><span class="dt">i8</span></td><td>Halo identifier matching other catalogs</td></tr>
+<tr><td class="cn">lam1_R2R200b</td><td><span class="dt">f4</span></td><td>1st eigenvalue of tidal tensor at 2×R200b</td></tr>
+<tr><td class="cn">lam2_R2R200b</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of tidal tensor at 2×R200b</td></tr>
+<tr><td class="cn">lam3_R2R200b</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of tidal tensor at 2×R200b</td></tr>
+<tr><td class="cn">lam1_R4R200b</td><td><span class="dt">f4</span></td><td>1st eigenvalue of tidal tensor at 4×R200b</td></tr>
+<tr><td class="cn">lam2_R4R200b</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of tidal tensor at 4×R200b</td></tr>
+<tr><td class="cn">lam3_R4R200b</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of tidal tensor at 4×R200b</td></tr>
+<tr><td class="cn">lam1_R6R200b</td><td><span class="dt">f4</span></td><td>1st eigenvalue of tidal tensor at 6×R200b</td></tr>
+<tr><td class="cn">lam2_R6R200b</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of tidal tensor at 6×R200b</td></tr>
+<tr><td class="cn">lam3_R6R200b</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of tidal tensor at 6×R200b</td></tr>
+<tr><td class="cn">lam1_R8R200b</td><td><span class="dt">f4</span></td><td>1st eigenvalue of tidal tensor at 8×R200b</td></tr>
+<tr><td class="cn">lam2_R8R200b</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of tidal tensor at 8×R200b</td></tr>
+<tr><td class="cn">lam3_R8R200b</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of tidal tensor at 8×R200b</td></tr>
+<tr><td class="cn">lam1_R2Mpch</td><td><span class="dt">f4</span></td><td>1st eigenvalue of tidal tensor at 2 Mpc/h</td></tr>
+<tr><td class="cn">lam2_R2Mpch</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of tidal tensor at 2 Mpc/h</td></tr>
+<tr><td class="cn">lam3_R2Mpch</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of tidal tensor at 2 Mpc/h</td></tr>
+<tr><td class="cn">lam1_R3Mpch</td><td><span class="dt">f4</span></td><td>1st eigenvalue of tidal tensor at 3 Mpc/h</td></tr>
+<tr><td class="cn">lam2_R3Mpch</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of tidal tensor at 3 Mpc/h</td></tr>
+<tr><td class="cn">lam3_R3Mpch</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of tidal tensor at 3 Mpc/h</td></tr>
+<tr><td class="cn">lam1_R5Mpch</td><td><span class="dt">f4</span></td><td>1st eigenvalue of tidal tensor at 5 Mpc/h</td></tr>
+<tr><td class="cn">lam2_R5Mpch</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of tidal tensor at 5 Mpc/h</td></tr>
+<tr><td class="cn">lam3_R5Mpch</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of tidal tensor at 5 Mpc/h</td></tr>
+<tr><td class="cn">lamH1_R3Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
+<tr><td class="cn">lamH2_R3Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
+<tr><td class="cn">lamH3_R3Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
+<tr><td class="cn">lamH1_R5Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
+<tr><td class="cn">lamH2_R5Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
+<tr><td class="cn">lamH3_R5Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr></tbody></table>
+      </details>
+      <details class="fcard">
+        <summary><span class="fname">Tensor catalog</span>
+          <code class="fpath">out_&lt;snap&gt;_tens.fits.gz</code>
+          <span class="fmeta">columns TBD</span></summary>
+        <p class="fdesc">Value-added: full 3×3 tidal tensor at several smoothing scales. Column documentation pending.</p>
+        <p class="pending">Column-level documentation for this file is not yet available in the README. The file is downloadable above; field definitions will be added here.</p>
+      </details>
+
+    <h3 class="grp-h">Particle subsamples <span class="badge">HDF5 &middot; compressed</span></h3>
+    
+      <details class="fcard">
+        <summary><span class="fname">Particle IDs</span>
+          <code class="fpath">comp_snapshot_&lt;NNN&gt;_subsample&lt;x&gt;_ids.h5</code>
+          <span class="fmeta">compressed binary in HDF5</span></summary>
+        <p class="fdesc">Unique particle identifiers. Stored with custom algorithmic compression (3–4×), so it must be
+        read with the Sahyadri reader rather than plain <code>h5py</code>.</p>
+      </details>
+      <details class="fcard">
+        <summary><span class="fname">Positions</span>
+          <code class="fpath">comp_snapshot_&lt;NNN&gt;_subsample&lt;x&gt;_positions.h5</code>
+          <span class="fmeta">compressed binary in HDF5</span></summary>
+        <p class="fdesc">Comoving particle positions (Mpc/h). Stored with custom algorithmic compression (3–4×), so it must be
+        read with the Sahyadri reader rather than plain <code>h5py</code>.</p>
+      </details>
+      <details class="fcard">
+        <summary><span class="fname">Velocities</span>
+          <code class="fpath">comp_snapshot_&lt;NNN&gt;_subsample&lt;x&gt;_velocities.h5</code>
+          <span class="fmeta">compressed binary in HDF5</span></summary>
+        <p class="fdesc">Particle velocities (km/s). Stored with custom algorithmic compression (3–4×), so it must be
+        read with the Sahyadri reader rather than plain <code>h5py</code>.</p>
+      </details>
+  </div>
+
+  <div class="section" id="readers">
+    <h2 class="section-title">Reader functions</h2>
+    <p class="section-sub">FITS catalogs read with standard tools. Particle files use compressed blocks and
+       need the reader from the
+       <a href="https://github.com/a-paranjape/sahyadri-sandbox/" target="_blank" rel="noopener">sahyadri-sandbox</a> repository.</p>
+    <hr class="section-rule">
+<h3 class="grp-h">Halo catalogs &mdash; FITS</h3>
+<pre class="code"><span class="cmt"># pip install astropy</span>
+<span class="kw">from</span> astropy.table <span class="kw">import</span> Table
+
+<span class="kw">def</span> load_halo_catalog(filename):
+    <span class="cmt">"""Load a Sahyadri halo catalog (basic / extended / vahc / tens).</span>
+<span class="cmt">    Works directly on the .fits.gz file; returns an astropy Table."""</span>
+    <span class="kw">return</span> Table.read(filename)        <span class="cmt"># HDU 1, binary table</span>
+
+t = load_halo_catalog(<span class="st">"out_100_basic.fits.gz"</span>)
+<span class="kw">print</span>(t.colnames, len(t))
+mvir = t[<span class="st">"Mvir"</span>]                      <span class="cmt"># columns by name</span>
+</pre>
+
+    <h3 class="grp-h">Particle subsamples &mdash; compressed HDF5</h3>
+<pre class="code"><span class="cmt"># git clone https://github.com/a-paranjape/sahyadri-sandbox.git</span>
+<span class="cmt"># then make its readers importable (add the repo to PYTHONPATH)</span>
+<span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">from</span> readers <span class="kw">import</span> SnapshotReader
+
+<span class="kw">def</span> load_particles(sim_stem, snap, subsamples=[<span class="st">1</span>], real=<span class="st">1</span>,
+                   blocks=(<span class="st">"ids"</span>,<span class="st">"pos"</span>,<span class="st">"vel"</span>,<span class="st">"potential"</span>)):
+    <span class="cmt">"""sim_stem e.g. 'sims/sahyadri/default2048/'. Returns a dict of arrays."""</span>
+    sr = SnapshotReader(sim_stem=sim_stem, real=real, snap=snap,
+                        read_header=<span class="kw">True</span>, use_compressed=<span class="kw">True</span>)
+    <span class="kw">return</span> {b: sr.read_block(b, subsamples=subsamples) <span class="kw">for</span> b <span class="kw">in</span> blocks}
+
+data = load_particles(<span class="st">"sims/sahyadri/default2048/"</span>, snap=<span class="st">100</span>, subsamples=[<span class="st">1</span>])
+<span class="kw">for</span> k, v <span class="kw">in</span> data.items():
+    <span class="kw">print</span>(k, v.shape)
+</pre>
+  </div>
+
+  <div class="section" id="snaps">
+    <h2 class="section-title">Snapshot &harr; redshift &harr; scale factor</h2>
+    <p class="section-sub">101 snapshots, 0&ndash;100. Snapshot 100 is z = 0 (a = 1). Redshift is computed as
+       z = 1/a &minus; 1.</p>
+    <hr class="section-rule">
+<div class="snap-tools">
+      <input type="text" id="snapSearch" placeholder="Filter by snapshot or redshift…" aria-label="Filter snapshots">
+      <span class="note" id="snapShown"></span>
+    </div>
+    <div class="snap-scroll">
+      <table class="snap">
+        <thead><tr><th>Snapshot</th><th>Scale factor a</th><th>Redshift z</th></tr></thead>
+        <tbody id="snapBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+
+<div id="site-footer"></div>
+<script src="js/main.js"></script>
+<script>
+const DATA = {"base": "http://sahyadri.tifr.res.in/data/sahyadri_sims/", "cosmologies": [["default2048", "Fiducial: Ωₘ=0.3138, nₛ=0.9649, h=0.6736, Aₛ=2.09×10⁻⁹, w=0, Ωₖ=0"], ["var_As_m2048", "Aₛ → 0.90 × fiducial"], ["var_As_p2048", "Aₛ → 1.10 × fiducial"], ["var_Om_m2048", "Ωₘ → 0.95 × fiducial"], ["var_Om_p2048", "Ωₘ → 1.05 × fiducial"], ["var_h_m2048", "h → 0.95 × fiducial"], ["var_h_p2048", "h → 1.05 × fiducial"], ["var_ns_m2048", "nₛ → 0.95 × fiducial"], ["var_ns_p2048", "nₛ → 1.05 × fiducial"], ["var_w_m2048", "w → −0.5"], ["var_w_p2048", "w → +0.5"]], "snaps": [{"snap": 0, "a": 0.076923, "z": 12.000013000012999}, {"snap": 1, "a": 0.086154, "z": 10.607122130139054}, {"snap": 2, "a": 0.095385, "z": 9.483828694239136}, {"snap": 3, "a": 0.104615, "z": 8.55885867227453}, {"snap": 4, "a": 0.113846, "z": 7.78379565377791}, {"snap": 5, "a": 0.123077, "z": 7.124994921878173}, {"snap": 6, "a": 0.132308, "z": 6.558121957855912}, {"snap": 7, "a": 0.141538, "z": 6.065240430131838}, {"snap": 8, "a": 0.150769, "z": 5.632663213260021}, {"snap": 9, "a": 0.16, "z": 5.25}, {"snap": 10, "a": 0.169231, "z": 4.909082851250657}, {"snap": 11, "a": 0.178462, "z": 4.603433784222972}, {"snap": 12, "a": 0.187692, "z": 4.3278775866845685}, {"snap": 13, "a": 0.196923, "z": 4.078126983643354}, {"snap": 14, "a": 0.206154, "z": 3.8507426486995158}, {"snap": 15, "a": 0.215385, "z": 3.6428488520556215}, {"snap": 16, "a": 0.224615, "z": 3.4520624179150987}, {"snap": 17, "a": 0.233846, "z": 3.2763186028411857}, {"snap": 18, "a": 0.243077, "z": 3.1139227487586236}, {"snap": 19, "a": 0.252308, "z": 2.963409800719756}, {"snap": 20, "a": 0.261538, "z": 2.8235361591814576}, {"snap": 21, "a": 0.270769, "z": 2.6931849657826414}, {"snap": 22, "a": 0.28, "z": 2.571428571428571}, {"snap": 23, "a": 0.289231, "z": 2.457444049911662}, {"snap": 24, "a": 0.298462, "z": 2.3505102827160576}, {"snap": 25, "a": 0.307692, "z": 2.2500032500032496}, {"snap": 26, "a": 0.316923, "z": 2.155340571684605}, {"snap": 27, "a": 0.326154, "z": 2.066036289605524}, {"snap": 28, "a": 0.335385, "z": 1.9816479568257375}, {"snap": 29, "a": 0.344615, "z": 1.9017889528894565}, {"snap": 30, "a": 0.353846, "z": 1.826088185255733}, {"snap": 31, "a": 0.363077, "z": 1.754236704610868}, {"snap": 32, "a": 0.372308, "z": 1.6859481934312455}, {"snap": 33, "a": 0.381538, "z": 1.6209709124648137}, {"snap": 34, "a": 0.390769, "z": 1.5590566293641515}, {"snap": 35, "a": 0.4, "z": 1.5}, {"snap": 36, "a": 0.409231, "z": 1.4436076445821553}, {"snap": 37, "a": 0.418462, "z": 1.3897032466508308}, {"snap": 38, "a": 0.427692, "z": 1.338131178511639}, {"snap": 39, "a": 0.436923, "z": 1.2887327973121123}, {"snap": 40, "a": 0.446154, "z": 1.241378537455677}, {"snap": 41, "a": 0.455385, "z": 1.1959440912634367}, {"snap": 42, "a": 0.464615, "z": 1.1523196625162768}, {"snap": 43, "a": 0.473846, "z": 1.110390295581265}, {"snap": 44, "a": 0.483077, "z": 1.0700633646395916}, {"snap": 45, "a": 0.492308, "z": 1.0312487304695432}, {"snap": 46, "a": 0.501538, "z": 0.9938668655216552}, {"snap": 47, "a": 0.510769, "z": 0.9578322098639502}, {"snap": 48, "a": 0.52, "z": 0.9230769230769229}, {"snap": 49, "a": 0.529231, "z": 0.8895340597961949}, {"snap": 50, "a": 0.538462, "z": 0.8571412653074868}, {"snap": 51, "a": 0.547692, "z": 0.8258437223841137}, {"snap": 52, "a": 0.556923, "z": 0.7955803585055745}, {"snap": 53, "a": 0.566154, "z": 0.7663038678522096}, {"snap": 54, "a": 0.575385, "z": 0.7379667526960207}, {"snap": 55, "a": 0.584615, "z": 0.7105274411364744}, {"snap": 56, "a": 0.593846, "z": 0.6839382600876323}, {"snap": 57, "a": 0.603077, "z": 0.658163053805733}, {"snap": 58, "a": 0.612308, "z": 0.6331650084597948}, {"snap": 59, "a": 0.621538, "z": 0.6089120858258061}, {"snap": 60, "a": 0.630769, "z": 0.5853664336706463}, {"snap": 61, "a": 0.64, "z": 0.5625}, {"snap": 62, "a": 0.649231, "z": 0.5402838126953273}, {"snap": 63, "a": 0.658462, "z": 0.5186905242823427}, {"snap": 64, "a": 0.667692, "z": 0.4976965427173008}, {"snap": 65, "a": 0.676923, "z": 0.477272895144647}, {"snap": 66, "a": 0.686154, "z": 0.4573987763679872}, {"snap": 67, "a": 0.695385, "z": 0.4380523019622222}, {"snap": 68, "a": 0.704615, "z": 0.4192147484796662}, {"snap": 69, "a": 0.713846, "z": 0.400862370875511}, {"snap": 70, "a": 0.723077, "z": 0.3829785762788749}, {"snap": 71, "a": 0.732308, "z": 0.36554564472872086}, {"snap": 72, "a": 0.741538, "z": 0.34854855718789857}, {"snap": 73, "a": 0.750769, "z": 0.3319676225310315}, {"snap": 74, "a": 0.76, "z": 0.3157894736842106}, {"snap": 75, "a": 0.769231, "z": 0.299999610000117}, {"snap": 76, "a": 0.778462, "z": 0.2845842186259573}, {"snap": 77, "a": 0.787692, "z": 0.2695317459108384}, {"snap": 78, "a": 0.796923, "z": 0.2548263759484919}, {"snap": 79, "a": 0.806154, "z": 0.24045777853859174}, {"snap": 80, "a": 0.815385, "z": 0.2264145158422095}, {"snap": 81, "a": 0.824615, "z": 0.21268713278317763}, {"snap": 82, "a": 0.833846, "z": 0.1992622138860174}, {"snap": 83, "a": 0.843077, "z": 0.18613127863765722}, {"snap": 84, "a": 0.852308, "z": 0.173284774987446}, {"snap": 85, "a": 0.861538, "z": 0.1607149075258434}, {"snap": 86, "a": 0.870769, "z": 0.14841019834192526}, {"snap": 87, "a": 0.88, "z": 0.13636363636363646}, {"snap": 88, "a": 0.889231, "z": 0.12456718220574858}, {"snap": 89, "a": 0.898462, "z": 0.11301312687681841}, {"snap": 90, "a": 0.907692, "z": 0.10169528871026734}, {"snap": 91, "a": 0.916923, "z": 0.09060411833927162}, {"snap": 92, "a": 0.926154, "z": 0.07973403991128891}, {"snap": 93, "a": 0.935385, "z": 0.06907850778021873}, {"snap": 94, "a": 0.944615, "z": 0.0586323528633359}, {"snap": 95, "a": 0.953846, "z": 0.04838726586891395}, {"snap": 96, "a": 0.963077, "z": 0.038338575212574}, {"snap": 97, "a": 0.972308, "z": 0.028480687189655907}, {"snap": 98, "a": 0.981538, "z": 0.018809256493380833}, {"snap": 99, "a": 0.990769, "z": 0.009317005275699897}, {"snap": 100, "a": 1.0, "z": 0.0}], "cols": {"basic": [["id", "i8", "Unique halo identifier"], ["pid", "i8", "Parent halo ID (-1 if no parent, i.e., distinct halo)"], ["Mvir", "f4", "Virial mass in M☉/h"], ["Rvir", "f4", "Virial radius in kpc/h"], ["rs", "f4", "Scale radius in kpc/h (NFW profile fitting)"], ["vrms", "f4", "Velocity dispersion in km/s"], ["x", "f4", "Halo center x-coordinate in Mpc/h"], ["y", "f4", "Halo center y-coordinate in Mpc/h"], ["z", "f4", "Halo center z-coordinate in Mpc/h"], ["vx", "f4", "Halo velocity x-component in km/s"], ["vy", "f4", "Halo velocity y-component in km/s"], ["vz", "f4", "Halo velocity z-component in km/s"], ["Mvir_all", "f4", "Total mass including unbound particles in M☉/h"], ["M200b", "f4", "Mass within radius where density = 200 × background density in M☉/h"], ["M200c", "f4", "Mass within radius where density = 200 × critical density in M☉/h"], ["M500c", "f4", "Mass within radius where density = 500 × critical density in M☉/h"], ["M2500c", "f4", "Mass within radius where density = 2500 × critical density in M☉/h"], ["T/|U|", "f4", "Ratio of kinetic to potential energy"], ["Mpeak", "f4", "Maximum mass ever achieved by this halo in M☉/h"], ["Vpeak", "f4", "Maximum circular velocity ever achieved in km/s"], ["b1", "f4", ""]], "extended": [["scale", "f4", "Scale factor a = 1/(1+z) at this snapshot"], ["desc_scale", "f4", "Scale factor of descendant snapshot"], ["desc_id", "f4", "ID of descendant halo"], ["num_prog", "f4", "Number of progenitor halos"], ["upid", "i8", "ID of parent halo (if subhalo)"], ["desc_pid", "f4", "Parent ID of descendant"], ["phantom", "f4", "Phantom flag (interpolated halo)"], ["sam_Mvir", "f4", "Virial mass from semi-analytic model"], ["mmp?", "f4", "Most massive progenitor flag"], ["scale_of_last_MM", "f4", "Scale factor of last major merger"], ["vmax", "f4", "Maximum circular velocity in km/s"], ["Jx", "f4", "Angular momentum x-component"], ["Jy", "f4", "Angular momentum y-component"], ["Jz", "f4", "Angular momentum z-component"], ["Spin", "f4", "Peebles spin parameter"], ["Breadth_first_ID", "f4", "ID in breadth-first tree traversal"], ["Depth_first_ID", "f4", "ID in depth-first tree traversal"], ["Tree_root_ID", "f4", "Root ID of merger tree"], ["Orig_halo_ID", "f4", "Original halo ID from simulation"], ["Snap_idx", "f4", "Snapshot index"], ["Next_coprogenitor_depthfirst_ID", "f4", "Next co-progenitor in depth-first order"], ["Last_progenitor_depthfirst_ID", "f4", "Last progenitor in depth-first order"], ["Last_mainleaf_depthfirst_ID", "f4", "Last main leaf in depth-first order"], ["Tidal_Force", "f4", "Tidal force strength"], ["Tidal_ID", "f4", "ID of most significant tidal perturber"], ["Rs_Klypin", "f4", "Scale radius using Klypin vmax method in kpc/h"], ["Xoff", "f4", "Center offset from bulk position"], ["Voff", "f4", "Velocity offset from bulk velocity"], ["Spin_Bullock", "f4", "Bullock spin parameter"], ["b_to_a", "f4", "Intermediate to major axis ratio"], ["c_to_a", "f4", "Minor to major axis ratio"], ["A[x]", "f4", "Major axis direction x-component"], ["A[y]", "f4", "Major axis direction y-component"], ["A[z]", "f4", "Major axis direction z-component"], ["M_pe_Behroozi", "f4", "Pseudo-evolution mass (Behroozi method)"], ["M_pe_Diemer", "f4", "Pseudo-evolution mass (Diemer method)"], ["Halfmass_Radius", "f4", "Radius containing half the halo mass"], ["Macc", "f4", "Mass at accretion time"], ["Vacc", "f4", "Vmax at accretion time"], ["Halfmass_Scale", "f4", "Scale factor when half current mass was assembled"], ["Acc_Rate_Inst", "f4", "Instantaneous accretion rate"], ["Acc_Rate_100Myr", "f4", "Accretion rate over 100 Myr"], ["Acc_Rate_1*Tdyn", "f4", "Accretion rate over 1 dynamical time"], ["Acc_Rate_2*Tdyn", "f4", "Accretion rate over 2 dynamical times"], ["Acc_Rate_Mpeak", "f4", "Accretion rate when mass was at peak"], ["Acc_Log_Vmax_Inst", "f4", "Instantaneous log(Vmax) accretion rate"], ["Acc_Log_Vmax_1*Tdyn", "f4", "Log(Vmax) accretion rate over 1 Tdyn"], ["Mpeak_Scale", "f4", "Scale factor when mass peaked"], ["Acc_Scale", "f4", "Scale factor at accretion"], ["First_Acc_Scale", "f4", "Scale factor of first accretion"], ["First_Acc_Mvir", "f4", "Virial mass at first accretion"], ["First_Acc_Vmax", "f4", "Vmax at first accretion"], ["Vmax@Mpeak", "f4", "Vmax when mass was at its peak"], ["Tidal_Force_Tdyn", "f4", "Tidal force over dynamical time"], ["Log_", "f4", ""], ["Time_to_future_merger", "f4", "Time until next major merger"], ["Future_merger_MMP_ID", "f4", "ID of future merger partner"], ["Spin_at_Mpeak_Scale", "f4", "Spin parameter when mass peaked"]], "vahc": [["haloID", "i8", "Halo identifier matching other catalogs"], ["lam1_R2R200b", "f4", "1st eigenvalue of tidal tensor at 2×R200b"], ["lam2_R2R200b", "f4", "2nd eigenvalue of tidal tensor at 2×R200b"], ["lam3_R2R200b", "f4", "3rd eigenvalue of tidal tensor at 2×R200b"], ["lam1_R4R200b", "f4", "1st eigenvalue of tidal tensor at 4×R200b"], ["lam2_R4R200b", "f4", "2nd eigenvalue of tidal tensor at 4×R200b"], ["lam3_R4R200b", "f4", "3rd eigenvalue of tidal tensor at 4×R200b"], ["lam1_R6R200b", "f4", "1st eigenvalue of tidal tensor at 6×R200b"], ["lam2_R6R200b", "f4", "2nd eigenvalue of tidal tensor at 6×R200b"], ["lam3_R6R200b", "f4", "3rd eigenvalue of tidal tensor at 6×R200b"], ["lam1_R8R200b", "f4", "1st eigenvalue of tidal tensor at 8×R200b"], ["lam2_R8R200b", "f4", "2nd eigenvalue of tidal tensor at 8×R200b"], ["lam3_R8R200b", "f4", "3rd eigenvalue of tidal tensor at 8×R200b"], ["lam1_R2Mpch", "f4", "1st eigenvalue of tidal tensor at 2 Mpc/h"], ["lam2_R2Mpch", "f4", "2nd eigenvalue of tidal tensor at 2 Mpc/h"], ["lam3_R2Mpch", "f4", "3rd eigenvalue of tidal tensor at 2 Mpc/h"], ["lam1_R3Mpch", "f4", "1st eigenvalue of tidal tensor at 3 Mpc/h"], ["lam2_R3Mpch", "f4", "2nd eigenvalue of tidal tensor at 3 Mpc/h"], ["lam3_R3Mpch", "f4", "3rd eigenvalue of tidal tensor at 3 Mpc/h"], ["lam1_R5Mpch", "f4", "1st eigenvalue of tidal tensor at 5 Mpc/h"], ["lam2_R5Mpch", "f4", "2nd eigenvalue of tidal tensor at 5 Mpc/h"], ["lam3_R5Mpch", "f4", "3rd eigenvalue of tidal tensor at 5 Mpc/h"], ["lamH1_R3Mpch", "f4", ""], ["lamH2_R3Mpch", "f4", ""], ["lamH3_R3Mpch", "f4", ""], ["lamH1_R5Mpch", "f4", ""], ["lamH2_R5Mpch", "f4", ""], ["lamH3_R5Mpch", "f4", ""]], "tens": []}};
+const BASE = DATA.base;
+const pad3 = n => String(n).padStart(3,"0");
+
+const HALO_CONTENT = [
+  ["basic","Basic"],["extended","Extended"],["vahc","VAHC"],["tens","Tensor"]
+];
+const PART_CONTENT = [["ids","IDs"],["positions","Positions"],["velocities","Velocities"]];
+const SUBSAMPLES = [1, 3, 5, 9, 10, 12, 15, 20, 25];
+const PUBLIC_SUB = [1];
+
+const state = {
+  fam:"halos",
+  cosmos:new Set(["default2048"]),
+  content:new Set(["basic"]),
+  subs:new Set([1]),
+  snaps:[100],
+  mirror:true
+};
+
+/* ---- cosmology list ---- */
+const cosmoList = document.getElementById("cosmoList");
+DATA.cosmologies.forEach(([c,d])=>{
+  const l=document.createElement("label");
+  l.innerHTML=`<input type="checkbox" value="${c}" ${state.cosmos.has(c)?"checked":""}>
+    <span><span class="cn">${c}</span><br><span class="cd">${d}</span></span>`;
+  l.querySelector("input").addEventListener("change",e=>{
+    e.target.checked?state.cosmos.add(c):state.cosmos.delete(c); render();
+  });
+  cosmoList.appendChild(l);
+});
+function syncCosmoBoxes(){ cosmoList.querySelectorAll("input").forEach(i=>i.checked=state.cosmos.has(i.value)); }
+document.querySelector("[data-cosmo-all]").onclick=()=>{ DATA.cosmologies.forEach(([c])=>state.cosmos.add(c)); syncCosmoBoxes(); render(); };
+document.querySelector("[data-cosmo-fid]").onclick=()=>{ state.cosmos=new Set(["default2048"]); syncCosmoBoxes(); render(); };
+document.querySelector("[data-cosmo-none]").onclick=()=>{ state.cosmos.clear(); syncCosmoBoxes(); render(); };
+
+/* ---- content + subsample checkboxes ---- */
+const contentChecks=document.getElementById("contentChecks");
+const contentLabel=document.getElementById("contentLabel");
+const subField=document.getElementById("subField");
+const subChecks=document.getElementById("subChecks");
+
+function buildContent(){
+  const list = state.fam==="halos"?HALO_CONTENT:PART_CONTENT;
+  contentLabel.textContent = state.fam==="halos"?"Halo file types":"Particle quantities";
+  contentChecks.innerHTML="";
+  // reset content selection to first item when switching family
+  state.content = new Set([list[0][0]]);
+  list.forEach(([k,lbl],i)=>{
+    const l=document.createElement("label");
+    l.innerHTML=`<input type="checkbox" value="${k}" ${i===0?"checked":""}> ${lbl}`;
+    l.querySelector("input").addEventListener("change",e=>{
+      e.target.checked?state.content.add(k):state.content.delete(k); render();
+    });
+    contentChecks.appendChild(l);
+  });
+  subField.hidden = state.fam!=="particles";
+  if(state.fam==="particles"){
+    subChecks.innerHTML="";
+    state.subs=new Set([1]);
+    SUBSAMPLES.forEach(x=>{
+      const pub=PUBLIC_SUB.includes(x);
+      const l=document.createElement("label");
+      if(!pub) l.classList.add("disabled");
+      l.innerHTML=`<input type="checkbox" value="${x}" ${x===1?"checked":""} ${pub?"":"disabled"}> ${x}%${pub?"":" · on request"}`;
+      if(pub) l.querySelector("input").addEventListener("change",e=>{
+        e.target.checked?state.subs.add(x):state.subs.delete(x); render();
+      });
+      subChecks.appendChild(l);
+    });
+  }
+}
+
+/* ---- family toggle ---- */
+document.querySelectorAll("#famSeg button").forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll("#famSeg button").forEach(x=>x.setAttribute("aria-pressed","false"));
+    b.setAttribute("aria-pressed","true");
+    state.fam=b.dataset.fam; buildContent(); render();
+  };
+});
+
+/* ---- snapshot parsing ---- */
+function parseSnaps(str){
+  const out=new Set();
+  str.split(",").forEach(tok=>{
+    tok=tok.trim(); if(!tok) return;
+    const m=tok.match(/^(\d+)\s*-\s*(\d+)$/);
+    if(m){ let a=+m[1],b=+m[2]; if(a>b)[a,b]=[b,a];
+      for(let i=a;i<=b;i++) if(i>=0&&i<=100) out.add(i); }
+    else if(/^\d+$/.test(tok)){ const v=+tok; if(v>=0&&v<=100) out.add(v); }
+  });
+  return [...out].sort((a,b)=>a-b);
+}
+const snapInput=document.getElementById("snapInput");
+const snapResolved=document.getElementById("snapResolved");
+snapInput.addEventListener("input",()=>{ state.snaps=parseSnaps(snapInput.value); render(); });
+document.querySelectorAll("#snapPresets button").forEach(b=>{
+  b.onclick=()=>{ const v=b.dataset.snap;
+    snapInput.value = v==="all"?"0-100":v;
+    state.snaps=parseSnaps(snapInput.value); render(); };
+});
+document.getElementById("mirror").addEventListener("change",e=>{ state.mirror=e.target.checked; render(); });
+
+/* ---- URL construction ---- */
+function urlsForHalo(){
+  const u=[];
+  for(const c of state.cosmos) for(const s of state.snaps) for(const t of state.content)
+    u.push(`${BASE}halos/sahyadri/${c}/r1/compressed/out_${s}_${t}.fits.gz`);
+  return u;
+}
+function urlsForParticle(){
+  const u=[];
+  for(const c of state.cosmos) for(const x of state.subs) for(const s of state.snaps) for(const q of state.content)
+    u.push(`${BASE}sims/sahyadri/${c}/r1/compressed/subsample${x}/comp_snapshot_${pad3(s)}_subsample${x}_${q}.h5`);
+  return u;
+}
+function buildUrls(){ return state.fam==="halos"?urlsForHalo():urlsForParticle(); }
+
+/* ---- render ---- */
+const termOut=document.getElementById("termOut");
+const fileCount=document.getElementById("fileCount");
+let lastScript="";
+
+function render(){
+  // resolved snapshot redshifts
+  if(state.snaps.length){
+    const zr=state.snaps.map(s=>{const r=DATA.snaps[s];return r?r.z:NaN;});
+    const fmt=z=>z<0.01?z.toExponential(2):z.toFixed(3);
+    const preview = state.snaps.length<=6
+      ? state.snaps.map((s,i)=>`${s}(z=${fmt(zr[i])})`).join(", ")
+      : `${state.snaps.length} snapshots, z = ${fmt(Math.max(...zr))} … ${fmt(Math.min(...zr))}`;
+    snapResolved.innerHTML = `Resolved: <b>${preview}</b>`;
+  } else snapResolved.innerHTML = `<span style="color:var(--warn)">No valid snapshots parsed.</span>`;
+
+  const urls=buildUrls();
+  fileCount.textContent = `${urls.length} file${urls.length===1?"":"s"}`;
+
+  // terminal preview (HTML-colored, capped) + plain script
+  const wgetOpts = state.mirror ? "-c -x -nH --cut-dirs=2" : "-c";
+  const mirrorNote = state.mirror
+    ? `# Files are saved into a local copy of the server's directory layout:\n`
+      + `#   halos/sahyadri/<cosmo>/r1/compressed/...   and   sims/sahyadri/<cosmo>/...\n`
+      + `# so the cosmology stays in the path and nothing overwrites across runs.\n`
+      + `#   -x keep dir path | -nH drop hostname | --cut-dirs=2 drop 'data/sahyadri_sims'\n`
+    : `# FLAT mode: every file lands in the current folder. Identical names across\n`
+      + `#   cosmologies and snapshots WILL overwrite each other.\n`;
+  const head = `#!/bin/bash\n# Sahyadri data download — generated 2026-06-18\n`
+    + `# ${urls.length} files | family=${state.fam} | cosmologies=${[...state.cosmos].join(",")||"none"}\n`
+    + mirrorNote;
+  const body = urls.map(u=>`wget ${wgetOpts} "${u}"`).join("\n");
+  lastScript = head + "set -e\n" + body + "\n";
+
+  if(!urls.length){
+    termOut.innerHTML = `<span class="cmt"># nothing selected yet — pick contents, cosmologies and snapshots</span>`;
+  } else {
+    const esc=s=>s.replace(/&/g,"&amp;").replace(/</g,"&lt;");
+    const shown=urls.slice(0,40);
+    let h = `<span class="cmt">#!/bin/bash</span>\n`
+      + `<span class="cmt"># Sahyadri download · ${urls.length} files</span>\n`
+      + `<span class="cmt">${state.mirror ? "# local folders mirror the server — cosmology kept in the path" : "# FLAT — identical filenames overwrite across cosmologies"}</span>\n`
+      + `<span class="amb">set -e</span>\n`;
+    h += shown.map(u=>`<span class="blu">wget</span> <span class="amb">${wgetOpts}</span> <span class="grn">"${esc(u)}"</span>`).join("\n");
+    if(urls.length>shown.length) h += `\n<span class="cmt"># … +${urls.length-shown.length} more (in the copied / downloaded script)</span>`;
+    termOut.innerHTML = h;
+  }
+}
+
+/* ---- copy / download ---- */
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1600); }
+document.getElementById("copyBtn").onclick=async()=>{
+  try{ await navigator.clipboard.writeText(lastScript); toast("Script copied"); }
+  catch{ toast("Copy failed — select & copy manually"); }
+};
+document.getElementById("dlBtn").onclick=()=>{
+  const blob=new Blob([lastScript],{type:"text/x-sh"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download="download_sahyadri.sh"; a.click(); URL.revokeObjectURL(a.href); toast("download_sahyadri.sh saved");
+};
+
+/* ---- snapshot table ---- */
+const snapBody=document.getElementById("snapBody");
+const snapShown=document.getElementById("snapShown");
+function fmtZ(z){ return z<0.01? z.toExponential(3): z.toFixed(4); }
+function renderSnapTable(filter=""){
+  const f=filter.trim();
+  const rows=DATA.snaps.filter(r=>{
+    if(!f) return true;
+    return String(r.snap).includes(f) || r.z.toFixed(4).includes(f) || r.a.toFixed(6).includes(f);
+  });
+  snapBody.innerHTML=rows.map(r=>
+    `<tr class="${r.snap===100?"z0":""}"><td>${r.snap}</td><td>${r.a.toFixed(6)}</td><td>${fmtZ(r.z)}</td></tr>`
+  ).join("");
+  snapShown.textContent=`${rows.length} of ${DATA.snaps.length} snapshots`;
+}
+document.getElementById("snapSearch").addEventListener("input",e=>renderSnapTable(e.target.value));
+
+/* ---- init ---- */
+buildContent();
+renderSnapTable();
+render();
+</script>
+</body>
+</html>
