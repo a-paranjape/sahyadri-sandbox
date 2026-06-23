@@ -21,6 +21,7 @@
     { id: "science",        href: "science.html",        label: "Science" },
     { id: "learn",          href: "learn.html",          label: "Learning Hub" },
     { id: "visualizations", href: "visualizations.html", label: "Visualizations" },
+    { id: "contact",   href: "contact.html",   label: "Contact" },
     { id: "publications",   href: "publications.html",   label: "Publications" },
   ];
 
@@ -81,7 +82,7 @@
           "Designed for DESI BGS, 4MOST, and next-generation survey science. " +
           "Run on Pegasus Cluster at IUCAA Pune." +
         "</div>" +
-        '<div class="footer-copy">© 2025 Sahyadri Collaboration</div>' +
+        '<div class="footer-copy">© 2026 Sahyadri Collaboration</div>' +
       "</footer>";
   }
 
@@ -236,6 +237,18 @@
     slider.addEventListener("input", update);
     update();
   }
+
+  /*contact email */
+  document.querySelectorAll('.contact-mail').forEach(function (el) {
+    var addr = el.dataset.user + '@' + el.dataset.domain;   // assembled at runtime
+    var a = document.createElement('a');
+    a.href = 'mailto:' + addr;
+    a.textContent = addr;
+    a.className = 'contact-link';
+    a.setAttribute('aria-label', 'Email ' + addr);
+    el.replaceWith(a);
+  });
+
 
   /* ─── Initialise on DOM ready ─── */
   document.addEventListener("DOMContentLoaded", function () {

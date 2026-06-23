@@ -21,25 +21,83 @@
     <div id="accordionContainer"></div>
   </div>
 
-  <div class="section">
+
+
+<div class="section">
     <h2 class="section-title">Getting Started</h2>
+    <p class="section-sub">A complete, runnable example: download the z = 0 halo
+       catalogs for the fiducial cosmology, then relate halo mass to its tidal
+       environment &mdash; concentration, overdensity, and tidal anisotropy.</p>
     <hr class="section-rule">
-    <div class="code-block"><span class="comment"># Quick-start example: Reading a Sahyadri halo catalog</span>
+    <div class="code-block"><span class="comment"># Quick-start: halo mass vs. tidal environment at z = 0 (fiducial cosmology)</span>
+<span class="comment">#</span>
+<span class="comment"># Step 1 - download the basic, extended and VAHC catalogs for the default</span>
+<span class="comment"># simulation at z = 0 (snapshot 100). Run these once, in a shell:</span>
+<span class="comment">#</span>
+<span class="comment">#   BASE=http://sahyadri.tifr.res.in/data/sahyadri_sims/halos/sahyadri/default2048/r1/compressed</span>
+<span class="comment">#   wget -c $BASE/out_100_basic.fits.gz</span>
+<span class="comment">#   wget -c $BASE/out_100_vahc.fits.gz</span>
+
 <span class="kw">import</span> numpy <span class="kw">as</span> np
-<span class="kw">from</span> sahyadri_tools <span class="kw">import</span> read_catalog, read_snapshot
+<span class="kw">import</span> matplotlib.pyplot <span class="kw">as</span> plt
+<span class="kw">from</span> matplotlib.colors <span class="kw">import</span> LogNorm
+<span class="kw">from</span> astropy.table <span class="kw">import</span> Table
 
-<span class="comment"># Load halo catalog at z=0 for fiducial cosmology</span>
-halos = <span class="fn">read_catalog</span>(<span class="str">"fiducial"</span>, snap=<span class="num">100</span>)
+<span class="comment"># Step 2 - read the catalogs (rows are matched across basic / extended / vahc)</span>
+basic = Table.<span class="fn">read</span>(<span class="str">"out_100_basic.fits.gz"</span>)
+vahc  = Table.<span class="fn">read</span>(<span class="str">"out_100_vahc.fits.gz"</span>)
 
-<span class="comment"># Access halo properties</span>
-mass = halos[<span class="str">"mvir"</span>]    <span class="comment"># Virial mass [h-1 Msun]</span>
-pos  = halos[<span class="str">"pos"</span>]     <span class="comment"># Position [h-1 Mpc]</span>
-vel  = halos[<span class="str">"vel"</span>]     <span class="comment"># Velocity [km/s]</span>
+<span class="comment"># Step 3 - mass and concentration from the basic catalog.</span>
+<span class="comment"># Concentration is the standard NFW definition c = Rvir / rs.</span>
+mvir = basic[<span class="str">"Mvir"</span>]                  <span class="comment"># virial mass [Msun/h]</span>
+conc = basic[<span class="str">"Rvir"</span>] / basic[<span class="str">"rs"</span>]    <span class="comment"># concentration</span>
 
-<span class="comment"># Filter resolved halos (>=40 particles)</span>
-mask = mass >= <span class="num">3.2e9</span>
-<span class="fn">print</span>(<span class="str">f"Resolved halos: {mass[mask].size}"</span>)</div>
+<span class="comment"># Step 4 - tidal environment from the VAHC catalog. lam1, lam2, lam3 are the</span>
+<span class="comment"># eigenvalues of the tidal tensor smoothed at 4 x R200b.</span>
+l1 = vahc[<span class="str">"lam1_R5Mpch"</span>]
+l2 = vahc[<span class="str">"lam2_R5Mpch"</span>]
+l3 = vahc[<span class="str">"lam3_R5Mpch"</span>]
+
+<span class="comment"># Overdensity = trace of the tidal tensor:</span>
+delta = l1 + l2 + l3
+delta = delta/np.mean(delta) -1
+
+
+<span class="comment"># Tidal anisotropy: rms of the eigenvalue differences scaled by (1 + delta):</span>
+q2    = <span class="num">0.5</span> * ((l1 - l2)**<span class="num">2</span> + (l2 - l3)**<span class="num">2</span> + (l3 - l1)**<span class="num">2</span>)
+alpha = np.<span class="fn">sqrt</span>(q2) / (<span class="num">1.0</span> + delta)
+
+<span class="comment"># Step 5 - keep resolved haloes with finite, positive estimates</span>
+m = (mvir &gt; <span class="num">9e9</span>) &amp; (conc &gt; <span class="num">0</span>) &amp; (alpha &gt; <span class="num">0</span>) &amp; np.<span class="fn">isfinite</span>(delta)
+logM = np.<span class="fn">log10</span>(mvir[m])
+<span class="fn">print</span>(<span class="str">f"Selected {logM.size} haloes"</span>)
+
+<span class="comment"># Step 6 - three panels sharing the halo-mass axis</span>
+fig, ax = plt.<span class="fn">subplots</span>(<span class="num">1</span>, <span class="num">3</span>, sharey=<span class="kw">True</span>, figsize=(<span class="num">10</span>, <span class="num">4</span>))
+panels = [(np.<span class="fn">log10</span>(conc[m]), <span class="str">"log c = Rvir / rs"</span>),
+          (np.log10(1+delta[m]),          <span class="str">"log of Overdensity"</span>),
+          (np.<span class="fn">log10</span>(alpha[m]), <span class="str">"log tidal anisotropy  a"</span>)]
+
+<span class="kw">for</span> axi, (y, label) <span class="kw">in</span> <span class="fn">zip</span>(ax, panels):
+    h = axi.<span class="fn">hist2d</span>(y, logM, bins=<span class="num">60</span>, cmin=<span class="num">1</span>, norm=<span class="fn">LogNorm</span>(), cmap=<span class="str">"plasma"</span>)
+    axi.<span class="fn">set_xlabel</span>(label)
+
+fig.<span class="fn">colorbar</span>(h[<span class="num">3</span>], ax=ax[-1], label=<span class="str">"N"</span>, pad=<span class="num">0.01</span>)
+ax[-<span class="num">0</span>].<span class="fn">set_xlabel</span>(<span class="str">"log10( Mvir [Msun/h] )"</span>)
+fig.<span class="fn">tight_layout</span>()
+fig.<span class="fn">savefig</span>(<span class="str">"mass_vs_environment.png"</span>, dpi=<span class="num">150</span>)
+plt.<span class="fn">show</span>()</div>
+
+    <figure style="margin:24px 0 0;text-align:center">
+       <img src="resources/mass_vs_environment.png"     
+           alt="Three-panel plot of halo concentration, overdensity and tidal anisotropy versus virial mass"
+           style="max-width:830px;width:100%;height:auto;border:1px solid #e4e7f0;border-radius:8px">
+      <figcaption class="section-sub" style="margin-top:10px;font-size:0.85rem">
+        Illustrative output of the example above. Each panel shares the halo-mass axis; colour encodes halo counts on a log scale.
+      </figcaption>
+    </figure>
   </div>
+
 
 </div>
 <div id="site-footer"></div>

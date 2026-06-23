@@ -123,14 +123,24 @@
 
   <div class="section" id="builder">
     <h2 class="section-title">Download builder</h2>
-    <p class="section-sub">Pick a product family, cosmologies, file contents, and snapshots. The terminal
-       on the right builds the full URL list and a ready-to-run <code>wget</code> script as you go.<br>
+<p class="section-sub">Pick a product family, cosmologies, file contents, and snapshots. The terminal
+   on the right builds the full URL list and a ready-to-run <code>wget</code> script as you go.
+   By default the script recreates the server's directory layout on your machine, so the
+   cosmology stays in the path and files from different cosmologies or snapshots never overwrite
+   one another:</p>
+<div class="path-block">sahyadri_sims/halos/sahyadri/&lt;cosmo&gt;/r1/compressed/&hellip;</div>
+<p class="section-sub">Untick <em>mirror server dirs</em> (at the bottom of the terminal) to drop everything into a
+   single folder instead.</p>
 
-       By default the script recreates the server's directory layout on your machine<br>
-       <code>sahyadri_sims/halos/sahyadri/&lt;cosmo&gt;/r1/compressed/&hellip;</code> <br> 
-       so the cosmology stays in the
-       path and files from different cosmologies or snapshots never overwrite one another. Untick
-       <em>mirror server dirs</em> to drop everything into a single folder instead.</p>
+<p class="section-sub">
+  When your selection is ready, click <em>Download .sh</em> to save
+  <code>download_sahyadri.sh</code>, move it to wherever you want the data, and run
+  <code>bash download_sahyadri.sh</code>. Files download one at a time; for a long list,
+  consider running it in the background (e.g. with <code>screen</code>). If it's
+  interrupted, just rerun it &mdash; already-downloaded files are skipped and it picks up
+  where it left off.
+</p>
+
     <hr class="section-rule">
 <div class="builder">
       <div class="panel">
@@ -230,8 +240,8 @@ http://sahyadri.tifr.res.in/data/sahyadri_sims/
 <tr><td class="cn">var_h_p2048</td><td>h → 1.05 × fiducial</td></tr>
 <tr><td class="cn">var_ns_m2048</td><td>nₛ → 0.95 × fiducial</td></tr>
 <tr><td class="cn">var_ns_p2048</td><td>nₛ → 1.05 × fiducial</td></tr>
-<tr><td class="cn">var_w_m2048</td><td>w → −0.5</td></tr>
-<tr><td class="cn">var_w_p2048</td><td>w → +0.5</td></tr></tbody>
+<tr><td class="cn">var_w_m2048</td><td>w_∥→ −0.5 <a href="DE_description.html">discussion on this variable</a>  </td></tr>
+<tr><td class="cn">var_w_p2048</td><td>w_∥→ +0.5 <a href="DE_description.html">discussion on this variable</a> </td></tr></tbody>
       </table>
     </div>
   </div>
@@ -269,7 +279,7 @@ http://sahyadri.tifr.res.in/data/sahyadri_sims/
 <tr><td class="cn">T/|U|</td><td><span class="dt">f4</span></td><td>Ratio of kinetic to potential energy</td></tr>
 <tr><td class="cn">Mpeak</td><td><span class="dt">f4</span></td><td>Maximum mass ever achieved by this halo in M☉/h</td></tr>
 <tr><td class="cn">Vpeak</td><td><span class="dt">f4</span></td><td>Maximum circular velocity ever achieved in km/s</td></tr>
-<tr><td class="cn">b1</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr></tbody></table>
+<tr><td class="cn">b1</td><td><span class="dt">f4</span></td><td>halo-by-halo bias as defined in arXiv:1706.09906 and arXiv:2001.08760</td></tr></tbody></table>
       </details>
       <details class="fcard">
         <summary><span class="fname">Extended catalog</span>
@@ -330,8 +340,7 @@ http://sahyadri.tifr.res.in/data/sahyadri_sims/
 <tr><td class="cn">First_Acc_Vmax</td><td><span class="dt">f4</span></td><td>Vmax at first accretion</td></tr>
 <tr><td class="cn">Vmax@Mpeak</td><td><span class="dt">f4</span></td><td>Vmax when mass was at its peak</td></tr>
 <tr><td class="cn">Tidal_Force_Tdyn</td><td><span class="dt">f4</span></td><td>Tidal force over dynamical time</td></tr>
-<tr><td class="cn">Log_</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
-<tr><td class="cn">Time_to_future_merger</td><td><span class="dt">f4</span></td><td>Time until next major merger</td></tr>
+<tr><td class="cn">Log_Time_to_future_merger</td><td><span class="dt">f4</span></td><td>Time until next major merger</td></tr>
 <tr><td class="cn">Future_merger_MMP_ID</td><td><span class="dt">f4</span></td><td>ID of future merger partner</td></tr>
 <tr><td class="cn">Spin_at_Mpeak_Scale</td><td><span class="dt">f4</span></td><td>Spin parameter when mass peaked</td></tr></tbody></table>
       </details>
@@ -362,12 +371,12 @@ http://sahyadri.tifr.res.in/data/sahyadri_sims/
 <tr><td class="cn">lam1_R5Mpch</td><td><span class="dt">f4</span></td><td>1st eigenvalue of tidal tensor at 5 Mpc/h</td></tr>
 <tr><td class="cn">lam2_R5Mpch</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of tidal tensor at 5 Mpc/h</td></tr>
 <tr><td class="cn">lam3_R5Mpch</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of tidal tensor at 5 Mpc/h</td></tr>
-<tr><td class="cn">lamH1_R3Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
-<tr><td class="cn">lamH2_R3Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
-<tr><td class="cn">lamH3_R3Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
-<tr><td class="cn">lamH1_R5Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
-<tr><td class="cn">lamH2_R5Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr>
-<tr><td class="cn">lamH3_R5Mpch</td><td><span class="dt">f4</span></td><td>&mdash;</td></tr></tbody></table>
+<tr><td class="cn">lamH1_R3Mpch</td><td><span class="dt">f4</span></td><td>1st eigenvalue of density Hessian at 3 Mpc/h</td></tr>
+<tr><td class="cn">lamH2_R3Mpch</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of density Hessian at 3 Mpc/h</td></tr>
+<tr><td class="cn">lamH3_R3Mpch</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of density Hessian at 3 Mpc/h</td></tr>
+<tr><td class="cn">lamH1_R5Mpch</td><td><span class="dt">f4</span></td><td>1st eigenvalue of density Hessian at 5 Mpc/h</td></tr>
+<tr><td class="cn">lamH2_R5Mpch</td><td><span class="dt">f4</span></td><td>2nd eigenvalue of density Hessian at 5 Mpc/h</td></tr>
+<tr><td class="cn">lamH3_R5Mpch</td><td><span class="dt">f4</span></td><td>3rd eigenvalue of density Hessian at 5 Mpc/h</td></tr></tbody></table>
       </details>
       <details class="fcard">
         <summary><span class="fname">Tensor catalog</span>
@@ -444,7 +453,7 @@ data = load_particles(<span class="st">"sims/sahyadri/default2048/"</span>, snap
   <div class="section" id="snaps">
     <h2 class="section-title">Snapshot &harr; redshift &harr; scale factor</h2>
     <p class="section-sub">101 snapshots, 0&ndash;100. Snapshot 100 is z = 0 (a = 1). Redshift is computed as
-       z = 1/a &minus; 1.</p>
+       z = 1/a &minus; 1. You can download the <a href="resources/outputs100.txt">outputs100.txt</a>  file which list the scale factor of the 100 snapshot, the first row entry corresponds to snapshot=0</p>
     <hr class="section-rule">
 <div class="snap-tools">
       <input type="text" id="snapSearch" placeholder="Filter by snapshot or redshift…" aria-label="Filter snapshots">

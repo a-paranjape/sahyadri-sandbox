@@ -42,6 +42,19 @@ body {
 img { max-width: 100%; height: auto; display: block; }
 
 
+.path-block{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:.85rem;
+  color:#2e3a8c;
+  background:#eef0fb;
+  border:1px solid #e4e7f0;
+  border-radius:8px;
+  padding:10px 14px;
+  margin:8px 0 12px;
+  overflow-x:auto;
+  white-space:nowrap;   /* keep the path on one line; scroll on narrow screens */
+}
+
 /* ═══════ Navigation ═══════ */
 
 .nav {
@@ -102,6 +115,15 @@ img { max-width: 100%; height: auto; display: block; }
 
 
 /* ═══════ Layout ═══════ */
+    .contact-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:18px; }
+    .contact-grid .card{ display:flex; flex-direction:column; gap:6px; }
+    .contact-aff{ color:#5c6376; font-size:.9rem; margin:0; }
+    .contact-mail{ font-family:'IBM Plex Mono',monospace; font-size:.82rem; color:#5c6376; margin-top:auto; padding-top:8px; }
+    .contact-link{ font-family:'IBM Plex Mono',monospace; font-size:.82rem; color:#2e3a8c;
+                   text-decoration:none; word-break:break-all; margin-top:auto; padding-top:8px; }
+    .contact-link:hover{ text-decoration:underline; }
+
+
 
 .page-wrapper { padding-top: 56px; }
 
