@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>w&#8320;&ndash;w&#8336; Rotation Matrix &mdash; Sahyadri</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- MathJax (same CDN spirit as the Google-Fonts link above; self-host for an
+       offline-friendly portal). Fold the small style rules into css/style.css. -->
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+
+  <style>
+    .de-stack{ display:flex; flex-direction:column; gap:16px; }
+    .de-stack .card{ margin:0; }
+    .de-lead{ color:#5c6376; font-size:.95rem; margin:0 0 4px; }
+    mjx-container[display="true"]{ overflow-x:auto; overflow-y:hidden; padding:2px 0; }
+    .de-note{ font-size:.85rem; color:#5c6376; border-left:3px solid #cdd2e2;
+              padding:2px 0 2px 12px; margin-top:10px; }
+    .de-result{ font-size:1.02rem; }
+  </style>
+</head>
+<body>
+
+<div id="site-nav"></div>
+
+<div class="page-wrapper">
+
+  <!-- ===================== PART 1 ===================== -->
+  <div class="section">
+    <h2 class="section-title">Rotation matrix for the \(w_0\)&ndash;\(w_a\) parameter space</h2>
+    <p class="section-sub">A CMB-motivated rotation that separates the dark-energy equation-of-state plane
+       into a direction the CMB constrains tightly and a direction it leaves degenerate. Below: the
+       step-by-step construction of the matrix, then its application to the DESI DR2 best fit.</p>
+    <hr class="section-rule">
+
+    <div class="card card-flat card-accent">
+      <div class="card-title accent-text">Background</div>
+      <p class="card-text mt-16">
+        The CMB constraint on the comoving distance to last scattering \(D_M(z_\*)\) imposes a
+        near-perfect degeneracy in the \((w_0, w_a)\) plane:
+      </p>
+      $$ w_a = A\,(w_0 + 1), \qquad A = -3.68, $$
+      <p class="card-text">
+        and the degeneracy line passes through \(\Lambda\)CDM at \((w_0, w_a) = (-1, 0)\).
+      </p>
+    </div>
+
+    <div class="de-stack" style="margin-top:16px">
+
+      <div class="card">
+        <div class="card-title">Step 1 &mdash; Define the degeneracy direction</div>
+        <p class="card-text mt-16">Measured relative to \(\Lambda\)CDM we write
+           \(\Delta w_0 = w_0 + 1\) and \(\Delta w_a = w_a\). The <em>parallel</em> direction runs
+           along the degeneracy (left unconstrained by the CMB); the <em>perpendicular</em> direction
+           is the one the CMB pins down:</p>
+        $$ \vec{v}_\parallel = (1,\, A) = (1,\, -3.68), \qquad
+           \vec{v}_\perp = (-A,\, 1) = (3.68,\, 1). $$
+      </div>
+
+      <div class="card">
+        <div class="card-title">Step 2 &mdash; Normalise the basis vectors</div>
+        <p class="card-text mt-16">The common normalisation factor is</p>
+        $$ N = \sqrt{1 + A^2} = \sqrt{1 + (-3.68)^2} = \sqrt{14.5424} = 3.813, $$
+        <p class="card-text">giving the orthonormal basis</p>
+        $$ \hat{u}_\parallel = \tfrac{1}{N}(1,\, A) = (0.262,\, -0.965), \qquad
+           \hat{u}_\perp = \tfrac{1}{N}(-A,\, 1) = (0.965,\, 0.262). $$
+      </div>
+
+      <div class="card">
+        <div class="card-title">Step 3 &mdash; Construct the rotation matrix</div>
+        <p class="card-text mt-16">Stacking \(\hat{u}_\parallel\) and \(\hat{u}_\perp\) as columns gives the
+           transformation from rotated coordinates \((w_\parallel, w_\perp)\) to physical offsets:</p>
+        $$ \begin{pmatrix} \Delta w_0 \\ \Delta w_a \end{pmatrix}
+           = \begin{pmatrix} 1/N & -A/N \\ A/N & 1/N \end{pmatrix}
+             \begin{pmatrix} w_\parallel \\ w_\perp \end{pmatrix}
+           = \begin{pmatrix} 0.262 & 0.965 \\ -0.965 & 0.262 \end{pmatrix}
+             \begin{pmatrix} w_\parallel \\ w_\perp \end{pmatrix}. $$
+      </div>
+
+      <div class="card">
+        <div class="card-title">Step 4 &mdash; Forward and inverse transformations</div>
+        <p class="card-text mt-16"><strong>Forward</strong> (rotated &rarr; physical):</p>
+        <!-- Corrected sign: the w0 row carries -A w_perp, consistent with the matrix in Step 3. -->
+        $$ w_0 = -1 + \frac{w_\parallel - A\,w_\perp}{N}, \qquad
+           w_a = \frac{A\,w_\parallel + w_\perp}{N}. $$
+        <p class="card-text"><strong>Inverse</strong> (physical &rarr; rotated):</p>
+        $$ w_\parallel = \frac{(w_0 + 1) + A\,w_a}{N}, \qquad
+           w_\perp = \frac{-A\,(w_0 + 1) + w_a}{N}. $$
+        <p class="de-note">The \(w_0\) row carries \(-A\,w_\perp\), matching the rotation matrix in
+           Step&nbsp;3 (with \(A<0\), this <em>adds</em> a positive \(|A|\,w_\perp\) term).</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Step 5 &mdash; Applying the CMB constraint</div>
+        <p class="card-text mt-16">Imposing the CMB constraint on \(D_M(z_\*)\) sets the perpendicular
+           coordinate to zero and lets the parallel coordinate vary freely along the degeneracy:</p>
+        $$ w_\perp = 0, \qquad w_\parallel \ \text{free}. $$
+        <p class="card-text">The relation then reduces to a one-parameter family:</p>
+        $$ w_0 = -1 + \frac{w_\parallel}{3.813}, \qquad
+           w_a = \frac{-3.68\,w_\parallel}{3.813}. $$
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================== PART 2 ===================== -->
+  <div class="section">
+    <h2 class="section-title">DESI DR2 best fit in rotated coordinates</h2>
+    <hr class="section-rule">
+
+    <div class="card card-flat card-accent">
+      <div class="card-title accent-text">Input &mdash; DESI DR2 + CMB</div>
+      <p class="card-text mt-16">From the DESI DR2 + Planck CMB \(w_0w_a\)CDM fit
+        (<a href="https://arxiv.org/abs/2503.14738" target="_blank" rel="noopener">arXiv:2503.14738</a>,
+        DESI + CMB, Eq.&nbsp;25):</p>
+      $$ w_0 = -0.42 \pm 0.21, \qquad w_a = -1.75 \pm 0.58. $$
+    </div>
+
+    <div class="de-stack" style="margin-top:16px">
+
+      <div class="card">
+        <div class="card-title">Best-fit values</div>
+        <p class="card-text mt-16">Using the inverse transformation with \(A = -3.68\) and \(N = 3.813\):</p>
+        $$ w_\parallel = \frac{(w_0 + 1) + A\,w_a}{N}
+           = \frac{0.58 + 6.44}{3.813} = \frac{7.02}{3.813} = 1.841, $$
+        $$ w_\perp = \frac{-A\,(w_0 + 1) + w_a}{N}
+           = \frac{2.134 - 1.75}{3.813} = \frac{0.384}{3.813} = 0.101. $$
+      </div>
+
+      <div class="card">
+        <div class="card-title">Error propagation</div>
+        <p class="card-text mt-16">The Jacobian of the physical&nbsp;&rarr;&nbsp;rotated map is</p>
+        $$ J = \begin{pmatrix} 1/N & A/N \\ -A/N & 1/N \end{pmatrix}
+             = \begin{pmatrix} 0.262 & -0.965 \\ 0.965 & 0.262 \end{pmatrix}. $$
+        <p class="card-text">Assuming uncorrelated errors on \((w_0, w_a)\):</p>
+        $$ \sigma_{w_\parallel}^2 = \left(\tfrac{1}{N}\right)^2 \sigma_{w_0}^2
+             + \left(\tfrac{A}{N}\right)^2 \sigma_{w_a}^2
+           = (0.262)^2(0.21)^2 + (0.965)^2(0.58)^2 = 0.00303 + 0.3133 = 0.3163, $$
+        $$ \sigma_{w_\parallel} = 0.562. $$
+        $$ \sigma_{w_\perp}^2 = \left(\tfrac{A}{N}\right)^2 \sigma_{w_0}^2
+             + \left(\tfrac{1}{N}\right)^2 \sigma_{w_a}^2
+           = (0.965)^2(0.21)^2 + (0.262)^2(0.58)^2 = 0.0410 + 0.0231 = 0.0641, $$
+        $$ \sigma_{w_\perp} = 0.253. $$
+      </div>
+
+      <div class="card card-flat card-accent">
+        <div class="card-title accent-text">Result</div>
+        <p class="card-text mt-16 de-result">DESI DR2 + CMB in rotated coordinates:</p>
+        $$ w_\parallel = 1.84 \pm 0.56, \qquad w_\perp = 0.10 \pm 0.25. $$
+        <p class="card-text">The perpendicular coordinate \(w_\perp\) is consistent with zero at the
+           \(0.4\sigma\) level &mdash; i.e. the DESI DR2 + CMB best fit sits essentially on the CMB
+           degeneracy line, displaced from \(\Lambda\)CDM almost entirely along the unconstrained
+           parallel direction.</p>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<div id="site-footer"></div>
+<script src="js/main.js"></script>
+</body>
+</html>
