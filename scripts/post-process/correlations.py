@@ -18,12 +18,14 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
     """
     #############################################################
     def __init__(self,lgbin=False,smin=1e-2,smax=3e1,n_s=15,Lbox=300.0,
-                 aniso=True,n_mu=161,los=2,L_Max=3,verbose=True,logfile=None):
+                 pbc=True,scale_factors=[1.,1.],aniso=True,n_mu=161,los=2,L_Max=3,verbose=True,logfile=None):
         """ Initialise the following:
             -- lgbin    : use logarithmic (True) or linear (False) binning
             -- smin,smax: min,max separations in s.
             -- n_s      : number of bins in s.
             -- Lbox     : Box size in same units as smin,smax.
+            -- pbc: bool (default True); whether or not to assume periodic boundaries
+            -- scale_factors: list of 2 floats [alpha_par,alpha_perp] (default [1,1] for cubic box).
             -- aniso    : bool (default True). If True, calculate multipoles ell = 2*L for L in range(L_Max), else only monopole ell=0.
             -- n_mu     : number of bins in mu.               --> Only used if aniso=True.
             -- los      : int 0/1/2, line of sight direction. --> Only used if aniso=True.
@@ -50,6 +52,8 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
         self.L_Max = L_Max
         self.los = los
         self.non_los = np.where(np.arange(3,dtype=int) != self.los)[0]
+        self.pbc = pbc
+        self.scale_factors = scale_factors
 
         self.N_SPLIT = 100000 # 1000000; max number of objects that can be handled on 1 cpu
 
@@ -64,6 +68,19 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
         else:
             self.sbin = np.linspace(self.smin,self.smax,self.n_s+1)
             self.smid = 0.5*(self.sbin[1:]+self.sbin[:-1])
+            
+        if not isinstance(self.scale_factors,list):
+            raise Exception("scale_factors should be list in TPCFPeriodic.RR_theory")
+        if len(self.scale_factors) != 2:
+            raise Exception("scale_factors should be list of length 2 in TPCFPeriodic.RR_theory")
+        
+        if self.pbc:
+            if self.smax >= 0.5*self.Lbox:
+                self.print_this("Warning! : smax > Lbox/2 detected. Theory RR may be incorrect.",self.logfile)
+        else:
+            if self.smax >= 0.5*self.Lbox*np.min(self.scale_factors):
+                self.print_this("Warning! : smax > Lmin/2 detected. Theory RR may be incorrect.",self.logfile)
+
 
         # mu bins needed regardless of whether aniso is requested
         if self.n_mu % 2 == 0:
@@ -106,8 +123,9 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
             raise NotImplementedError("anisotropic marked pair counts still under construction!")
 
         # 3-d trees used for both aniso and monopole calcs
-        tree_1 = syspat.cKDTree(pos_1,boxsize=self.Lbox)
-        tree_2 = syspat.cKDTree(pos_2,boxsize=self.Lbox)
+        boxsize = self.Lbox if self.pbc else None
+        tree_1 = syspat.cKDTree(pos_1,boxsize=boxsize)
+        tree_2 = syspat.cKDTree(pos_2,boxsize=boxsize)
         
         if self.aniso:
             bin_counts = np.zeros((self.n_s,self.n_mu),dtype=int)                
@@ -139,12 +157,14 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
                 for jj in range(len(nonzero_ind)):
                     j = nonzero_ind[jj]
                     delta_mu = pos_2[ind_Ds[jj],self.los] - pos_1[j,self.los]
-                    cond_out = (np.fabs(delta_mu) > 0.5*self.Lbox)
-                    delta_mu[cond_out] -= np.sign(delta_mu[cond_out])*self.Lbox
+                    if self.pbc:
+                        cond_out = (np.fabs(delta_mu) > 0.5*self.Lbox)
+                        delta_mu[cond_out] -= np.sign(delta_mu[cond_out])*self.Lbox
                     s_sq = delta_mu**2
                     for nl in self.non_los:
                         dsp = np.fabs(pos_2[ind_Ds[jj],nl] - pos_1[j,nl])
-                        dsp[dsp > 0.5*self.Lbox] -= self.Lbox
+                        if self.pbc:
+                            dsp[dsp > 0.5*self.Lbox] -= self.Lbox
                         s_sq += dsp**2
                     delta_mu /= np.sqrt(s_sq) 
                     counts,dummy = np.histogram(delta_mu,bins=self.mubin,density=False)
@@ -198,39 +218,26 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
     #############################################################
     
     #############################################################
-    def RR_theory(self,pbc=True,scale_factors=[1.,1.]):
+    def RR_theory(self):
         """ Theory RR for periodic cubic box or non-periodic, possibly rectangular box.
             For periodic box, output is valid for smax < Lbox/2, else see Deserno 04.
             For non-periodic box, output is valid for smax < min(L_x,L_y,L_z).
-            -- pbc: bool (default True); whether or not to assume periodic boundaries
-            -- scale_factors: list of 2 floats [alpha_par,alpha_perp] (default [1,1] for cubic box).
             Output structure:
-            -- pbc=False, scale_factors=list, self.aniso=True (rect box, aniso requested): (self.n_s,self.n_mu)
+            -- (self.aniso=True) & ((self.pbc=False)|(self.scale_factors[0]!=self.scale_factors[1])): (self.n_s,self.n_mu)
+               [aniso requested AND (non-periodic OR cuboid box)]
             -- all other cases: (self.n_s,)
         """
         if self.verbose:
             self.print_this("... ... calculating RR from theory",self.logfile)
             
-        if not isinstance(scale_factors,list):
-            raise Exception("scale_factors should be list in TPCFPeriodic.RR_theory")
-        if len(scale_factors) != 2:
-            raise Exception("scale_factors should be list of length 2 in TPCFPeriodic.RR_theory")
-        
-        if pbc:
-            if self.smax >= 0.5*self.Lbox:
-                self.print_this("Warning! : smax > Lbox/2 detected. Theory RR may be incorrect.",self.logfile)
-        else:
-            if self.smax >= 0.5*self.Lbox*np.min(scale_factors):
-                self.print_this("Warning! : smax > Lmin/2 detected. Theory RR may be incorrect.",self.logfile)
-
-        if pbc:
-            if scale_factors[0] != scale_factors[1]:
+        if self.pbc:
+            if self.scale_factors[0] != self.scale_factors[1]:
                 raise NotImplementedError("Non-cubic periodic box not yet implemented.")
             else:
                 RR = 2*np.pi/3*(self.sbin[1:]**3-self.sbin[:-1]**3)/self.Lbox**3
                 RR *= self.dmu if self.aniso else 2.0
         else:
-            apar,aperp = scale_factors[0],scale_factors[1]
+            apar,aperp = self.scale_factors[0],self.scale_factors[1]
             if self.aniso:
                 RR = np.zeros((self.n_s,self.n_mu))
                 nmu_cen = self.mubin.size//2 # first positive bin edge / location immediately after mu==0 in self.mumid
@@ -262,7 +269,7 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
             else:
                 Hp = self.RR_helper(self.sbin[1:],[1.0],scale_factors=[apar,aperp])
                 Hm = self.RR_helper(self.sbin[:-1],[1.0],scale_factors=[apar,aperp])
-                RR = 2*(Hp - Hm)
+                RR = np.squeeze(2*(Hp - Hm))
 
                 del Hp,Hm
             
@@ -325,11 +332,10 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
 
 
     #############################################################
-    def auto_CF(self,pos_data1,pos_data2=None,mark_data1=None,mark_data2=None,pbc=True,scale_factors=[1.,1.]):
+    def auto_CF(self,pos_data1,pos_data2=None,mark_data1=None,mark_data2=None):
         """ Auto/cross-correlation of data points.
             -- pos_dataj : tracer positions shape (ndata_j,3); pos_data2 = None gives auto, else cross CF 
             -- mark_dataj: tracer marks, None (default) or float shape (ndata_j,) 
-            -- pbc,scale_factors: passed to self.RR_theory; see that docstring.
 
             Applies recursive binary split for large data sets.
             Returns Peebles-Hauser estimator DD/RR - 1 
@@ -341,7 +347,7 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
         DD = self.DD_split(pos_data1,pos_data2=pos_data2,mark_data1=mark_data1,mark_data2=mark_data2)
         # shape (s,mu) if self.aniso==True else (s,)
 
-        RR = self.RR_theory(pbc=pbc,scale_factors=scale_factors)
+        RR = self.RR_theory()
         # shape (s,) or (s,mu)
         
         cf_s = (DD.T/(RR.T + self.TINY)).T - 1.0    
