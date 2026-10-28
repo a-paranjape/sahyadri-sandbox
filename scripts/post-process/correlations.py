@@ -325,7 +325,7 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
 
 
     #############################################################
-    def auto_CF(self,pos_data1,pos_data2=None,mark_data1=None,mark_data2=None,pbc=True,scale_factors=None):
+    def auto_CF(self,pos_data1,pos_data2=None,mark_data1=None,mark_data2=None,pbc=True,scale_factors=[1.,1.]):
         """ Auto/cross-correlation of data points.
             -- pos_dataj : tracer positions shape (ndata_j,3); pos_data2 = None gives auto, else cross CF 
             -- mark_dataj: tracer marks, None (default) or float shape (ndata_j,) 
