@@ -1,5 +1,7 @@
 import numpy as np
 import scipy.fftpack as fft
+import scipy.spatial as syspat
+import scipy.special as sysp
 
 from utilities import Utilities,Paths,Constants
 import gc
@@ -7,23 +9,485 @@ import gc
 from numpy.ctypeslib import ndpointer
 from ctypes import *
 
+#################################################################
+# New (very slow) 2pcf class added by Aseem 21 Feb 2026
+#################################################################
+class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
+    """ 2-point (cross-)correlation functions in bins of separation. 
+        Assumes complete, cubic periodic box throughout.
+    """
+    #############################################################
+    def __init__(self,lgbin=False,smin=1e-2,smax=3e1,n_s=15,Lbox=300.0,
+                 aniso=True,n_mu=161,los=2,L_Max=3,verbose=True,logfile=None):
+        """ Initialise the following:
+            -- lgbin    : use logarithmic (True) or linear (False) binning
+            -- smin,smax: min,max separations in s.
+            -- n_s      : number of bins in s.
+            -- Lbox     : Box size in same units as smin,smax.
+            -- aniso    : bool (default True). If True, calculate multipoles ell = 2*L for L in range(L_Max), else only monopole ell=0.
+            -- n_mu     : number of bins in mu.               --> Only used if aniso=True.
+            -- los      : int 0/1/2, line of sight direction. --> Only used if aniso=True.
+            -- L_Max    : int >= 1, number of multipoles.     --> Only used if aniso=True.
+            -- verbose  : write out messages
+            -- logfile  : logfile (default None)
+             
+            Methods: 
+            pair_counts,DD_split,DD_only,RR_theory,auto_CF
+            """
+        Paths.__init__(self)
+        Constants.__init__(self)
+        Utilities.__init__(self)
+        self.lgbin = lgbin
+        self.smin = smin
+        self.smax = smax
+        self.n_s = n_s
+        self.verbose = verbose
+        self.logfile = logfile
+        self.Lbox = Lbox
+        self.aniso = aniso
+        # below only used if self.aniso is True
+        self.n_mu = n_mu # tested 41,81,201. ell=0 converged at <1% at 81. set default to 161. 
+        self.L_Max = L_Max
+        self.los = los
+        self.non_los = np.where(np.arange(3,dtype=int) != self.los)[0]
+
+        self.N_SPLIT = 100000 # 1000000; max number of objects that can be handled on 1 cpu
+
+        if self.verbose:
+            print_string = "Initialising 2pcf calculator for periodic boxes\n"
+            print_string += "--------------------------------"
+            self.print_this(print_string,self.logfile)            
+            
+        if self.lgbin:
+            self.sbin = np.logspace(np.log10(self.smin),np.log10(self.smax),self.n_s+1)
+            self.smid = np.sqrt(self.sbin[1:]*self.sbin[:-1])
+        else:
+            self.sbin = np.linspace(self.smin,self.smax,self.n_s+1)
+            self.smid = 0.5*(self.sbin[1:]+self.sbin[:-1])
+
+        # mu bins needed regardless of whether aniso is requested
+        if self.n_mu % 2 == 0:
+            raise Exception("Need odd n_mu in TwoPointCorrelationFunctionPeriodic.")
+        self.mubin = np.linspace(-1,1,self.n_mu+1)
+        self.mumid = 0.5*(self.mubin[1:]+self.mubin[:-1])
+        self.dmu = self.mubin[1] - self.mubin[0] 
+        if self.aniso:
+            if self.verbose:
+                self.print_this("... 2pcf multipoles calculated",self.logfile)
+            self.Pell = np.ones((self.L_Max,self.n_mu),dtype=float)
+            for L in range(self.L_Max):
+                self.Pell[L] = sysp.legendre_p(2*L,self.mumid)[0]
+        else:
+            if self.verbose:
+                self.print_this("... real-space/monopole 2pcf calculated",self.logfile)
+
+        if self.verbose:
+            print_string = "... initialisation complete\n"
+            print_string += "--------------------------------"
+            self.print_this(print_string,self.logfile)
+
+    #############################################################
+
+
+    #############################################################
+    def pair_counts(self,pos_1,pos_2,mark_1=None,mark_2=None):
+        """ Unnormalised binned pair counts between two data sets (can be the same data set).
+            -- pos_j : tracer positions shape (ndata_j,3) 
+            -- mark_j: tracer marks, None (default) or float shape (ndata_j,) 
+            Returns array of shape (self.n_s,self.n_mu) if self.aniso==True else (self.n_s,). 
+        """
+        MARKED = False
+        if (mark_1 is not None) & (mark_2 is not None):
+            wts_1 = mark_1/np.mean(mark_1)
+            wts_2 = mark_2/np.mean(mark_2)
+            MARKED = True
+
+        if MARKED & self.aniso:
+            raise NotImplementedError("anisotropic marked pair counts still under construction!")
+
+        # 3-d trees used for both aniso and monopole calcs
+        tree_1 = syspat.cKDTree(pos_1,boxsize=self.Lbox)
+        tree_2 = syspat.cKDTree(pos_2,boxsize=self.Lbox)
+        
+        if self.aniso:
+            bin_counts = np.zeros((self.n_s,self.n_mu),dtype=int)                
+            ########################
+            ndata_1 = tree_1.n
+            ########################
+            ind_s = tree_1.query_ball_tree(tree_2,self.sbin[0])
+            # ind_s is list of size len(data1)
+            # each element j is list of s-ball-nbrs of data1[j] in data2
+            s_len = np.array(list(map(len,ind_s)))
+            # s_len is array of lengths of ind_s lists
+            for s in range(1,self.n_s+1):
+                ########################
+                ind_sDs = tree_1.query_ball_tree(tree_2,self.sbin[s])
+                # ind_sDs[j] is list of indices of data2 that are (s+Ds)-ball-nbrs of data1[j]
+                sDs_len = np.array(list(map(len,ind_sDs)))
+
+                cond_nonzero = (sDs_len > s_len)
+                nonzero_ind = np.where(cond_nonzero)[0] # pick elements of data1 with at least one s-bin-nbr in data2
+
+                ind_Ds = [np.concatenate([np.setdiff1d(ind_sDs[j],ind_s[j],assume_unique=True)]).astype(int)
+                          for j in nonzero_ind]
+                ########################
+                # ind_Ds[j] is array of indices of data2 that are s-bin-nbrs of data1[j]
+                # Use these for mu measurement
+                ########################
+                
+                # CAN WE ELIMINATE THIS LOOP??
+                for jj in range(len(nonzero_ind)):
+                    j = nonzero_ind[jj]
+                    delta_mu = pos_2[ind_Ds[jj],self.los] - pos_1[j,self.los]
+                    cond_out = (np.fabs(delta_mu) > 0.5*self.Lbox)
+                    delta_mu[cond_out] -= np.sign(delta_mu[cond_out])*self.Lbox
+                    s_sq = delta_mu**2
+                    for nl in self.non_los:
+                        dsp = np.fabs(pos_2[ind_Ds[jj],nl] - pos_1[j,nl])
+                        dsp[dsp > 0.5*self.Lbox] -= self.Lbox
+                        s_sq += dsp**2
+                    delta_mu /= np.sqrt(s_sq) 
+                    counts,dummy = np.histogram(delta_mu,bins=self.mubin,density=False)
+                    # which of these are also mu-bin-nbrs.
+                    bin_counts[s-1] += counts
+                    # we only care about number of (s,mu)-nbrs, not identities
+                    ########################                                            
+                del nonzero_ind,cond_nonzero,ind_Ds
+
+                ind_s = ind_sDs.copy()
+                s_len = sDs_len.copy()
+                ########################
+        ###################        
+        else:
+            if MARKED:
+                bin_counts = tree_1.count_neighbors(tree_2,self.sbin,cumulative=False,weights=(wts_1,wts_2))
+            else:
+                bin_counts = tree_1.count_neighbors(tree_2,self.sbin,cumulative=False)
+            bin_counts = bin_counts[1:] # first value contains all pairs with seps smaller than lower edge of first bin
+            ########################
+            
+        del tree_1,tree_2
+        gc.collect()
+
+        return bin_counts 
+    #############################################################
+
+    #############################################################
+    def RR_helper(self,s,mu,scale_factors=[1.,1.]):
+        """ Helper function for RR(s,mu) in non-periodic and possibly rectangular box.
+            -- s: 1-d array [left or right bin edges in s]
+            -- mu: 1-d array [left or right bin edges in mu]
+            -- scale_factors: list of two positive floats (default [1,1] for cubic box).
+            Returns: array of shape (s.size,mu.size)
+        """
+        sg = np.outer(s,np.ones(len(mu)))
+        mug = np.outer(np.ones(len(s)),mu)
+
+        apar = scale_factors[0]
+        aperp = scale_factors[1]
+
+        sgbyL = sg/self.Lbox
+        sqrtonemmug2 = np.sqrt(1-mug**2 + self.TINY)
+
+        H = mug - 0.75*sgbyL*(0.5*mug**2/apar + 2*(mug*sqrtonemmug2 + np.asin(mug))/(np.pi*aperp))
+        H += 3*sgbyL**2/(5*np.pi*aperp**2)*(mug*(1-mug**2/3) + (4/3)*(aperp/apar)*(1-sqrtonemmug2**3))
+        H -= sgbyL**3*mug**2*(1-0.5*mug**2)/(4*np.pi*apar*aperp**2)
+        H *= (2*np.pi/3)*sgbyL**3/np.fabs(apar*aperp**2)
+
+        return H
+    #############################################################
+    
+    #############################################################
+    def RR_theory(self,pbc=True,scale_factors=[1.,1.]):
+        """ Theory RR for periodic cubic box or non-periodic, possibly rectangular box.
+            For periodic box, output is valid for smax < Lbox/2, else see Deserno 04.
+            For non-periodic box, output is valid for smax < min(L_x,L_y,L_z).
+            -- pbc: bool (default True); whether or not to assume periodic boundaries
+            -- scale_factors: list of 2 floats [alpha_par,alpha_perp] (default [1,1] for cubic box).
+            Output structure:
+            -- pbc=False, scale_factors=list, self.aniso=True (rect box, aniso requested): (self.n_s,self.n_mu)
+            -- all other cases: (self.n_s,)
+        """
+        if self.verbose:
+            self.print_this("... ... calculating RR from theory",self.logfile)
+            
+        if not isinstance(scale_factors,list):
+            raise Exception("scale_factors should be list in TPCFPeriodic.RR_theory")
+        if len(scale_factors) != 2:
+            raise Exception("scale_factors should be list of length 2 in TPCFPeriodic.RR_theory")
+        
+        if pbc:
+            if self.smax >= 0.5*self.Lbox:
+                self.print_this("Warning! : smax > Lbox/2 detected. Theory RR may be incorrect.",self.logfile)
+        else:
+            if self.smax >= 0.5*self.Lbox*np.min(scale_factors):
+                self.print_this("Warning! : smax > Lmin/2 detected. Theory RR may be incorrect.",self.logfile)
+
+        if pbc:
+            if scale_factors[0] != scale_factors[1]:
+                raise NotImplementedError("Non-cubic periodic box not yet implemented.")
+            else:
+                RR = 2*np.pi/3*(self.sbin[1:]**3-self.sbin[:-1]**3)/self.Lbox**3
+                RR *= self.dmu if self.aniso else 2.0
+        else:
+            apar,aperp = scale_factors[0],scale_factors[1]
+            if self.aniso:
+                RR = np.zeros((self.n_s,self.n_mu))
+                nmu_cen = self.mubin.size//2 # first positive bin edge / location immediately after mu==0 in self.mumid
+                
+                # negative mu
+                Hpp = self.RR_helper(self.sbin[1:],self.mubin[1:nmu_cen],scale_factors=[-1.0*apar,aperp])
+                Hmp = self.RR_helper(self.sbin[:-1],self.mubin[1:nmu_cen],scale_factors=[-1.0*apar,aperp])
+                Hpm = self.RR_helper(self.sbin[1:],self.mubin[:nmu_cen-1],scale_factors=[-1.0*apar,aperp])
+                Hmm = self.RR_helper(self.sbin[:-1],self.mubin[:nmu_cen-1],scale_factors=[-1.0*apar,aperp])
+
+                RR[:,:nmu_cen-1] = Hpp - Hpm - (Hmp - Hmm)
+
+                # center mu
+                # note: evaluation is at UPPER edge of central bin
+                Hp = self.RR_helper(self.sbin[1:],self.mubin[nmu_cen:nmu_cen+1],scale_factors=[apar,aperp])
+                Hm = self.RR_helper(self.sbin[:-1],self.mubin[nmu_cen:nmu_cen+1],scale_factors=[apar,aperp])
+
+                RR[:,nmu_cen-1:nmu_cen] = 2*(Hp - Hm)
+
+                # positive mu
+                Hpp = self.RR_helper(self.sbin[1:],self.mubin[nmu_cen+1:],scale_factors=[apar,aperp])
+                Hmp = self.RR_helper(self.sbin[:-1],self.mubin[nmu_cen+1:],scale_factors=[apar,aperp])
+                Hpm = self.RR_helper(self.sbin[1:],self.mubin[nmu_cen:-1],scale_factors=[apar,aperp])
+                Hmm = self.RR_helper(self.sbin[:-1],self.mubin[nmu_cen:-1],scale_factors=[apar,aperp])
+
+                RR[:,nmu_cen:] = Hpp - Hpm - (Hmp - Hmm)
+
+                del Hpp,Hmp,Hpm,Hmm,Hp,Hm
+            else:
+                Hp = self.RR_helper(self.sbin[1:],[1.0],scale_factors=[apar,aperp])
+                Hm = self.RR_helper(self.sbin[:-1],[1.0],scale_factors=[apar,aperp])
+                RR = 2*(Hp - Hm)
+
+                del Hp,Hm
+            
+        return RR
+    #############################################################
+
+    ########################
+    # this one is incorrectly isotropic
+    ########################    
+    # #############################################################
+    # def RR_theory(self,pbc=True,scale_factors=None):
+    #     """ Theory RR for periodic cubic box or non-periodic, possibly rectangular box.
+    #         For periodic box, output is valid for smax < Lbox/2, else see Deserno 04.
+    #         For non-periodic box, output is valid for smax < min(L_x,L_y,L_z).
+    #         -- pbc: bool (default True); whether or not to assume periodic boundaries
+    #         -- scale_factors: None or list of 3 floats in (0,1] s.t. L_i = scale_factor[i]*self.Lbox
+    #                           Only relevant for non-periodic box.
+    #         Returns: array of shape (self.n_s,)
+    #     """
+    #     if self.verbose:
+    #         self.print_this("... ... calculating RR from theory",self.logfile)
+    #     if pbc:
+    #         if self.smax >= 0.5*self.Lbox:
+    #             self.print_this("Warning! : smax > Lbox/2 detected. Theory RR may be incorrect.",self.logfile)
+    #     else:
+    #         if scale_factors is not None:
+    #             if not isinstance(scale_factors,list):
+    #                 raise Exception("scale_factors should be None or list in TPCFPeriodic.RR_theory")
+    #             if len(scale_factors) != 3:
+    #                 raise Exception("scale_factors should be None or list of length 3 in TPCFPeriodic.RR_theory")
+    #         if self.smax >= 0.5*self.Lbox*np.min(scale_factors):
+    #             self.print_this("Warning! : smax > Lmin/2 detected. Theory RR may be incorrect.",self.logfile)
+
+    #     if pbc:
+    #         RR = 2*np.pi/3*(self.sbin[1:]**3-self.sbin[:-1]**3)/self.Lbox**3
+    #     else:
+    #         term_0 = (self.sbin[1:]**3-self.sbin[:-1]**3)/3
+    #         term_1 = -(self.sbin[1:]**4-self.sbin[:-1]**4)/8
+    #         term_2 = 2*(self.sbin[1:]**5-self.sbin[:-1]**5)/(5*np.pi)
+    #         term_3 = (self.sbin[1:]**6-self.sbin[:-1]**6)/(24*np.pi)
+    #         if scale_factors is not None:
+    #             Ls = np.zeros(3)
+    #             for i in range(3):
+    #                 Ls[i] = scale_factors[i]*self.Lbox
+                    
+    #             term_1 *= np.sum(1/(Ls + self.TINY))
+    #             term_2 *= (1/(Ls[0]*Ls[1] + self.TINY) + 1/(Ls[0]*Ls[2] + self.TINY) + 1/(Ls[1]*Ls[2] + self.TINY))/3
+    #             term_3 *= 1/(np.prod(Ls) + self.TINY)
+    #         else:
+    #             term_1 *= 3/self.Lbox
+    #             term_2 *= 1/self.Lbox**2
+    #             term_3 *= 1/self.Lbox**3
+    #         RR = term_0 + term_1 + term_2 + term_3
+    #         RR *= 2*np.pi
+    #         RR /= ((self.Lbox**3 if scale_factors is None else np.prod(Ls)) + self.TINY)
+            
+    #     RR *= self.dmu if self.aniso else 2.0
+    #     return RR
+    # #############################################################
+
+
+    #############################################################
+    def auto_CF(self,pos_data1,pos_data2=None,mark_data1=None,mark_data2=None,pbc=True,scale_factors=None):
+        """ Auto/cross-correlation of data points.
+            -- pos_dataj : tracer positions shape (ndata_j,3); pos_data2 = None gives auto, else cross CF 
+            -- mark_dataj: tracer marks, None (default) or float shape (ndata_j,) 
+            -- pbc,scale_factors: passed to self.RR_theory; see that docstring.
+
+            Applies recursive binary split for large data sets.
+            Returns Peebles-Hauser estimator DD/RR - 1 
+            of shape (self.L_Max,self.n_s) if self.aniso==True else (self.n_s,).
+        """
+        if pos_data1.shape[1] != 3:
+            raise TypeError("Incompatible data shape. Expected (ndata,3).")
+
+        DD = self.DD_split(pos_data1,pos_data2=pos_data2,mark_data1=mark_data1,mark_data2=mark_data2)
+        # shape (s,mu) if self.aniso==True else (s,)
+
+        RR = self.RR_theory(pbc=pbc,scale_factors=scale_factors)
+        # shape (s,) or (s,mu)
+        
+        cf_s = (DD.T/(RR.T + self.TINY)).T - 1.0    
+        # shape (s,mu) if self.aniso==True else (s,)
+
+        if self.aniso:
+            if self.verbose:
+                self.print_this("... ... computing multipoles",self.logfile)
+            cf = np.zeros((self.L_Max,self.n_s),dtype=float)
+            for L in range(self.L_Max):
+                ell = 2*L
+                cf[L] = 0.5*(2*ell+1)*np.trapezoid(self.Pell[L]*cf_s,dx=self.dmu,axis=1)
+        else:
+            cf = 1.0*cf_s
+
+        if self.verbose:
+            self.print_this("... ... done",self.logfile)
+        
+        return cf
+    #############################################################
+
+
+    #############################################################
+    def DD_only(self,pos_data1,pos_data2=None,mark_data1=None,mark_data2=None):
+        """ DD (or D1D2) calculation.
+            Assumes pos_data1.shape() = (ndata,3).
+            If pos_data2 is not None, assumes pos_data2.shape() = (ndata2,3).
+            Returns DD or D1D2.
+        """
+        ndata1 = pos_data1.shape[0]
+        if pos_data2 is None:
+            cf = 1.0*self.pair_counts(pos_data1,pos_data1,mark_1=mark_data1,mark_2=mark_data1)/ndata1/(ndata1-1)
+        else:
+            ndata2 = pos_data2.shape[0]
+            cf = 1.0*self.pair_counts(pos_data1,pos_data2,mark_1=mark_data1,mark_2=mark_data2)/ndata1/ndata2
+
+        return cf
+    #############################################################
+
+
+    #############################################################
+    def DD_split(self,pos_data1,pos_data2=None,mark_data1=None,mark_data2=None):
+        """ DD calculation wrapper.
+            Assumes pos_data1.shape() = (ndata,3).
+            If pos_data2 is not None, assumes pos_data2.shape() = (ndata2,3).
+            Returns DD (or D1D2), applying binary recursive split for large data sets.
+        """
+        MARKED = False if mark_data1 is None else True
+        ndata = pos_data1.shape[0]
+        ndata_by_2 = ndata//2
+        if ndata < self.N_SPLIT:
+            if self.verbose:
+                print_string = '... ... calculating '
+                if MARKED:
+                    print_string += 'marked '
+                print_string += "DD" if pos_data2 is None else "D1D2"
+                self.print_this(print_string,self.logfile)
+            cf = self.DD_only(pos_data1,pos_data2=pos_data2,mark_data1=mark_data1,mark_data2=mark_data2)
+        else:
+            if self.verbose:
+                self.print_this("... ... binary split",self.logfile)
+            if pos_data2 is None:
+                pd1s = pos_data1[:ndata_by_2].copy()
+                ndata1s = pd1s.shape[0]
+                pd1spr = pos_data1[ndata_by_2:].copy()
+                ndata1spr = pd1spr.shape[0]
+                if MARKED:
+                    md1s = mark_data1[:ndata_by_2].copy()
+                    md1spr = mark_data1[ndata_by_2:].copy()                    
+                    D1D1 = self.DD_split(pd1s,mark_data1=md1s)
+                    D1D1pr = self.DD_split(pd1s,pos_data2=pd1spr,mark_data1=md1s,mark_data2=md1spr)
+                    D1prD1pr = self.DD_split(pd1spr,mark_data1=md1spr)
+                else:
+                    D1D1 = self.DD_split(pd1s)
+                    D1D1pr = self.DD_split(pd1s,pos_data2=pd1spr)
+                    D1prD1pr = self.DD_split(pd1spr)
+                cf = ndata1s*(ndata1s-1)*D1D1 + 2*ndata1s*ndata1spr*D1D1pr + ndata1spr*(ndata1spr-1)*D1prD1pr
+                cf = 1.0*cf/ndata/(ndata-1)
+                del pd1s,pd1spr
+                if MARKED:
+                    del md1s,md1spr
+                gc.collect()
+            else:
+                ndata2 = pos_data2.shape[0]
+                ndata2_by_2 = ndata//2
+                pd1s = pos_data1[:ndata_by_2].copy()
+                ndata1s = pd1s.shape[0]
+                pd1spr = pos_data1[ndata_by_2:].copy()
+                ndata1spr = pd1spr.shape[0]
+                pd2s = pos_data2[:ndata2_by_2].copy()
+                ndata2s = pd2s.shape[0]
+                pd2spr = pos_data2[ndata2_by_2:].copy()
+                ndata2spr = pd2spr.shape[0]
+                if MARKED:
+                    if mark_data2 is None:
+                        raise TypeError('Need marks for second data set')
+                    md1s = mark_data1[:ndata_by_2].copy()
+                    md1spr = mark_data1[ndata_by_2:].copy()
+                    md2s = mark_data2[:ndata2_by_2].copy()
+                    md2spr = mark_data2[ndata2_by_2:].copy()
+                    D1D2 = self.DD_split(pd1s,pos_data2=pd2s,mark_data1=md1s,mark_data2=md2s)
+                    D1D2pr = self.DD_split(pd1s,pos_data2=pd2spr,mark_data1=md1s,mark_data2=md2spr)
+                    D1prD2 = self.DD_split(pd1spr,pos_data2=pd2s,mark_data1=md1spr,mark_data2=md2s)
+                    D1prD2pr = self.DD_split(pd1spr,pos_data2=pd2spr,mark_data1=md1spr,mark_data2=md2spr)
+                else:
+                    D1D2 = self.DD_split(pd1s,pos_data2=pd2s)
+                    D1D2pr = self.DD_split(pd1s,pos_data2=pd2spr)
+                    D1prD2 = self.DD_split(pd1spr,pos_data2=pd2s)
+                    D1prD2pr = self.DD_split(pd1spr,pos_data2=pd2spr)
+                    
+                cf = ndata1s*ndata2s*D1D2 + ndata1s*ndata2spr*D1D2pr 
+                cf = cf + ndata1spr*ndata2s*D1prD2 + ndata1spr*ndata2spr*D1prD2pr
+                cf = 1.0*cf/ndata/ndata2
+                del pd1s,pd1spr,pd2s,pd2spr
+                if MARKED:
+                    del md1s,md1spr,md2s,md2spr
+                gc.collect()
+
+        return cf
+    #############################################################
+#################################################################
+
+
 ################################################################
 # Power spectrum and various (Fourier) fields from particle data
 ################################################################
 class PowerSpectrum(Utilities,Paths,Constants):
     """ Power spectrum and various (Fourier) fields from particle data in cubic periodic box. """    
     ###############################################
-    def __init__(self,grid=256,Lbox=200.0,lgbin=True,nbin=30,KSEP=3,NFAC=10,logfile=None,verbose=True, dim=3):
+    def __init__(self,grid=256,Lbox=200.0,lgbin=True,nbin=30,KSEP=3,NFAC=10,logfile=None,verbose=True,
+                 kmin=None,kmax=None,anisotropic=False,n_mu=161,los=2,L_Max=3):
         """ Initialise the following:
             -- grid: resolution at which to compute density in case of particles
             -- Lbox: box size along one dimension
-            -- lgbin: use logarithmic (True, default) or linear+log (False) binning
+            -- lgbin: use logarithmic (True, default) or linear+log (False) or linear (None) binning
             -- nbin: number of bins in k
+            -- kmin,kmax: if not None, should be floats giving min,max of k range for Pk binning.
             -- KSEP: dynamic range separator for linear+log binning.
             -- NFAC: factor to separate number of bins for linear+log binning.
-            -- dim: dimension
+            -- anisotropic: bool. if True, set up arrays for anisotropic power spectrum calculation
+            below only used if anisotropic==True
+            -- n_mu : number of bins in mu, for anisotropic power spectrum (converged at 161). 
+            -- los : int 0,1,2, line of sight direction
+            -- L_Max : int >= 1, number of even multipoles to return
             Additionally defines the variables/arrays:
-            cell_size,Delta_k,kmin,kmax,kbin,ktab,(dlnk or dk)
+            cell_size,Delta_k,kmin,kmax,kbin,ktab,(dlnk or dk) [mubin,mutab (if anisotropic==True)]
             Methods: 
             density_field,fourier_transform_density,
             tidal_tensor_field,density_hessian_field,Pk_grid            
@@ -32,8 +496,6 @@ class PowerSpectrum(Utilities,Paths,Constants):
         Utilities.__init__(self)
         Constants.__init__(self)
         self.lib_cic = cdll.LoadLibrary(self.python_path+'cic_update.so')
-        self.lib_ngp = cdll.LoadLibrary(self.python_path+'ngp_update.so')
-
 
         self.lgbin = lgbin
         self.nbin = nbin
@@ -43,8 +505,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
         self.verbose = verbose
         self.dynran = np.log2(self.grid/2) # dynamic range from fundamental mode to Nyquist frequency
         self.NFAC = NFAC
-        self.KSEP = KSEP     
-        self.dim = dim
+        self.KSEP = KSEP        
 
         if self.verbose:
             self.print_this('Setting up k-space...',self.logfile)
@@ -52,15 +513,35 @@ class PowerSpectrum(Utilities,Paths,Constants):
         self.cell_size = self.Lbox/self.grid
         self.Delta_k = 2*np.pi/self.Lbox
         self.grid_inv = 2*np.pi/self.grid
+
+        self.anisotropic = anisotropic
+        self.n_mu = n_mu
+        self.los = los
+        self.L_Max = L_Max
+        if self.anisotropic:
+            self.mubin = np.linspace(-1.0,1.0,self.n_mu+1)
+            self.mutab = 0.5*(self.mubin[1:]+self.mubin[:-1])
+            self.dmu = self.mubin[1] - self.mubin[0] 
+            self.Pell = np.ones((self.L_Max,self.n_mu),dtype=float)
+            for L in range(self.L_Max):
+                self.Pell[L] = sysp.legendre_p(2*L,self.mutab)[0]
         
-        self.kmin = 1.0*self.Delta_k
+        self.kmin = 1.0*self.Delta_k if kmin is None else kmin
         self.kNy = np.pi/self.cell_size # don't change this!
-        if self.lgbin:
+        self.kmax = 1.0*self.kNy if kmax is None else kmax
+        if self.lgbin is None:
+            if self.verbose:
+                self.print_this('... using linear binning',self.logfile)
+            self.kbin = np.linspace(self.kmin,self.kmax,self.nbin+1)
+            self.dk = self.kbin[1] - self.kbin[0]
+            self.ktab = 0.5*(self.kbin[1:]+self.kbin[:-1])            
+        elif self.lgbin:
             if self.verbose:
                 self.print_this('... using log binning',self.logfile)
-            self.dlnk = np.log(self.kNy/self.kmin)/(self.nbin)
+            self.dlnk = np.log(self.kmax/self.kmin)/(self.nbin)
             self.kbin = self.kmin*np.exp(self.dlnk*np.arange(self.nbin+1,dtype=float))
             self.ktab = np.sqrt(self.kbin[1:]*self.kbin[:-1])
+            self.dlnk = np.log(self.kbin[1]/self.kbin[0])
         else:
             if self.dynran > self.KSEP: 
                 self.KSEP = int(self.dynran/2) 
@@ -90,7 +571,6 @@ class PowerSpectrum(Utilities,Paths,Constants):
         self.krange = np.arange(self.grid,dtype=int)
         self.K1,self.K2,self.K3 = np.meshgrid(self.krange,self.krange,self.krange,
                                               sparse=True,indexing='ij')
-
         # map upper half axes to negative values
         self.K1[self.K1 >= self.grid/2] = self.K1[self.K1 >= self.grid/2] - self.grid
         self.K2[self.K2 >= self.grid/2] = self.K2[self.K2 >= self.grid/2] - self.grid
@@ -110,22 +590,58 @@ class PowerSpectrum(Utilities,Paths,Constants):
         self.KK = self.K1**2 + self.K2**2 + self.K3**2
         # shape (~grid,~grid,~grid)
 
+        if self.anisotropic:
+            # self.MU = self.K1.copy() if self.los==0 else (self.K2.copy() if self.los==1 else self.K3.copy())
+            # self.MU = self.MU/np.sqrt(self.KK + self.TINY)
+            if self.los==0:
+                self.MU = self.K1/np.sqrt(self.KK + self.TINY)
+            elif self.los==1:
+                self.MU = self.K2/np.sqrt(self.KK + self.TINY)
+            elif self.los==2:
+                self.MU = self.K3/np.sqrt(self.KK + self.TINY)
+
         if self.verbose:
             self.print_this('... setting up index arrays',self.logfile)
 
-        self.IND = [[]]
-        for k in range(self.nbin-1):
+        self.IND = []
+        for k in range(self.nbin):
             self.IND.append([])
             
+        if self.anisotropic:
+            self.IND_MU = []
+            for k in range(self.nbin):
+                ind = []
+                for mu in range(self.n_mu):
+                    ind.append([])
+                self.IND_MU.append(ind)
+                ind = None
+            
         self.I_SIZE = np.zeros(self.nbin,dtype=int)
+        if self.anisotropic:
+            self.I_MU_SIZE = np.zeros((self.nbin,self.n_mu),dtype=int)
+            
         for k in range(self.nbin):
             cond = ((self.KK >= self.k2_compare[k]) & (self.KK < self.k2_compare[k+1]))
             self.IND[k] = np.where(cond)
             self.I_SIZE[k] = self.IND[k][0].size
             del cond
-            gc.collect()
+            gc.collect()            
         self.I_SIZE_MAX = np.max(self.I_SIZE)
 
+        if self.anisotropic:
+            for k in range(self.nbin):
+                cond_k = ((self.KK >= self.k2_compare[k]) & (self.KK < self.k2_compare[k+1]))
+                for mu in range(self.n_mu):
+                    cond_last = (self.MU < self.mubin[mu+1]) if mu != self.n_mu-1 else (self.MU <= self.mubin[mu+1])
+                    cond = cond_k & (self.MU >= self.mubin[mu]) & cond_last
+                    self.IND_MU[k][mu] = np.where(cond)
+                    self.I_MU_SIZE[k,mu] = self.IND_MU[k][mu][0].size
+                    cond = None
+                    cond_last = None
+                cond_k = None
+                gc.collect()            
+            self.I_MU_SIZE_MAX = np.max(self.I_MU_SIZE)
+        
         if self.verbose:
             self.print_this('... done with setup',self.logfile)
     ###############################################
@@ -384,21 +900,27 @@ class PowerSpectrum(Utilities,Paths,Constants):
         
 
     ###############################################
-    def Pk_grid(self,input_array,input_array2=None,input_is_density=False,input_is_FTdensity=False,CIC=True):
+    def Pk_grid(self,input_array,input_array2=None,input_is_density=False,input_is_FTdensity=False,
+                CIC=True,aniso=False,nbar=None):
         """ Use FFT to compute Fourier transform of density and its power spectrum. 
 
             Assumes density.shape = (self.grid,self.grid,self.grid); density is real.
             If input is positions, then density is computed using self.density_field
 
-            Returns P(k) = |FTdensity|^2 or Re(FTdensity.FTdensity2*) on self.ktab.
+            Returns 
+            -- aniso=False:    P(k) = |FTdensity|^2 or Re(FTdensity.FTdensity2*) on self.ktab.
+            -- aniso=True : P_ell(k) = |FTdensity|^2 or Re(FTdensity.FTdensity2*) on self.ktab for ell=2L with L in range(self.L_Max).
+            Note: aniso is separate from self.anisotropic so as to allow isotropic and anisotropic calculations simultaneously.
         """
 
         cross = False if input_array2 is None else True
-
-        # density = input_array if input_is_density else self.density_field(input_array)
-        # if self.logfile==None: print '... Fourier transforming field 1'
-        # else: writelog(self.logfile,'... Fourier transforming field 1\n')
-        # FTdensity = self.fourier_transform_density(density)
+        
+        # for auto power, we may need externally specified number density for shot-noise subtraction
+        if (nbar is None) & (input_array2 is None):
+            if (input_is_density | input_is_FTdensity):
+                raise Exception("Please specify number density nbar [in same units as 1/Lbox^3] for shot-noise subtraction!")
+            else:
+                nbar = input_array.shape[1]/self.Lbox**3
 
         if not input_is_FTdensity:
             density = input_array if input_is_density else self.density_field(input_array)
@@ -408,9 +930,15 @@ class PowerSpectrum(Utilities,Paths,Constants):
         else:
             FTdensity = input_array
 
-        density_k = np.zeros((self.nbin,self.I_SIZE_MAX),dtype=complex)
-        for k in range(self.nbin):
-            density_k[k,:self.I_SIZE[k]] = FTdensity[self.IND[k]]
+        if aniso:
+            density_k = np.zeros((self.nbin,self.n_mu,self.I_MU_SIZE_MAX),dtype=complex)
+            for k in range(self.nbin):
+                for mu in range(self.n_mu):
+                    density_k[k,mu,:self.I_MU_SIZE[k,mu]] = FTdensity[self.IND_MU[k][mu]]
+        else:
+            density_k = np.zeros((self.nbin,self.I_SIZE_MAX),dtype=complex)
+            for k in range(self.nbin):
+                density_k[k,:self.I_SIZE[k]] = FTdensity[self.IND[k]]
         del FTdensity
         gc.collect()
 
@@ -423,28 +951,39 @@ class PowerSpectrum(Utilities,Paths,Constants):
             else:
                 FTdensity2 = np.conjugate(input_array2)
 
-            # density2 = input_array2 if input_is_density else self.density_field(input_array2)
-            # if self.verbose:
-            #     if self.logfile==None: print '... Fourier transforming field 2'
-            #     else: writelog(self.logfile,'... Fourier transforming field 2\n')
-            # FTdensity2 = np.conjugate(self.fourier_transform_density(density2))
-
-            density2_k = np.zeros((self.nbin,self.I_SIZE_MAX),dtype=complex)
-            for k in range(self.nbin):
-                density2_k[k,:self.I_SIZE[k]] = FTdensity2[self.IND[k]]
+            if aniso:
+                density2_k = np.zeros((self.nbin,self.n_mu,self.I_MU_SIZE_MAX),dtype=complex)
+                for k in range(self.nbin):
+                    for mu in range(self.n_mu):
+                        density2_k[k,mu,:self.I_MU_SIZE[k,mu]] = FTdensity2[self.IND_MU[k][mu]]
+            else:
+                density2_k = np.zeros((self.nbin,self.I_SIZE_MAX),dtype=complex)
+                for k in range(self.nbin):
+                    density2_k[k,:self.I_SIZE[k]] = FTdensity2[self.IND[k]]
             del FTdensity2
             gc.collect()
 
         if self.verbose:
-            self.print_this('... calculating P(k)',self.logfile)
-        Pk = np.zeros(self.nbin,dtype=float)
+            Pkstr = 'P(k,mu) multipoles' if aniso else 'P(k)'
+            self.print_this('... calculating '+Pkstr,self.logfile)
 
-        Pk = (np.sum(np.absolute(density_k)**2,axis=1)
+        Pk = (np.sum(np.absolute(density_k)**2,axis=-1)
               if not cross else
-              np.sum(np.real(density_k*density2_k),axis=1))
+              np.sum(np.real(density_k*density2_k),axis=-1))
 
-        Pk *= self.Lbox**3/(self.I_SIZE + self.TINY)
+        if aniso:
+            Pkmu = Pk.copy()
+            Pk = np.zeros((self.L_Max,self.nbin),dtype=float)
+            for L in range(self.L_Max):
+                ell = 2*L
+                Pk[L] = (2*ell+1)*np.sum(self.Pell[L]*Pkmu,axis=1) # sum (instead of 0.5*trapezoid) ensures correct masking of empty bins.
 
+        Pk *= self.Lbox**3/(self.I_SIZE + self.TINY) # works for iso and aniso
+        if aniso:
+            Pk[0] -= 1/nbar # shot-noise is isotropic
+        else:
+            Pk -= 1/nbar
+        
         del density_k
         if cross:
             del density2_k
@@ -670,6 +1209,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
                 (b1,bias_k,self.ktab[krange],Pk_matter,self.ktab))
 
     ############################################################
+
 
     ################################################################
     def wtd_ngp_field(self,pos,weights=None,contrast=False):
