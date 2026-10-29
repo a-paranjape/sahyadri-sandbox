@@ -2,12 +2,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void update_density(long int ndata, int grid, double *density, 
-		    double *x, double *y, double *z, double cell_size, double interlace);
+void update_density(long int ndata, int grid, double *density,
+		    double *x, double *y, double *z,
+		    double cell_size_x, double cell_size_y, double cell_size_z,
+		    double interlace);
 
 
-void update_density(long int ndata, int grid, double *density, 
-		    double *x, double *y, double *z, double cell_size, double interlace)
+void update_density(long int ndata, int grid, double *density,
+		    double *x, double *y, double *z,
+		    double cell_size_x, double cell_size_y, double cell_size_z,
+		    double interlace)
 {
 
   long int i;
@@ -18,14 +22,14 @@ void update_density(long int ndata, int grid, double *density,
 
   for(i=0;i<ndata;i++){
 
-    cx = x[i]/cell_size;// + 0.5*interlace;
-    cy = y[i]/cell_size;// + 0.5*interlace;
-    cz = z[i]/cell_size;// + 0.5*interlace;
+    cx = x[i]/cell_size_x;// + 0.5*interlace;
+    cy = y[i]/cell_size_y;// + 0.5*interlace;
+    cz = z[i]/cell_size_z;// + 0.5*interlace;
 
     ix = (int) cx;
     iy = (int) cy;
     iz = (int) cz;
-    
+
     c0 = ix % grid;
     c1 = iy % grid;
     c2 = iz % grid;
@@ -49,7 +53,7 @@ void update_density(long int ndata, int grid, double *density,
     density[cp10+grid*c1+grid2*cp12] += dx*ty*dz;
     density[c0+grid*cp11+grid2*cp12] += tx*dy*dz;
     density[cp10+grid*cp11+grid2*cp12] += dx*dy*dz;
-    
+
   }
   return;
 }

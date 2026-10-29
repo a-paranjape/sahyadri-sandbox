@@ -478,7 +478,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
     """ Power spectrum and various (Fourier) fields from particle data in cubic periodic box. """    
     ###############################################
     def __init__(self,grid=256,Lbox=200.0,lgbin=True,nbin=30,KSEP=3,NFAC=10,logfile=None,verbose=True,
-                 kmin=None,kmax=None,anisotropic=False,n_mu=161,los=2,L_Max=3):
+                 kmin=None,kmax=None,anisotropic=False,n_mu=161,los=2,L_Max=3,scale_factors=[1.,1.]):
         """ Initialise the following:
             -- grid: resolution at which to compute density in case of particles
             -- Lbox: box size along one dimension
@@ -492,6 +492,8 @@ class PowerSpectrum(Utilities,Paths,Constants):
             -- n_mu : number of bins in mu, for anisotropic power spectrum (converged at 161). 
             -- los : int 0,1,2, line of sight direction
             -- L_Max : int >= 1, number of even multipoles to return
+            -- scale_factors: list of 2 floats [alpha_par,alpha_perp] (default [1.,1.]).
+               Sub-box dimensions: Lx=Ly=alpha_perp*Lbox/2, Lz=alpha_par*Lbox/2.
             Additionally defines the variables/arrays:
             cell_size,Delta_k,kmin,kmax,kbin,ktab,(dlnk or dk) [mubin,mutab (if anisotropic==True)]
             Methods: 
@@ -506,6 +508,15 @@ class PowerSpectrum(Utilities,Paths,Constants):
         self.lgbin = lgbin
         self.nbin = nbin
         self.Lbox = Lbox
+        if not isinstance(scale_factors,list):
+            raise Exception("scale_factors must be a list in PowerSpectrum")
+        if len(scale_factors) != 2:
+            raise Exception("scale_factors must be a list of length 2 in PowerSpectrum")
+        a_par, a_perp = scale_factors[0], scale_factors[1]
+        self.Lx   = a_perp * Lbox / 2.0
+        self.Ly   = a_perp * Lbox / 2.0
+        self.Lz   = a_par  * Lbox / 2.0
+        self.Vbox = self.Lx * self.Ly * self.Lz
         self.grid = grid
         self.logfile = logfile
         self.verbose = verbose
@@ -516,8 +527,14 @@ class PowerSpectrum(Utilities,Paths,Constants):
         if self.verbose:
             self.print_this('Setting up k-space...',self.logfile)
             
-        self.cell_size = self.Lbox/self.grid
-        self.Delta_k = 2*np.pi/self.Lbox
+        self.cell_size_x = self.Lx / self.grid
+        self.cell_size_y = self.Ly / self.grid
+        self.cell_size_z = self.Lz / self.grid
+        self.cell_size    = self.cell_size_x
+        self.Delta_kx = 2*np.pi / self.Lx
+        self.Delta_ky = 2*np.pi / self.Ly
+        self.Delta_kz = 2*np.pi / self.Lz
+        self.Delta_k  = min(self.Delta_kx, self.Delta_ky, self.Delta_kz)
         self.grid_inv = 2*np.pi/self.grid
 
         self.anisotropic = anisotropic
@@ -533,7 +550,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
                 self.Pell[L] = sysp.legendre_p(2*L,self.mutab)[0]
         
         self.kmin = 1.0*self.Delta_k if kmin is None else kmin
-        self.kNy = np.pi/self.cell_size # don't change this!
+        self.kNy = min(np.pi/self.cell_size_x, np.pi/self.cell_size_y, np.pi/self.cell_size_z) # don't change this!
         self.kmax = 1.0*self.kNy if kmax is None else kmax
         if self.lgbin is None:
             if self.verbose:
@@ -595,16 +612,20 @@ class PowerSpectrum(Utilities,Paths,Constants):
 
         self.KK = self.K1**2 + self.K2**2 + self.K3**2
         # shape (~grid,~grid,~grid)
+        self.rx = self.Delta_kx / self.Delta_k
+        self.ry = self.Delta_ky / self.Delta_k
+        self.rz = self.Delta_kz / self.Delta_k
+        self.KK_aniso = (self.rx*self.K1)**2 + (self.ry*self.K2)**2 + (self.rz*self.K3)**2
 
         if self.anisotropic:
             # self.MU = self.K1.copy() if self.los==0 else (self.K2.copy() if self.los==1 else self.K3.copy())
             # self.MU = self.MU/np.sqrt(self.KK + self.TINY)
             if self.los==0:
-                self.MU = self.K1/np.sqrt(self.KK + self.TINY)
+                self.MU = self.rx*self.K1/np.sqrt(self.KK_aniso + self.TINY)
             elif self.los==1:
-                self.MU = self.K2/np.sqrt(self.KK + self.TINY)
+                self.MU = self.ry*self.K2/np.sqrt(self.KK_aniso + self.TINY)
             elif self.los==2:
-                self.MU = self.K3/np.sqrt(self.KK + self.TINY)
+                self.MU = self.rz*self.K3/np.sqrt(self.KK_aniso + self.TINY)
 
         if self.verbose:
             self.print_this('... setting up index arrays',self.logfile)
@@ -627,7 +648,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
             self.I_MU_SIZE = np.zeros((self.nbin,self.n_mu),dtype=int)
             
         for k in range(self.nbin):
-            cond = ((self.KK >= self.k2_compare[k]) & (self.KK < self.k2_compare[k+1]))
+            cond = ((self.KK_aniso >= self.k2_compare[k]) & (self.KK_aniso < self.k2_compare[k+1]))
             self.IND[k] = np.where(cond)
             self.I_SIZE[k] = self.IND[k][0].size
             del cond
@@ -636,7 +657,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
 
         if self.anisotropic:
             for k in range(self.nbin):
-                cond_k = ((self.KK >= self.k2_compare[k]) & (self.KK < self.k2_compare[k+1]))
+                cond_k = ((self.KK_aniso >= self.k2_compare[k]) & (self.KK_aniso < self.k2_compare[k+1]))
                 for mu in range(self.n_mu):
                     cond_last = (self.MU < self.mubin[mu+1]) if mu != self.n_mu-1 else (self.MU <= self.mubin[mu+1])
                     cond = cond_k & (self.MU >= self.mubin[mu]) & cond_last
@@ -686,13 +707,13 @@ class PowerSpectrum(Utilities,Paths,Constants):
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
-                                     c_double,c_double]
+                                     c_double,c_double,c_double,c_double]
 
         c_update_density(c_long(ndata),c_int(self.grid),density,
                          pos[0].astype('float64'),
                          pos[1].astype('float64'),
                          pos[2].astype('float64'),
-                         self.cell_size,c_double(0.0))
+                         c_double(self.cell_size_x),c_double(self.cell_size_y),c_double(self.cell_size_z),c_double(0.0))
 
         density = np.reshape(density,(self.grid,self.grid,self.grid),order='F')
 
@@ -704,7 +725,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
                              pos[0].astype('float64'),
                              pos[1].astype('float64'),
                              pos[2].astype('float64'),
-                             self.cell_size,c_double(1.0))
+                             c_double(self.cell_size_x),c_double(self.cell_size_y),c_double(self.cell_size_z),c_double(1.0))
             density2 = np.reshape(density2,(self.grid,self.grid,self.grid),order='F')
 
             density += density2            
@@ -926,7 +947,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
             if (input_is_density | input_is_FTdensity):
                 raise Exception("Please specify number density nbar [in same units as 1/Lbox^3] for shot-noise subtraction!")
             else:
-                nbar = input_array.shape[1]/self.Lbox**3
+                nbar = input_array.shape[1]/self.Vbox
 
         if not input_is_FTdensity:
             density = input_array if input_is_density else self.density_field(input_array)
@@ -984,9 +1005,19 @@ class PowerSpectrum(Utilities,Paths,Constants):
                 ell = 2*L
                 Pk[L] = (2*ell+1)*np.sum(self.Pell[L]*Pkmu,axis=1) # sum (instead of 0.5*trapezoid) ensures correct masking of empty bins.
 
-        Pk *= self.Lbox**3/(self.I_SIZE + self.TINY) # works for iso and aniso
+        Pk *= self.Vbox/(self.I_SIZE + self.TINY) # works for iso and aniso
         if aniso:
-            Pk[0] -= 1/nbar # shot-noise is isotropic
+            # Subtract shot noise for all multipoles with geometric correction.
+            # For an anisotropic box, modes in a k-bin are not isotropically
+            # distributed on the k-sphere, so shot noise contributes
+            # (2ell+1)/nbar * <P_ell(mu)>_modes to P_ell(k), not just 1/nbar.
+            # For ell=0, <P_0(mu)>_modes = 1 always, recovering the standard
+            # 1/nbar subtraction.
+            # geom_weights[L,k] = sum_mu Pell[L,mu]*I_MU_SIZE[k,mu] / I_SIZE[k]
+            geom_weights = (self.Pell @ self.I_MU_SIZE.T) / (self.I_SIZE + self.TINY)
+            for L in range(self.L_Max):
+                ell = 2*L
+                Pk[L] -= (2*ell+1) * geom_weights[L] / nbar
         else:
             Pk -= 1/nbar
         
@@ -1052,7 +1083,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
 
         Ntrc = hpos.shape[0]
 
-        hpos_grid = hpos*self.grid/self.Lbox
+        hpos_grid = hpos * (self.grid / np.array([self.Lx, self.Ly, self.Lz]))
         hgrid = np.fmod(hpos_grid,self.grid).astype('int')
         # shape(Ntrc,3)
         # hgrid contains integer vectors identifying the cell (floor) corresponding to each halo: used by CIC
@@ -1090,8 +1121,8 @@ class PowerSpectrum(Utilities,Paths,Constants):
 
         i_size = np.zeros(krange.size,dtype=int)
         for k in range(krange.size):
-            cond = ((self.KK >= self.k2_compare[krange[k]]) 
-                    & (self.KK < self.k2_compare[krange[k]+1]))
+            cond = ((self.KK_aniso >= self.k2_compare[krange[k]])
+                    & (self.KK_aniso < self.k2_compare[krange[k]+1]))
             ind[k] = np.where(cond) # indices of cells contributing to bin
             i_size[k] = ind[k][0].size # number of cells contributing to bin
             k1_array[k] = self.K1[ind[k][0],:,:].flatten()*self.grid_inv # 2pi/self.grid is for later convenience
@@ -1199,7 +1230,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
         del cic_ttt,cic_dtt,cic_tdt,cic_ttd,cic_ddt,cic_dtd,cic_tdd,cic_ddd
         gc.collect()
 
-        bias_k *= self.Lbox**3
+        bias_k *= self.Vbox
         bias_k = bias_k.real/(Pk_matter[krange]+self.TINY)
 
         if self.verbose:
