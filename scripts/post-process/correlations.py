@@ -493,7 +493,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
             -- los : int 0,1,2, line of sight direction
             -- L_Max : int >= 1, number of even multipoles to return
             -- scale_factors: list of 2 floats [alpha_par,alpha_perp] (default [1.,1.]).
-               Sub-box dimensions: Lx=Ly=alpha_perp*Lbox/2, Lz=alpha_par*Lbox/2.
+               Sub-box dimensions: Lx=Ly=alpha_perp*Lbox, Lz=alpha_par*Lbox.
             Additionally defines the variables/arrays:
             cell_size,Delta_k,kmin,kmax,kbin,ktab,(dlnk or dk) [mubin,mutab (if anisotropic==True)]
             Methods: 
@@ -513,9 +513,9 @@ class PowerSpectrum(Utilities,Paths,Constants):
         if len(scale_factors) != 2:
             raise Exception("scale_factors must be a list of length 2 in PowerSpectrum")
         a_par, a_perp = scale_factors[0], scale_factors[1]
-        self.Lx   = a_perp * Lbox / 2.0
-        self.Ly   = a_perp * Lbox / 2.0
-        self.Lz   = a_par  * Lbox / 2.0
+        self.Lx   = a_perp * Lbox
+        self.Ly   = a_perp * Lbox
+        self.Lz   = a_par  * Lbox
         self.Vbox = self.Lx * self.Ly * self.Lz
         self.grid = grid
         self.logfile = logfile
