@@ -32,14 +32,16 @@ EOF
   wait $spid
   echo "$route: server exit $?, $(grep -c . "$out/out_0.list") lines in out_0.list, $(du -sh "$out" | cut -f1)"
 }
-t0=$(date +%s)
-run pkc 'FILE_FORMAT = "PKC"
+# ROUTES (environment): routes to run, default "pkc gad h5g"; TAG: suffix of the output directories
+for route in ${ROUTES:-pkc gad h5g}; do
+  t0=$(date +%s)
+  if [ "$route" = pkc ]; then
+    run pkc 'FILE_FORMAT = "PKC"
 FILENAME = "snap.<snap>.<block>"'
-t1=$(date +%s)
-run gad "$(grep -v '^#' "$DIR/gad/g.000.rockstar.cfg")
+  else
+    run "$route" "$(grep -v '^#' "$DIR/$route/g.000.rockstar.cfg")
 FILENAME = \"g.<snap>.<block>\""
-t2=$(date +%s)
-run h5g "$(grep -v '^#' "$DIR/h5g/g.000.rockstar.cfg")
-FILENAME = \"g.<snap>.<block>\""
-t3=$(date +%s)
-echo "wall: pkc $((t1-t0)) s, gad $((t2-t1)) s, h5g $((t3-t2)) s"
+  fi
+  echo "$route wall $(( $(date +%s) - t0 )) s"
+  if [ -n "${TAG:-}" ]; then rm -rf "$DIR/out_${route}_$TAG"; mv "$DIR/out_$route" "$DIR/out_${route}_$TAG"; fi
+done

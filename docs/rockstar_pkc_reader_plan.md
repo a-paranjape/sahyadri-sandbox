@@ -591,6 +591,50 @@ a test). All changed Rockstar files pass `cc -fsyntax-only -std=c99 -Wall` again
 headers, with and without `ENABLE_PKC` (no warnings). Not done yet: building the Rockstar binary
 (needs the upstream source: ask first), running it, `pkc_to_gadget --blocks`, consistent-trees patch.
 
+### End-to-end on the Mac (2026-11-10)
+
+Rockstar built from upstream 36ce9eea36ee + our files (`make with_pkc ZSTD_DIR=/opt/homebrew`, scratch
+copy; only upstream warnings). `pkc_to_gadget` extended on pkdgrav3 branch `pkc-to-gadget-v3`
+(`--blocks K`, version-3 cosmology with `<out>.rockstar.cfg`, `--from-hdf5`).
+
+Input: `tmp.nosync/p1/n128_L200/snap.00090` of the pkdgrav3 checkout (128^3, 200 Mpc/h, z = 0, HDF5,
+LCDM). .pkc made with `pkc_convert` (dx 1.95 kpc/h, dv 2.44 km/s; writes version 1) and turned into
+version 3 with `tests_pkc/pkc_v1_to_v3.py` (test helper). Rockstar: PARALLEL_IO on one machine,
+FORCE_RES 0.03, MIN_HALO_OUTPUT_SIZE 20 (`tests_pkc/run_rockstar_e2e.sh`); about 2 s per run.
+
+1. `pkc_compare blocks`: Gadget file k of `--blocks 8` holds exactly the IDs of native share k, same
+   order; `pkc_compare gadget`: all 2,097,152 particles bit-identical (0 ulp), same particle mass.
+2. **Rockstar is not deterministic**: the same input run twice gives different catalogs (8 blocks:
+   7805/7808/7811 halos native, 7811/7823/7799 Gadget). Causes: `srand(getpid())` in `client.c` (the
+   random constant of `inthash.c` changes iteration order), and with several readers the order in which
+   particles reach the writers. Even 1 block differs between runs (7809-7811) with the stock binary.
+3. **Exact test passes** with a test-only build (`srand(12345)` instead of `srand(getpid())`, scratch
+   copy, not in the repo) and NUM_BLOCKS = 1: native PKC and `pkc_to_gadget --blocks 1` give
+   byte-identical `out_0.list`, `halos_0.0.ascii`, `halos_0.0.bin` (7808 halos), reproducible over two
+   runs each; effective `rockstar.cfg` identical except the format lines. With 8 blocks the fixed seed
+   is not enough (7792-7801 halos).
+4. First look at the compression (HDF5 route vs native, both 1 block, fixed seed; halos matched by
+   nearest centre within 0.1 Rvir, `tests_pkc/cmp_halos.py`), next to Rockstar's own scatter (same
+   PKC input, two 8-block runs):
+
+| | exact (HDF5) vs PKC | PKC run 1 vs run 2 |
+|---|---|---|
+| halos Np >= 20 / 50 / 100 / 1000 | 7799/3484/1531/33 vs 7808/3480/1522/33 | 7801/3485/1523/33 vs 7798/3484/1529/33 |
+| matched (Np >= 100) | 95.8% | 96.6% |
+| rms dlog10 Mvir (99% bound) | 0.026 (0.040) | 0.015 (0.021) |
+| rms dVmax/Vmax | 0.016 | 0.013 |
+| position offset / Rvir: median (99%) | 6e-4 (0.089) | 0 (0.082) |
+| bulk velocity diff.: median (99%) | 0.16 km/s (62 km/s) | 0 (40 km/s) |
+
+   One 128^3 snapshot, few halos and a crude matching: indicative only. The compression effect is
+   of the order of Rockstar's run-to-run scatter, somewhat larger in mass. The 512^3 runs (section 6)
+   with ID-based matching are the real test. Note the .pkc here was made from the same HDF5 with the
+   same velocity conversion as `--from-hdf5`, so the difference is quantization only.
+
+Consequence for section 6: the exact (ii) vs (iii) comparison uses NUM_BLOCKS = 1 and the fixed-seed
+test build; production-like 8+ block runs are compared statistically against the scatter between
+repeated runs of the same input.
+
 ## 8. Work order
 
 1. **Rockstar reader (this branch, started 2026-11-10)**: decoder split into `io/pkc_core.{c,h}` (no
