@@ -1,0 +1,15 @@
+#!/bin/bash -l
+# Stage 4: value-added catalogs out_<snap>.vahc (and .tens with PP_TENS=1) from the .pkc particles and the
+# consistent-trees catalogs out_<snap>.trees (post-process/run_addvalue.py; production settings).
+# Restart: rerun; snapshots whose outputs exist are skipped.
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+ls "$HALO_DIR"/out_*.trees > /dev/null 2>&1 || { stamp "no out_<snap>.trees in $HALO_DIR (run stage ctrees first)"; exit 1; }
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+TENS=; [ "$PP_TENS" = 1 ] && TENS=--tens
+/usr/bin/time -v "$PY" "$PP/run_addvalue.py" "$STEM" --real "$REAL" --grid "$PP_GRID" --down-to "$PP_DOWN_TO" \
+    $TENS --nproc "$PP_NPROC" 2> "$LOGS/vahc_time.${PBS_JOBID%%.*}.log" | grep -v '^\.\.\.'
+rc=${PIPESTATUS[0]}
+grep -E "Elapsed|Maximum resident" "$LOGS/vahc_time.${PBS_JOBID%%.*}.log"
+stamp "run_addvalue exit $rc; $(ls "$HALO_DIR"/out_*.vahc 2>/dev/null | wc -l) .vahc, $(ls "$HALO_DIR"/out_*.tens 2>/dev/null | wc -l) .tens"
+exit $rc

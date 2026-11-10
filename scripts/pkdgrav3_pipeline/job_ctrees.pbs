@@ -1,0 +1,32 @@
+#!/bin/bash -l
+# Stage 3: consistent-trees (Sahyadri-patched: w0-wa and curvature) on the Rockstar outputs, then
+# clean_trees.pl as in the pegasus pipeline: hlists -> $HALO_DIR/out_<snap>.trees, scales.txt -> ../scales.txt,
+# configs kept in logs/, Rockstar's out_*.list / halos_* / hlists / outputs deleted (CLEAN_ROCKSTAR=0 keeps them
+# and only copies the hlists).
+# Restart: rerun; consistent-trees starts over from the Rockstar outputs (needs CLEAN_ROCKSTAR=0 on the earlier run
+# if it had already cleaned).
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+CT=$CODES/ctrees
+cd "$HALO_DIR" || exit 1
+[ -f rockstar.cfg ] || { stamp "no $HALO_DIR/rockstar.cfg (run stage rockstar first)"; exit 1; }
+export OMP_NUM_THREADS=${PBS_NCPUS:-$CT_NCPU}
+t0=$(date +%s)
+perl "$CODES/rockstar/scripts/gen_merger_cfg.pl" rockstar.cfg > ctrees_gen.log 2>&1 || { cat ctrees_gen.log; exit 1; }
+MT=$HALO_DIR/outputs/merger_tree.cfg
+grep -E "^(Om|Ol|h0|w0|wa|BOX_WIDTH|FORCE_RES|PARTICLE_MASS)" "$MT"
+( cd "$CT" && perl do_merger_tree.pl "$MT" "$CT" ) > ctrees_trees.log 2>&1 || { stamp "do_merger_tree failed"; tail ctrees_trees.log; exit 1; }
+( cd "$CT" && perl halo_trees_to_catalog.pl "$MT" "$CT" ) > ctrees_cat.log 2>&1 || { stamp "halo_trees_to_catalog failed"; tail ctrees_cat.log; exit 1; }
+nh=$(ls hlists/hlist_*.list 2>/dev/null | wc -l)
+stamp "consistent-trees done in $(( $(date +%s) - t0 )) s: $nh hlists, $(ls trees/tree_*.dat 2>/dev/null | wc -l) tree files"
+mkdir -p logs; mv ctrees_*.log logs/
+if [ "$CLEAN_ROCKSTAR" = 1 ]; then
+  perl "$SANDBOX/scripts/assist/clean_trees.pl" "$HALO_DIR" "$HALO_DIR/logs" 2>/dev/null
+else  # same file names as clean_trees.pl, nothing deleted
+  awk '{print $1, $2}' outputs/scales.txt | while read snap a; do
+    cp hlists/hlist_${a:0:5}*.list out_$snap.trees; done
+  cp outputs/scales.txt ../scales.txt; cp outputs/merger_tree.cfg rockstar.cfg logs/
+fi
+n=$(ls out_*.trees 2>/dev/null | wc -l)
+stamp "$n out_<snap>.trees; scales: $(wc -l < ../scales.txt) lines"
+[ "$n" -eq "$nh" ] || exit 1

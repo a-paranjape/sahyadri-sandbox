@@ -1,0 +1,54 @@
+#!/bin/bash -l
+# Stage 2: Rockstar on all outputs, reading the .pkc snapshots directly (FILE_FORMAT = "PKC").
+# Server and client run in this one job on one node. Output: $HALO_DIR/out_<snap>.list, halos_<snap>.*,
+# rockstar.cfg (the full configuration Rockstar used), auto-rockstar.cfg.
+# Restart: rerun the job; it starts from scratch unless RS_RESTART=1 (then Rockstar's restart.cfg is used).
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+RS=$CODES/rockstar/rockstar
+[ -s "$SIM_DIR/snapnames.txt" ] || { stamp "no $SIM_DIR/snapnames.txt (run stage sim first)"; exit 1; }
+NS=$(grep -c . "$SIM_DIR/snapnames.txt")
+mkdir -p "$HALO_DIR" && cd "$HALO_DIR" || exit 1
+CFG=$HALO_DIR/rs_input.cfg
+if [ "${RS_RESTART:-0}" = 1 ] && [ -f restart.cfg ]; then
+  CFG=$HALO_DIR/restart.cfg; stamp "restarting from $CFG"
+else
+  rm -f auto-rockstar.cfg
+  cat > "$CFG" <<EOF
+# written by job_rockstar.pbs from $CONF
+FILE_FORMAT = "PKC"
+INBASE = "$SIM_DIR"
+FILENAME = "snap.<snap>.<block>"
+SNAPSHOT_NAMES = "$SIM_DIR/snapnames.txt"
+NUM_SNAPS = $NS
+STARTING_SNAP = 0
+NUM_BLOCKS = $RS_NUM_BLOCKS
+NUM_WRITERS = $RS_WRITERS
+FORK_READERS_FROM_WRITERS = 1
+FORK_PROCESSORS_PER_MACHINE = $RS_WRITERS
+PARALLEL_IO = 1
+PARALLEL_IO_SERVER_ADDRESS = "localhost"
+OUTBASE = "$HALO_DIR"
+PERIODIC = 1
+FORCE_RES = $FORCE_RES
+PKC_SUBSAMPLES = "$RS_PKC_SUBSAMPLES"
+TEMPORAL_HALO_FINDING = 1
+STRICT_SO_MASSES = 0
+MIN_HALO_OUTPUT_SIZE = $MIN_HALO_OUTPUT_SIZE
+MIN_HALO_PARTICLES = $MIN_HALO_PARTICLES
+UNBOUND_THRESHOLD = $UNBOUND_THRESHOLD
+OVERLAP_LENGTH = 3
+EOF
+fi
+stamp "Rockstar: $NS snapshots, $RS_NUM_BLOCKS readers, $RS_WRITERS writers, FORCE_RES $FORCE_RES"
+t0=$(date +%s)
+"$RS" -c "$CFG" > server.log 2>&1 &
+SPID=$!
+for _ in $(seq 1 600); do [ -f auto-rockstar.cfg ] && break; sleep 0.5; done
+[ -f auto-rockstar.cfg ] || { stamp "server did not write auto-rockstar.cfg"; tail server.log; kill $SPID; exit 1; }
+/usr/bin/time -v "$RS" -c auto-rockstar.cfg > client.log 2> client.time
+wait $SPID; rc=$?
+grep -E "Elapsed|Maximum resident" client.time
+n=0; for f in out_*.list; do [ -f "$f" ] && n=$((n+1)); done
+stamp "Rockstar exit $rc in $(( $(date +%s) - t0 )) s; $n of $NS out_<snap>.list; halos in the last: $(grep -vc '^#' out_$((NS-1)).list 2>/dev/null)"
+[ $rc -eq 0 ] && [ $n -eq $NS ] || { tail -20 server.log; exit 1; }

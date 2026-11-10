@@ -1,0 +1,27 @@
+#!/bin/bash -l
+# Stage 5: ASCII halo catalogs and trees -> FITS (.fits.gz) with metadata, then an independent check.
+#   $HALO_DIR/out_<snap>.trees/.vahc/.tens -> $HALO_DIR/compressed/out_<snap>_{basic,extended,vahc,tens}.fits.gz
+#   $HALO_DIR/trees/tree_*.dat, locations.dat, forests.list -> $HALO_DIR/compressed/trees/
+# FITS_DELETE_ASCII=1 deletes each ASCII file after its FITS file was written and verified.
+# Restart: rerun; existing FITS files are skipped.
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+cd "$HALO_DIR" || exit 1
+TMP=/var/tmp/${USER}_fits_${PBS_JOBID%%.*}; mkdir -p "$TMP"; trap 'rm -rf "$TMP"' EXIT
+LAST=$(tail -1 "$SIM_DIR/snapnames.txt")
+DEL=; [ "$FITS_DELETE_ASCII" = 1 ] && DEL=--delete-ascii
+WHAT=all; [ -d trees ] || WHAT=halos
+"$PY" "$PP/compress_halo_outputs.py" $WHAT --indir "$HALO_DIR" --nproc "$FITS_NPROC" --tmpdir "$TMP" \
+    --rockstar-cfg logs/rockstar.cfg --ctrees-cfg logs/merger_tree.cfg --pkc "$SIM_DIR/snap.$LAST" \
+    --meta SIM_STEM="$STEM" --meta SIM_REAL="$REAL" $DEL > "$LOGS/fits.${PBS_JOBID%%.*}.log" 2>&1
+rc=$?
+tail -2 "$LOGS/fits.${PBS_JOBID%%.*}.log"
+if [ -z "$DEL" ]; then  # independent check against the ASCII (impossible once deleted)
+  CT=; [ -d trees ] && CT=--trees
+  "$PY" "$PP/check_compressed_halos.py" "$HALO_DIR" $CT > "$LOGS/fits_check.${PBS_JOBID%%.*}.log" 2>&1
+  rc2=$?; grep -c PASS "$LOGS/fits_check.${PBS_JOBID%%.*}.log" | sed 's/^/checks passed: /'; grep FAIL "$LOGS/fits_check.${PBS_JOBID%%.*}.log"
+  [ $rc2 -eq 0 ] || rc=1
+fi
+du -sh compressed
+stamp "FITS stage exit $rc"
+exit $rc

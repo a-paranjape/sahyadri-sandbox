@@ -28,6 +28,15 @@ class Paths(object):
             self.scratch_path = '/mnt/home/project/chpc2501005/data/'
 
         self.python_path = self.home_path + 'scripts/post-process/'
+        # environment override (pkdgrav3 pipeline, scripts/pkdgrav3_pipeline): SAHYADRI_SCRATCH holds sims/ and halos/;
+        # the compiled helpers (cic_update.so) are taken from this directory
+        import os
+        if os.environ.get('SAHYADRI_SCRATCH'):
+            self.scratch_path = os.path.join(os.environ['SAHYADRI_SCRATCH'], '')
+            self.config_path = self.scratch_path + 'config/'
+            self.python_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '')
+        if os.environ.get('SAHYADRI_LIBDIR'):  # where cic_update.so / ngp_update.so were compiled for this machine
+            self.python_path = os.path.join(os.environ['SAHYADRI_LIBDIR'], '')
 
         self.sim_path = self.scratch_path + 'sims/'
         self.halo_path = self.scratch_path + 'halos/'

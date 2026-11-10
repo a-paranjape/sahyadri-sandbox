@@ -1,0 +1,22 @@
+#!/bin/bash -l
+# Stage 1: pkdgrav3 simulation -> $SIM_DIR/snap.<step>.s<pct>.<writer>.pkc (+ snapnames.txt for Rockstar).
+# Submit with submit_pipeline.sh (or: qsub -v CONF=<run.conf>,PIPE_ENV=<this dir>/pipeline_env.sh -l select=1:ncpus=192:mem=700gb job_sim.pbs).
+# Restart: rerunning starts the simulation again from the ICs (no checkpoints in this template).
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+mkdir -p "$SIM_DIR" && cd "$SIM_DIR" || exit 1
+export PKD_IO_ROOT
+source "$PKD_IO_ROOT/pkdgrav3/bench/phase0/env_pawna.sh"
+(cd "$PKD_IO_ROOT/pkdgrav3" && git log -1 --format="pkdgrav3 source %h %s")
+python3 "$PIPE/make_pkdgrav3_par.py" p.par || exit 1
+NTH=${PBS_NCPUS:-$SIM_NCPU}
+stamp "pkdgrav3 with $NTH threads"
+/usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" p.par > run.log 2> time.log
+rc=$?
+grep -E "Elapsed|Maximum resident" time.log
+# Rockstar's snapshot number <snap> = line <snap> of snapnames.txt (zero-padded pkdgrav3 steps of the outputs)
+ls snap.*.done 2>/dev/null | sed 's/^snap\.//; s/\.done$//' | sort > snapnames.txt
+stamp "pkdgrav3 exit $rc; $(grep -c . snapnames.txt) of $(echo $OUT_Z | wc -w) outputs: $(tr '\n' ' ' < snapnames.txt)"
+for s in $(cat snapnames.txt); do "$PKD_IO_ROOT/build_snapcomp/pkc_check" "snap.$s" | tail -1; done
+du -sh "$SIM_DIR"
+[ $rc -eq 0 ] && [ "$(grep -c . snapnames.txt)" -eq "$(echo $OUT_Z | wc -w)" ] || exit 1
