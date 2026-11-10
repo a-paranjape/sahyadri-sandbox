@@ -25,6 +25,8 @@ foreach ( @scale_values )
 }
 
 system("cp $scales $halos/../scales.txt");
+# keep the settings of this run (read by post-process/compress_halo_outputs.py; Sahyadri 2026-11-11)
+system("mkdir -p $halos/logs; for f in $halos/outputs/merger_tree.cfg $halos/rockstar.cfg $halos/auto-rockstar.cfg; do [ -f \$f ] && cp \$f $halos/logs/; done");
 system("rm -rf $halos/outputs $halos/out_*.list $halos/hlists");
 system("rm -rf $halos/profiling/ $halos/*.ascii $halos/*.bin");
 system("mv $home/ctrees_cfg*.* $halos/logs/.");
