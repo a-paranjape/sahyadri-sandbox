@@ -31,6 +31,10 @@
 #include "io_arepo.h"
 #endif /* ENABLE_HDF5 */
 
+#ifdef ENABLE_PKC
+#include "io_pkc.h"  // pkdgrav3 compressed snapshots, added for Sahyadri 2026-11-10
+#endif /* ENABLE_PKC */
+
 char **snapnames = NULL;
 char **blocknames = NULL;
 
@@ -130,6 +134,14 @@ void read_particles(char *filename) {
     exit(1);
 #endif
   }
+  else if (!strncasecmp(FILE_FORMAT, "PKC", 3)) {
+#ifdef ENABLE_PKC
+    load_particles_pkc(filename, &p, &num_p);
+#else
+    fprintf(stderr, "[Error] PKC needs zstd.  Recompile Rockstar using \"make with_pkc\".\n");
+    exit(1);
+#endif
+  }
   else if (!strncasecmp(FILE_FORMAT, "AREPO", 5)) {
 #ifdef ENABLE_HDF5
     load_particles_arepo(filename, &p, &num_p);
@@ -213,6 +225,8 @@ int64_t print_ascii_header_info(FILE *output, float *bounds, int64_t np) {
 		     bounds[0], bounds[1], bounds[2], 
 		     bounds[3], bounds[4], bounds[5]);
   chars += fprintf(output, "#Om = %f; Ol = %f; h = %f\n", Om, Ol, h0);
+  if (W0 != -1 || WA != 0) // added for Sahyadri: read by gen_merger_cfg.pl; LCDM headers unchanged
+    chars += fprintf(output, "#w0 = %.8g; wa = %.8g\n", W0, WA);
   chars += fprintf(output, "#FOF linking length: %f\n", FOF_LINKING_LENGTH);
   chars += fprintf(output, "#Unbound Threshold: %f; FOF Refinement Threshold: %f\n",
 		   UNBOUND_THRESHOLD, FOF_FRACTION);

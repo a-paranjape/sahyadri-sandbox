@@ -1,0 +1,3 @@
+make_testset
+pkc_compare
+pkc_core.o

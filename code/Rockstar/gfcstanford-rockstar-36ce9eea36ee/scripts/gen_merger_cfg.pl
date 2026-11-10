@@ -21,8 +21,14 @@ if ($outbase !~ m!^/!) {
 my $first_fn = "$outbase/out_$config->{STARTING_SNAP}.list";
 open OUT, "<", $first_fn or
     die "Couldn't open first halo output catalog $first_fn!\n";
+our ($w0, $wa); # from the catalog header if present, else the config, else LCDM (Sahyadri, 2026-11-10)
 while (<OUT>) {
     last unless (/^\#/);
+    if (/^\#w0\s*=/) { # written by our Rockstar (meta_io.c) when (W0, WA) != (-1, 0)
+	$w0 = (/w0\s*=\s*([\d.e+-]+)/)[0];
+	$wa = (/wa\s*=\s*([\d.e+-]+)/)[0];
+	next;
+    }
     if (/Om/) {
 	our $Om = (/Om\s*=\s*([\d.e+-]+)/)[0];
 	our $Ol = (/Ol\s*=\s*([\d.e+-]+)/)[0];
@@ -37,6 +43,10 @@ while (<OUT>) {
     }
 }
 close OUT;
+unless (defined $w0) { # catalogs from a Rockstar without the #w0 line, or LCDM
+    $w0 = defined $config->{W0} ? $config->{W0} : -1;
+    $wa = defined $config->{WA} ? $config->{WA} : 0;
+}
 
 our $num_snaps = 0;
 if ($config->{SNAPSHOT_NAMES}) {
@@ -106,8 +116,8 @@ print CONFIG << "EOL"
 Om=$Om #Omega_Matter
 Ol=$Ol #Omega_Lambda
 h0=$h0 #h0
-w0=$config->{W0}  /* added by Saee/*
-wa=$config->{WA}  /* added by Saee */
+w0=$w0 #w(a) = w0 + wa(1-a), from the halo catalog header, else the Rockstar config (added by Saee; Sahyadri 2026-11-10)
+wa=$wa #see w0
 
 SCALEFILE = "$outbase/outputs/scales.txt"
 INBASE = "$outbase"
