@@ -67,8 +67,10 @@ class SnapshotReader(Utilities,Paths):
                 self.snapshot_file=self.snapdir+'/snapshot_{0:03d}'.format(self.snap)
                 self.snapshot_ext = '.0.hdf5'
 
+        elif self.find_pkc() is not None:
+            return self.read_pkc_header()
         else:
-            raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5]'%(
+            raise Exception('File not found!\n sim_path=%s \nfile_name=%s  [.hdf5 or .0.hdf5, or .pkc via snapnames.txt]'%(
                 self.sim_path,self.snapshot_file))
 
         if self.verbose:
@@ -111,6 +113,46 @@ class SnapshotReader(Utilities,Paths):
             self.print_this('... loaded header and parameters',self.logfile)
 
     ###############################################
+    # pkdgrav3 compressed snapshots (.pkc). Used when no Gadget HDF5 snapshot exists. Rockstar's snapshot
+    # number <snap> is line <snap> of snapnames.txt (the SNAPSHOT_NAMES file given to Rockstar: zero-padded
+    # pkdgrav3 steps) in the simulation directory; the files are <dir>/<name>.<step>.s<pct>.<writer>.pkc.
+    def find_pkc(self):
+        simdir = self.sim_path + self.sim_stem + '/r'+str(self.real)
+        names = os.path.join(simdir, 'snapnames.txt')
+        if not os.path.isfile(names):
+            return None
+        with open(names) as f:
+            steps = [l.split()[0] for l in f if l.strip() and not l.startswith('#')]
+        if self.snap >= len(steps):
+            return None
+        import glob
+        hits = sorted(glob.glob(os.path.join(simdir, '**', '*.' + steps[self.snap] + '.s*.pkc'), recursive=True))
+        prefixes = sorted({h[:h.rindex('.s', 0, h.rindex('.', 0, len(h) - 4))] for h in hits})
+        if len(prefixes) > 1:
+            raise Exception('several .pkc snapshots for step %s: %s' % (steps[self.snap], prefixes))
+        return prefixes[0] if prefixes else None
+
+    def read_pkc_header(self):
+        from pkcreader import PkcSnapshot
+        self.pkc = PkcSnapshot(self.find_pkc())
+        self.snapshot_file, self.snapshot_ext = self.pkc.prefix, '.pkc'
+        if self.verbose:
+            self.print_this('Snapshot Reader:\n... preparing to read pkdgrav3 compressed snapshot: '+self.pkc.prefix,self.logfile)
+        self.scale    = self.pkc.scale
+        self.redshift = self.pkc.redshift
+        self.npart    = self.npart_this = int(self.pkc.npart)
+        self.nFile    = len(self.pkc.files)
+        self.Lbox     = self.pkc.Lbox
+        self.mpart    = self.pkc.mpart # Msun/h
+        self.massarr  = [0.0, self.mpart/1e10]
+        self.Om       = self.pkc.Om
+        # Omega_Lambda + Omega_DE (pkcreader gives Olam = 0 for w0-wa runs); w0, wa in self.pkc.cosmology
+        self.Olam     = self.pkc.Olam + self.pkc.cosmology.get('Omega_DE', 0.0)
+        self.hubble   = self.pkc.hubble
+        if self.verbose:
+            self.print_this('... loaded header (pkc, subsamples %s %%)' % self.pkc.percents,self.logfile)
+
+    ###############################################
 
     ###############################################
     def read_block(self,block='pos',down_to=0,seed=None,subsamples=[],raw_nfile=[]):
@@ -119,7 +161,31 @@ class SnapshotReader(Utilities,Paths):
         if use_compressed=False and snapshot is in multiple files then you can use raw_nfile to chose which files to read, by default it will read all file. This is relevant only for simulations with multiple file per snapshot"""
         if block not in ['pos','vel','ids','potential']:
             raise ValueError("block should be one of ['pos','vel','ids'] in read_block().")
-        
+
+        if getattr(self, 'pkc', None) is not None:
+            # subsamples: list of pkc subsample percents to read (default: all, i.e. every particle).
+            # down_to > 0 (as for Gadget): decode only the smallest subsamples that hold down_to^3 particles,
+            # then keep a random down_to^3 of them (RandomState(seed)). A particle's subsample is a hash of its
+            # ID, so this is a random subset as with Gadget files, without decoding the whole snapshot.
+            # pos (3,n) Mpc/h in [0,L); vel (3,n) peculiar km/s (Gadget stores v/sqrt(a)); ids (n,)
+            n_sample = int(down_to)**3
+            if not subsamples and 0 < n_sample < self.npart:
+                subsamples = []
+                for p in sorted(self.pkc.percents):
+                    subsamples.append(p)
+                    if self.pkc.count(subsamples) >= n_sample:
+                        break
+            if self.verbose:
+                self.print_this('... reading %s from pkc (subsamples %s)' % (block, subsamples or 'all'),self.logfile)
+            out = self.pkc.read_block('pot' if block == 'potential' else block, subsamples=subsamples or None)
+            n_read = out.shape[-1]
+            if 0 < n_sample < n_read:
+                if self.verbose:
+                    self.print_this('... downsampling %d to %d^3' % (n_read, down_to),self.logfile)
+                ind = np.random.RandomState(seed).choice(n_read, size=n_sample, replace=False)
+                out = out[..., ind]
+            return out
+
         if(self.use_compressed):
             transform_quant={'pos':'positions','vel':'velocities','potential':'potentials','ids':'ids'}
             if(subsamples==[]):
@@ -159,6 +225,7 @@ class SnapshotReader(Utilities,Paths):
             #select the ptype
             np_this=np_arr_this[self.ptype]
             out_this=f[prefix+suffix][:]
+            f.close()
 
             if(ii==0):
                 out=out_this
@@ -167,32 +234,8 @@ class SnapshotReader(Utilities,Paths):
             else:
                 out=np.row_stack([out,out_this])
 
-        return out if block in ['ids','potential'] else out.T # notice transpose
-
-        f = h5py.File(self.snapshot_file+self.snapshot_ext,'r')
-        out_part = f[prefix+suffix][:]
-        f.close()
-        if self.nFile > 1:
-            # NEEDS TESTING
-            out = np.zeros(self.npart,dtype=out_part.dtype) if block in ['ids','potential'] else np.zeros((self.npart,3),dtype=out_part.dtype)
-            np_this=out_part.shape[0]
-            out[:np_this] = out_part 
-            shift = np_this
-            for i in range(1,self.nFile):
-                filename = self.snapshot_file+'.'+str(i)+'.hdf5'
-                f = h5py.File(filename,'r')
-                np_arr_this = (f['Header'].attrs[u'NumPart_ThisFile']).astype(np.int64)
-                #select the ptype
-                np_this=np_arr_this[self.ptype]
-                out[shift:shift+np_this] = f[prefix+suffix][:]
-                f.close()
-                shift += np_this
-        else:
-            out = out_part.copy()
-
-        del out_part
-
-        if down_to**3 > self.npart:
+        # (an early return here used to skip the down_to downsampling below; fixed 2026-11-11)
+        if down_to**3 > out.shape[0]:
             if self.verbose:
                 self.print_this('Not enough particles! Using original sample...',self.logfile)
             down_to = 0
@@ -203,7 +246,7 @@ class SnapshotReader(Utilities,Paths):
             rng = np.random.RandomState(seed)
             n_sample = int(down_to**3)
             
-            ind = rng.choice(self.npart,size=n_sample,replace=False)
+            ind = rng.choice(out.shape[0],size=n_sample,replace=False)
             out = out[ind]
             del ind
             

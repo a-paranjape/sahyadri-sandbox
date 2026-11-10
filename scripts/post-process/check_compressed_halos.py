@@ -59,6 +59,16 @@ def check_snapshot(R, out, snap):
         if 'b1' in vn:
             nb += [] if same(got['b1'], V[:, vn.index('b1')]) else ['b1 (basic)']
         ok(not nb, 'out_%s: .vahc columns equal the ASCII%s' % (snap, (' (differ: %s)' % nb) if nb else ''))
+        ok(np.array_equal(V[:, vn.index('haloID')], A[:, names.index('id')]), 'out_%s: .vahc rows are the .trees halos in order' % snap)
+    tens = os.path.join(R, 'out_%s.tens' % snap)
+    if os.path.isfile(tens) and os.path.isfile(os.path.join(out, 'out_%s_tens.fits.gz' % snap)):
+        tn = C.halo_header_names(tens, 'tens')
+        V = np.loadtxt(tens, ndmin=2)
+        with fitsio.FITS(os.path.join(out, 'out_%s_tens.fits.gz' % snap)) as f:
+            d = f[1].read()
+        nb = [c for c in d.dtype.names if not same(d[c], V[:, tn.index(c)])]
+        ok(not nb and len(d) == len(V), 'out_%s: .tens columns equal the ASCII%s' % (snap, (' (differ: %s)' % nb) if nb else ''))
+        ok(np.array_equal(V[:, tn.index('haloID')], A[:, names.index('id')]), 'out_%s: .tens rows are the .trees halos in order' % snap)
     # readers.py access (prep_halos_fits + ConvertToFITS.fits_to_record)
     try:
         import ConvertToFITS as Cfits

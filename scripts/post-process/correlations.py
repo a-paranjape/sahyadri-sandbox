@@ -876,7 +876,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
                 self.print_this('... Fourier transforming density',self.logfile)
             FTdensity = self.fourier_transform_density(density,CIC=CIC)
         else:
-            FTdensity = input_array
+            FTdensity = 1.0*input_array # copy: smoothing below is in place (was smoothing the caller's field; fixed 2026-11-11)
 
         if self.verbose:
             self.print_this("... applying Gaussian smoothing with radius {0:.2e}*Lbox".format(R_smooth),self.logfile)

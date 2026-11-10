@@ -413,9 +413,10 @@ def convert_halo_snapshot(task):
         for k in sources:
             if data[k].shape != (n, len(names[k])):
                 raise RuntimeError('%s: chunk shape %s, expected (%d, %d)' % (src[k], data[k].shape, n, len(names[k])))
-        if 'vahc' in data:  # rows must be the same halos
-            if not np.array_equal(data['trees'][:, names['trees'].index('id')], data['vahc'][:, names['vahc'].index('haloID')]):
-                raise RuntimeError('out_%s: .trees id and .vahc haloID differ row by row' % snap)
+        for k in ('vahc', 'tens'):  # rows must be the same halos (postprocess must not sort them)
+            if k in data and 'trees' in data and \
+                    not np.array_equal(data['trees'][:, names['trees'].index('id')], data[k][:, names[k].index('haloID')]):
+                raise RuntimeError('out_%s: .trees id and .%s haloID differ row by row' % (snap, k))
         if scale is None and n and 'scale' in names['trees']:
             scale = float(data['trees'][0, names['trees'].index('scale')])
         for t, (w, cols) in writers.items():

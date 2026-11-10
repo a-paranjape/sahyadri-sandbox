@@ -41,6 +41,7 @@ ps = PowerSpectrum(grid=grid,Lbox=Lbox,logfile=logfile)
 calc_Pk = False
 calc_mf = False
 add_value = False
+add_tens = False # with add_value: also write out_<snap>.tens (tidal tensor components)
 calc_vvf = False
 calc_knn = False
 calc_2pcf = True 
@@ -319,10 +320,15 @@ def do_this_snap(snap):
 
     if add_value:
         # more inclusive catalog for .vahc file
-        hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True)
+        # sorthalos=False: .vahc/.tens rows must be the .trees rows in order (readers.prep_halos(va=True),
+        # compress_halo_outputs.py and the production files rely on it)
+        hpos,halos = hr.prep_halos(QE=None,Npmin=0.0,keep_subhalos=True,sorthalos=False)
         av = AddValue(sim_stem=sim_stem,real=real,snap=snap,grid=grid,kmax=kmax,massdef=massdef,
                       ps=ps,density=FT_delta_dm,hpos=hpos,halos=halos,input_is_FTdensity=True)
         va = av.add_value(write_vahc=True)
+        if add_tens: # tidal tensor components (.tens), same density field and halos
+            del va
+            va = av.add_value(write_vahc=True,only_tensor=True)
             
        
     if calc_Pk:
