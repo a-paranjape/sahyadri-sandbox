@@ -28,15 +28,18 @@ echo "== Rockstar"
 [ -d "$CODES/rockstar/.git" ] || git clone -q https://bitbucket.org/gfcstanford/rockstar.git "$CODES/rockstar"
 (cd "$CODES/rockstar" && git checkout -q -f 36ce9eea36eeda4c333acf56f8bb0d40ff0df2a1 && git clean -qfdx)
 overlay "$SB/code/Rockstar/gfcstanford-rockstar-36ce9eea36ee" "$CODES/rockstar"
-(cd "$CODES/rockstar" && make with_hdf5_pkc ZSTD_INC="$ZSRC" ZSTD_LIB="$ZBLD" > build.log 2>&1) || { tail build.log; exit 1; }
-"$CODES/rockstar/rockstar" 2>&1 | head -1 || true
+# HDF5 (Gadget-4/AREPO input, not needed for .pkc): pawna's system HDF5 instead of the pegasus paths in the Makefile
+HDF5_INC=${HDF5_INC:-/usr/include/hdf5/serial}; HDF5_LIB=${HDF5_LIB:-/usr/lib/x86_64-linux-gnu/hdf5/serial}
+(cd "$CODES/rockstar" && make with_hdf5_pkc ZSTD_INC="$ZSRC" ZSTD_LIB="$ZBLD" \
+   HDF5_FLAGS="-DH5_USE_16_API -DENABLE_HDF5 -I$HDF5_INC -L$HDF5_LIB -lhdf5" > build.log 2>&1) || { tail "$CODES/rockstar/build.log"; exit 1; }
+ls -l "$CODES/rockstar/rockstar"
 
 echo "== consistent-trees"
 [ -d "$CODES/ctrees/.git" ] || git clone -q https://bitbucket.org/pbehroozi/consistent-trees.git "$CODES/ctrees"
 (cd "$CODES/ctrees" && git checkout -q -f 7c20add8bb417c567c8c0725eb38960869b75106 && git clean -qfdx)
 overlay "$SB/code/ConsistentTrees/consistent-trees-7c20add" "$CODES/ctrees"
 (cd "$CODES/ctrees" && make > build.log 2>&1) || { tail "$CODES/ctrees/build.log"; exit 1; }
-ls "$CODES/ctrees/find_parents_and_cleanup" "$CODES/ctrees/tree_cat" > /dev/null
+ls "$CODES/ctrees/find_parents_and_cleanup" "$CODES/ctrees/assemble_halo_trees" "$CODES/ctrees/gravitational_consistency" > /dev/null
 
 echo "== Python venv"
 [ -x "$CODES/venv/bin/python" ] || python3 -m venv --system-site-packages "$CODES/venv"
