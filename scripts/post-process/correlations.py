@@ -1094,7 +1094,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
             delta_matter = self.fourier_transform_density(delta_grid,CIC=CIC)
             del delta_grid
 
-        Pk_matter = self.Pk_grid(delta_matter,input_is_FTdensity=1,CIC=CIC)
+        Pk_matter = self.Pk_grid(delta_matter,input_is_FTdensity=1,CIC=CIC,nbar=np.inf) # no shot-noise subtraction for b1 (as in production before e77922b)
             
         cond_posPk = (Pk_matter > 0.0)
         ind_posPk = np.where(cond_posPk)[0]
