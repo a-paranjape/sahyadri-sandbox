@@ -1,0 +1,27 @@
+#!/bin/bash -l
+# Compress Rockstar/consistent-trees ASCII outputs of one run to FITS (.fits.gz) with metadata, then check them.
+# qsub -v RUN=<dir with out_*.trees and trees/>,RSCFG=<rockstar.cfg>,CTCFG=<merger_tree.cfg>,PKC=<prefix of a .pkc snapshot>,SIM=<name>,NPROC=16 job_compress_halo_outputs.pbs
+# (RSCFG, CTCFG, PKC, SIM optional; DELETE=1 removes the ASCII only after the conversion and the check both pass)
+#PBS -N comp_halos
+#PBS -l select=1:ncpus=16:mem=180gb
+#PBS -l walltime=24:00:00
+#PBS -j oe
+set -u
+HERE=${PBS_O_WORKDIR:-$(pwd)}
+cd "$HERE"
+NPROC=${NPROC:-16}
+TMP=${TMPDIR_LOCAL:-/var/tmp/${USER}_comp_${PBS_JOBID%%.*}}
+mkdir -p "$TMP"
+OPTS=(--nproc "$NPROC" --tmpdir "$TMP")
+[ -n "${RSCFG:-}" ] && OPTS+=(--rockstar-cfg "$RSCFG")
+[ -n "${CTCFG:-}" ] && OPTS+=(--ctrees-cfg "$CTCFG")
+[ -n "${PKC:-}" ] && OPTS+=(--pkc "$PKC")
+[ -n "${SIM:-}" ] && OPTS+=(--meta "SIMNAME=$SIM")
+echo "host $(hostname) date $(date -Is) RUN=$RUN"
+python compress_halo_outputs.py all --indir "$RUN" "${OPTS[@]}"; rc=$?
+python check_compressed_halos.py "$RUN" --trees; rc2=$?
+echo "convert rc=$rc check rc=$rc2"
+if [ "${DELETE:-0}" = 1 ] && [ $rc = 0 ] && [ $rc2 = 0 ]; then
+  python compress_halo_outputs.py all --indir "$RUN" "${OPTS[@]}" --delete-ascii   # skips existing files, then deletes
+fi
+rmdir "$TMP" 2>/dev/null
