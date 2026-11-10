@@ -1,0 +1,36 @@
+#!/bin/bash -l
+# 512^3 validation simulation for Rockstar's PKC reader. A 32^3 smoke run first must write format version 3.
+# Outputs: /storage/shadab/pkc_rockstar/val512/snap.<step>.s*.pkc and snap.<step> (HDF5).
+#PBS -N pkc_val512
+#PBS -q workq
+#PBS -l select=1:ncpus=64:mem=96gb
+#PBS -l walltime=12:00:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkc_rockstar/logs/val512.pbs.out
+set -u
+W=/storage/shadab/pkc_rockstar; R=/storage/shadab/pkdgrav3_io; NTH=64
+exec > $W/logs/val512.${PBS_JOBID%%.*}.log 2>&1   # PBS -o copy-back is unreliable on pawna
+export PKD_IO_ROOT=$R
+source $R/pkdgrav3/bench/phase0/env_pawna.sh
+echo "host $(hostname)  date $(date -Is)  job ${PBS_JOBID:-}  threads $NTH"
+(cd $R/pkdgrav3 && git log -1 --format="pkdgrav3 source %h %s"); ls -l $R/build/pkdgrav3
+RUN="mpirun --bind-to none -np 1 -x PYTHONPATH $R/build/pkdgrav3 -sz $NTH"
+
+# smoke: 32^3, 2 steps, must give version-3 .pkc
+S=$W/smoke32; rm -rf $S; mkdir -p $S; cd $S
+cp $W/smoke32.par p.par; cp $R/pkdgrav3/examples/euclid_z0_transfer_combined.dat .
+$RUN p.par > run.log 2>&1; echo "smoke rc=$?"
+F=$(ls snap.*.s01.0.pkc | tail -1)
+V=$(python3 -c "import struct,sys; print(struct.unpack_from('<I', open(sys.argv[1],'rb').read(12), 8)[0])" $F)
+echo "smoke: $F format version $V"; $R/build_snapcomp/pkc_check ${F%.s01.0.pkc} | tail -2
+[ "$V" = 3 ] || { echo "smoke run did not write version 3; stopping"; exit 1; }
+
+# validation run
+D=$W/val512; mkdir -p $D; cd $D
+cp $W/val512.par p.par; cp $R/pkdgrav3/examples/euclid_z0_transfer_combined.dat .
+/usr/bin/time -v $RUN p.par > run.log 2> time.log
+echo "val512 rc=$?  $(date -Is)"; grep -E "Elapsed|Maximum resident" time.log
+grep "successfully written" run.log | tail -12
+ls -la $D | grep -v "\.pkc$"
+for s in $(ls snap.*.done 2>/dev/null | sed 's/\.done$//'); do echo "== $s"; $R/build_snapcomp/pkc_check $s | tail -1; done
+du -sh $D

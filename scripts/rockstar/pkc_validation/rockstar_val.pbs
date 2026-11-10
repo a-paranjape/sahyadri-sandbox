@@ -1,0 +1,64 @@
+#!/bin/bash -l
+# Rockstar PKC reader validation on the 512^3 run (sahyadri-sandbox docs/rockstar_pkc_reader_plan.md, section 6).
+# Routes, all with NUM_BLOCKS = 8 over the 6 outputs:
+#   pkc   native PKC reader (run twice: pkc, pkc2 -> Rockstar's own run-to-run scatter)
+#   gad   pkc_to_gadget --blocks 8              (same particles as pkc, Gadget reader)
+#   h5g   pkc_to_gadget --blocks 8 --from-hdf5  (unquantized HDF5 particles, Gadget reader)
+# Exact test at the last output: fixed-seed test build, NUM_BLOCKS = NUM_WRITERS = 1: pkc1 vs gad1 byte-identical.
+# Then consistent-trees (Sahyadri-patched) on pkc and h5g. Gadget files live on the node's local disk only.
+#PBS -N pkc_rsval
+#PBS -q workq
+#PBS -l select=1:ncpus=16:mem=96gb
+#PBS -l walltime=08:00:00
+#PBS -j oe
+#PBS -o /storage/shadab/pkc_rockstar/logs/rsval.pbs.out
+set -u
+W=/storage/shadab/pkc_rockstar; D=$W/val512; OUT=$W/rsval
+exec > $W/logs/rsval.${PBS_JOBID%%.*}.log 2>&1
+TMP=/var/tmp/shadab_pkcval_${PBS_JOBID%%.*}; mkdir -p $TMP; trap 'rm -rf $TMP' EXIT
+P2G=$W/tools_build/pkc_to_gadget; RS=$W/rockstar/rockstar; RSD=$W/rockstar_det/rockstar; CT=$W/ctrees
+echo "host $(hostname)  date $(date -Is)  job ${PBS_JOBID:-}"; df -h /var/tmp | tail -1
+cd $D; ls snap.*.done | sed 's/^snap\.//; s/\.done$//' > $W/snapnames.txt; cat $W/snapnames.txt
+LAST=$(tail -1 $W/snapnames.txt); NS=$(grep -c . $W/snapnames.txt)
+
+t0=$(date +%s)
+mkdir -p $TMP/gad $TMP/h5g $TMP/gad1
+for s in $(cat $W/snapnames.txt); do
+  $P2G --threads 16 --blocks 8 $D/snap.$s $TMP/gad/g.$s | head -1
+  $P2G --threads 16 --blocks 8 --from-hdf5 $D/snap.$s $D/snap.$s $TMP/h5g/g.$s | tail -3 | head -1
+done
+$P2G --threads 16 --blocks 1 $D/snap.$LAST $TMP/gad1/g.$LAST | head -1
+echo "conversion $(( $(date +%s) - t0 )) s"; du -sh $TMP
+
+rs() { # name binary inbase filename nb nsnaps snapnames extra-config
+  local name=$1 bin=$2 inbase=$3 fname=$4 nb=$5 nsnap=$6 names=$7 extra=$8 o=$OUT/$1
+  rm -rf $o; mkdir -p $o
+  printf 'INBASE = "%s"\nOUTBASE = "%s"\nFILENAME = "%s"\nSNAPSHOT_NAMES = "%s"\nNUM_SNAPS = %s\nSTARTING_SNAP = 0\nNUM_BLOCKS = %s\nNUM_WRITERS = %s\nFORK_READERS_FROM_WRITERS = 1\nFORK_PROCESSORS_PER_MACHINE = %s\nPARALLEL_IO = 1\nPARALLEL_IO_SERVER_ADDRESS = "localhost"\nPERIODIC = 1\nFORCE_RES = 0.00195\nMIN_HALO_OUTPUT_SIZE = 20\n%s\n' \
+    "$inbase" "$o" "$fname" "$names" $nsnap $nb $nb $nb "$extra" > $o/rs.cfg
+  local t=$(date +%s)
+  ( cd $o && $bin -c rs.cfg > server.log 2>&1 ) &
+  local spid=$!
+  for _ in $(seq 1 300); do [ -f $o/auto-rockstar.cfg ] && break; sleep 0.2; done
+  ( cd $o && $bin -c auto-rockstar.cfg > client.log 2>&1 )
+  wait $spid
+  echo "$name: exit $?, $(( $(date +%s) - t )) s, halos per output: $(for f in $o/out_*.list; do grep -vc '^#' $f; done | tr '\n' ' ')"
+}
+GCFG() { grep -v '^#' $1 | grep -v "NUM_BLOCKS"; }
+printf '%s\n' $LAST > $W/snapnames_last.txt
+rs pkc  $RS  $D        "snap.<snap>.<block>" 8 $NS $W/snapnames.txt 'FILE_FORMAT = "PKC"'
+rs pkc2 $RS  $D        "snap.<snap>.<block>" 8 $NS $W/snapnames.txt 'FILE_FORMAT = "PKC"'
+rs gad  $RS  $TMP/gad  "g.<snap>.<block>"    8 $NS $W/snapnames.txt "$(GCFG $TMP/gad/g.$LAST.rockstar.cfg)"
+rs h5g  $RS  $TMP/h5g  "g.<snap>.<block>"    8 $NS $W/snapnames.txt "$(GCFG $TMP/h5g/g.$LAST.rockstar.cfg)"
+rs pkc1 $RSD $D        "snap.<snap>.<block>" 1 1   $W/snapnames_last.txt 'FILE_FORMAT = "PKC"'
+rs gad1 $RSD $TMP/gad1 "g.<snap>.<block>"    1 1   $W/snapnames_last.txt "$(GCFG $TMP/gad1/g.$LAST.rockstar.cfg)"
+for f in out_0.list halos_0.0.ascii halos_0.0.bin; do cmp $OUT/pkc1/$f $OUT/gad1/$f && echo "EXACT: $f identical (pkc1 vs gad1)"; done
+
+# consistent-trees (patched) on pkc and h5g
+for r in pkc h5g; do
+  ( cd $OUT/$r && perl $W/rockstar/scripts/gen_merger_cfg.pl rockstar.cfg > gen.log 2>&1 )
+  t=$(date +%s)
+  ( cd $CT && perl do_merger_tree.pl $OUT/$r/outputs/merger_tree.cfg $CT > $OUT/$r/trees.log 2>&1 && \
+              perl halo_trees_to_catalog.pl $OUT/$r/outputs/merger_tree.cfg $CT > $OUT/$r/cat.log 2>&1 )
+  echo "consistent-trees $r: exit $?, $(( $(date +%s) - t )) s, $(ls $OUT/$r/hlists 2>/dev/null | wc -l) hlists"
+done
+du -sh $OUT/*; echo "done $(date -Is)"

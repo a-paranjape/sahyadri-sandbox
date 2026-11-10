@@ -1,0 +1,40 @@
+# Validation of Rockstar's native PKC reader (sahyadri-sandbox docs/rockstar_pkc_reader_plan.md, section 6):
+# 512^3 in 50 Mpc/h (Sahyadri 2048^3/200 Mpc/h mass resolution), to z = 0, 6 outputs; every output written
+# compressed (.pkc, version 3) and as standard HDF5 (bCompAlsoStandard). Ordered mode as in production:
+# IDs = iOrder = Lagrangian lattice index (HDF5 has no ID column; rows are sorted by iOrder).
+from accuracy import classic_theta_switch, classic_replicas_switch
+achOutName      = "snap"
+achTfFile       = "euclid_z0_transfer_combined.dat"
+nGrid           = 32
+dBoxSize        = 50
+iLPT            = 2
+iSeed           = 314159265
+dRedFrom        = 49
+nSteps          = 2
+dRedTo          = 10.0
+iOutInterval    = 1000
+iCheckInterval  = 0
+h               = 0.6736
+dOmega0         = 0.3137721
+dLambda         = 0.6862279
+dSigma8         = 0.81
+dSpectral       = 0.965
+bComove         = True
+bPeriodic       = True
+bEwald          = True
+bEpsAccStep     = True
+bNewKDK         = True
+dEta            = 0.3
+dTheta          = classic_theta_switch()
+nReplicas       = classic_replicas_switch()
+bMemUnordered   = False
+bMemParticleID  = False
+bDoDensity      = False
+bOverwrite      = True
+bVDetails       = True
+bHDF5           = True
+bCompressedOutput = True
+bCompAlsoStandard = True
+achSimName      = "pkc_smoke32"
+achSimSet       = "Sahyadri validation"
+achSimComment   = "Rockstar PKC reader validation, LCDM"

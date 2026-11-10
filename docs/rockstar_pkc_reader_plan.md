@@ -651,6 +651,28 @@ PKC output of three 128^3 snapshots (z = 3, 1, 0): 38 output files byte-identica
 w0 = -0.9, wa = 0.1 on the same catalogs: accretion rates change by 1.6-2.2%, ~1-2% of halos are
 handled differently by the consistency step (code exercise, not a w0-wa simulation).
 
+### pawna (2026-11-10/11)
+
+- pkdgrav3 install `/storage/shadab/pkdgrav3_io` updated to main fcd37310 (`git pull --ff-only` +
+  `compile_pawna.sh`, as in running_on_pawna.md); no job of ours was running. Smoke run 32^3 in the
+  validation job: format version 3, `pkc_check` OK.
+- Workspace `/storage/shadab/pkc_rockstar`: Rockstar 36ce9eea36ee + our files (`make with_pkc`, gcc 11.4,
+  zstd from `build_snapcomp/_deps` via ZSTD_INC/ZSTD_LIB) and the fixed-seed test build
+  (`rockstar_det`); snapcomp tools of pkdgrav3 branch `pkc-to-gadget-v3` (`tools_build`; needed a CMake
+  fix, `enable_language(C)` before `find_package(HDF5)`, committed on that branch); `tests_pkc`: 28/28
+  pass; patched consistent-trees built (`ctrees`, gcc with OpenMP).
+- `snapcomp_test` on the pawna login node: decode 25.4 M particles/s per thread (C++ reference decoder,
+  synthetic data, block 65536): at 2048^3 with 64 readers about 5 s of decoding per reader.
+- Jobs (scripts in `scripts/rockstar/pkc_validation/`):
+  - 2536452 `run_val512.pbs`: smoke 32^3, then 512^3 / 50 Mpc/h LCDM to z = 0, outputs at z = 3, 2, 1,
+    0.5, 0.25, 0, each as .pkc (v3) and HDF5 (`bCompAlsoStandard`), ordered mode; 64 threads, 12 h limit.
+  - 2536453 `rockstar_val.pbs` (after 2536452 succeeds): Gadget inputs on node-local disk; Rockstar
+    routes pkc (twice), gad, h5g with 8 blocks over all outputs; exact pkc1 vs gad1 (1 block, fixed
+    seed) at z = 0; patched consistent-trees on pkc and h5g. Catalogs in `/storage/shadab/pkc_rockstar/rsval`.
+- `pkc_to_gadget --from-hdf5` now uses the row number as ID when the HDF5 file has no ParticleIDs
+  (ordered mode). Tested on an ID-sorted copy of the 128^3 snapshot: identical to the file with IDs;
+  HDF5 vs .pkc per ID within half a step (max 0.977 kpc/h, 1.220 km/s).
+
 ## 8. Work order
 
 1. **Rockstar reader (this branch, started 2026-11-10)**: decoder split into `io/pkc_core.{c,h}` (no
