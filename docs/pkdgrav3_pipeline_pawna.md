@@ -238,8 +238,22 @@ pipeline's version of the same step.
 
 ## 9. What was tested
 
-See the end of this section for the results of the pawna test run (filled in after it ran) and
-[rockstar_pkc_reader_plan.md](rockstar_pkc_reader_plan.md) for the Rockstar reader validation.
+Rockstar reader validation: [rockstar_pkc_reader_plan.md](rockstar_pkc_reader_plan.md).
+
+- **pawna, full chain, 2026-11-11** (`example_test128.conf`: 128^3 / 200 Mpc/h, 5 outputs z = 3, 2, 1, 0.5, 0;
+  fresh clone of this branch, `setup_pawna.sh`, then `submit_pipeline.sh`; times from the job logs):
+
+  | Stage | Job resources | Wall time | Result |
+  |---|---|---|---|
+  | setup (login node) | - | 40 min, of which ~37 min pip (fitsio and others built from source) | Rockstar, consistent-trees, venv, helpers |
+  | sim | 32 cores | 93 s (46 steps), 6.1 GB peak | 5 outputs, `pkc_check` OK, 98 MB |
+  | rockstar | 8 cores | 40 s | 5 `out_<snap>.list`, 5205 halos at z = 0 |
+  | ctrees | 8 cores | 7 s (+ cleaning) | 5 `out_<snap>.trees`, 3655 halos at z = 0, 1 tree file |
+  | vahc | 8 cores, 5 processes | 52 s total (23-30 s per snapshot), 0.6 GB peak | 5 `.vahc`, 5 `.tens` |
+  | fits | 8 cores | < 1 min | 20 halo FITS files + trees, 6.9 MB; `check_compressed_halos.py`: 38 checks pass |
+
+  The first vahc job failed because the venv was being rebuilt at the time (fixed setup, see section 2b);
+  `submit_pipeline.sh ... --stages vahc,fits` then completed the chain.
 - Mac, 128^3 / 200 Mpc/h, 3 outputs (z = 3, 1, 0), Rockstar on `.pkc`, patched consistent-trees:
   `.vahc` from `.pkc` byte-identical to `.vahc` from a Gadget-4 HDF5 file holding the same particles;
   `run_addvalue.py` (3 processes) byte-identical to `postprocess.py`; `.tens` equal except 2 of 204,000
