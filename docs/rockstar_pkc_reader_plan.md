@@ -635,6 +635,22 @@ Consequence for section 6: the exact (ii) vs (iii) comparison uses NUM_BLOCKS = 
 test build; production-like 8+ block runs are compared statistically against the scatter between
 repeated runs of the same input.
 
+### consistent-trees cosmology patch (2026-11-10)
+
+Done as planned in section 3c, in `code/ConsistentTrees/consistent-trees-7c20add/` (see its
+`README_sahyadri.txt`). Base: the pegasus install is an upstream git clone at 7c20add (2021-04-20)
+whose C sources are unmodified (checked with `git diff` there) and whose two Perl drivers Aseem
+changed; both kept here. Found while reading the code: the hlist accretion rates are computed in
+Perl (`src/Universe/Time.pm`, `src/MassConversions.pm`), with the same flat-LCDM assumptions, so the
+Perl side is patched too. Config keys are lowercase `w0`, `wa` as `gen_merger_cfg.pl` writes them
+(both config readers are case-sensitive).
+
+Tests (`tests_sahyadri/run_tests.sh`, Mac, 7 checks, 0 failures): flat LCDM byte-identical to the
+original in C and Perl; numerical table vs closed form 1.4e-7; C vs Perl 3e-9; full run on Rockstar
+PKC output of three 128^3 snapshots (z = 3, 1, 0): 38 output files byte-identical, original vs patched.
+w0 = -0.9, wa = 0.1 on the same catalogs: accretion rates change by 1.6-2.2%, ~1-2% of halos are
+handled differently by the consistency step (code exercise, not a w0-wa simulation).
+
 ## 8. Work order
 
 1. **Rockstar reader (this branch, started 2026-11-10)**: decoder split into `io/pkc_core.{c,h}` (no
