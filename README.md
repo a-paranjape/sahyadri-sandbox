@@ -17,6 +17,12 @@ We will use the following codes:
    2. Merger trees: `CONSISTENT-TREES` -- [see here](https://bitbucket.org/pbehroozi/consistent-trees/)
 4. Post-processing: Included as a customizable Python script [here](/scripts/post-process/postprocess.py)
 
+**pkdgrav3 pipeline (pawna).** The same chain with `pkdgrav3` (compressed `.pkc` snapshots) instead of
+GADGET-4, Rockstar reading `.pkc` directly, consistent-trees, value-added catalogs (`.vahc`, `.tens`) and FITS
+conversion, submitted as chained PBS jobs from one config file:
+[docs/pkdgrav3_pipeline_pawna.md](/docs/pkdgrav3_pipeline_pawna.md) (scripts in
+[scripts/pkdgrav3_pipeline](/scripts/pkdgrav3_pipeline)).
+
 ## Installation tips ##
 Here we provide some installation tips for setting up these codes in a [PBS environment](https://en.wikipedia.org/wiki/Portable_Batch_System). For further details, please see the individual documentation pages linked above.
 

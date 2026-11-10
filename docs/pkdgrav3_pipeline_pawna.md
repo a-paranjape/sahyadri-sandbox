@@ -61,7 +61,7 @@ bash sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pawna.sh /storage/$USER/sa
 |---|---|---|
 | `rockstar/` | Rockstar, `make with_hdf5_pkc` (`FILE_FORMAT = "PKC"`, also AREPO/Gadget HDF5) | `git clone https://bitbucket.org/gfcstanford/rockstar.git` at `36ce9eea36ee`, then the changed files of `code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/` copied over (`.pkc` reader, Aseem's curvature and Gadget-4 HDF5 changes, w0/wa in `gen_merger_cfg.pl`; see `scripts/rockstar/readme_*.txt`) |
 | `ctrees/` | consistent-trees, `make` | `git clone https://bitbucket.org/pbehroozi/consistent-trees.git` at `7c20add`, then `code/ConsistentTrees/consistent-trees-7c20add/` copied over (w0-wa and curvature background, `README_sahyadri.txt`) |
-| `venv/` | Python 3 venv with system site packages + numpy, scipy, pandas, h5py, fitsio, zstandard (pip) | PyPI |
+| `venv/` | self-contained Python 3 venv with numpy, scipy, pandas, h5py, fitsio, zstandard (pip; the system scipy on pawna needs numpy < 1.25) | PyPI |
 | `lib/` | `cic_update.so`, `ngp_update.so` compiled from `scripts/post-process/*.c` | this repository |
 
 It needs the pkdgrav3 install of 2a (for zstd), `git`, `cc`, `make`, `perl`, `python3` and network access

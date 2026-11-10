@@ -9,7 +9,7 @@
 # Builds (each from the upstream source plus the changed files kept in this repository under code/):
 #   $CODES/rockstar   Rockstar 36ce9eea36ee + Sahyadri changes (PKC reader, curvature, w0-wa), make with_hdf5_pkc
 #   $CODES/ctrees     consistent-trees 7c20add + Sahyadri changes (w0-wa/curvature background), make
-#   $CODES/venv       Python 3 venv (system site packages) + numpy scipy pandas h5py fitsio zstandard
+#   $CODES/venv       Python 3 venv (own packages) + numpy scipy pandas h5py fitsio zstandard
 #   $CODES/lib        cic_update.so, ngp_update.so for post-process (found through SAHYADRI_LIBDIR)
 # Rerunning rebuilds everything (the clones are kept).
 set -eu
@@ -42,7 +42,8 @@ overlay "$SB/code/ConsistentTrees/consistent-trees-7c20add" "$CODES/ctrees"
 ls "$CODES/ctrees/find_parents_and_cleanup" "$CODES/ctrees/assemble_halo_trees" "$CODES/ctrees/gravitational_consistency" > /dev/null
 
 echo "== Python venv"
-[ -x "$CODES/venv/bin/python" ] || python3 -m venv --system-site-packages "$CODES/venv"
+# self-contained (no system site packages): pawna's system scipy is built for numpy < 1.25
+[ -x "$CODES/venv/bin/python" ] || python3 -m venv "$CODES/venv"
 "$CODES/venv/bin/python" -m pip install -q --upgrade pip
 "$CODES/venv/bin/python" -m pip install -q numpy scipy pandas "h5py<3.12" fitsio zstandard
 "$CODES/venv/bin/python" -c "import numpy, scipy, pandas, h5py, fitsio, zstandard; print('python', numpy.__version__, scipy.__version__, pandas.__version__, fitsio.__version__)"
