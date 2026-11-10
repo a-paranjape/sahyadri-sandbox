@@ -5,11 +5,13 @@
 SNAPCOMP_SRC ?= $(HOME)/Documents/Projects/pkdgrav3_dev/pkdgrav3/io/snapcomp
 SNAPCOMP_BUILD ?= $(SNAPCOMP_SRC)/../../build_snapcomp
 ZSTD_DIR ?= /opt/homebrew
+ZSTD_INC ?= $(ZSTD_DIR)/include
+ZSTD_LIB ?= $(ZSTD_DIR)/lib
 CC ?= cc
 CXX ?= c++
-CFLAGS = -std=c99 -O2 -Wall -Wextra -DENABLE_PKC -D_POSIX_C_SOURCE=200809L -D_DARWIN_C_SOURCE -I$(ZSTD_DIR)/include
-CXXFLAGS = -std=c++17 -O2 -Wall -DENABLE_PKC -I$(SNAPCOMP_SRC) -I../io -I$(ZSTD_DIR)/include
-LIBS = $(SNAPCOMP_BUILD)/libsnapcomp.a -L$(ZSTD_DIR)/lib -lzstd -lpthread
+CFLAGS = -std=c99 -O2 -Wall -Wextra -DENABLE_PKC -D_POSIX_C_SOURCE=200809L -D_DARWIN_C_SOURCE -I$(ZSTD_INC)
+CXXFLAGS = -std=c++17 -O2 -Wall -DENABLE_PKC -I$(SNAPCOMP_SRC) -I../io -I$(ZSTD_INC)
+LIBS = $(SNAPCOMP_BUILD)/libsnapcomp.a -L$(ZSTD_LIB) -lzstd -lpthread
 
 all: make_testset pkc_compare
 

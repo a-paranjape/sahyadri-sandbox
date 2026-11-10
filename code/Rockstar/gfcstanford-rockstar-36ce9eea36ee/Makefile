@@ -7,8 +7,11 @@ PROFFLAGS = -lm -g -pg -O2 -std=c99 # -DHAVE_TIRPC
 CFILES = rockstar.c check_syscalls.c fof.c groupies.c subhalo_metric.c potential.c nfw.c jacobi.c fun_times.c interleaving.c universe_time.c hubble.c integrate.c distance.c config_vars.c config.c bounds.c inthash.c io/read_config.c client.c server.c merger.c inet/socket.c inet/rsocket.c inet/address.c io/meta_io.c io/io_internal.c io/io_ascii.c io/stringparse.c io/io_gadget.c io/io_generic.c io/io_art.c io/io_tipsy.c io/io_bgc2.c io/io_util.c io/io_arepo.c io/io_hdf5.c io/io_pkc.c io/pkc_core.c
 DIST_FLAGS =
 # pkdgrav3 compressed snapshots (FILE_FORMAT = "PKC"), added for Sahyadri: needs zstd (headers + library)
+# set ZSTD_DIR (prefix with include/ and lib/), or ZSTD_INC and ZSTD_LIB separately
 ZSTD_DIR ?= /usr
-PKC_FLAGS = -DENABLE_PKC -I$(ZSTD_DIR)/include -L$(ZSTD_DIR)/lib -lzstd
+ZSTD_INC ?= $(ZSTD_DIR)/include
+ZSTD_LIB ?= $(ZSTD_DIR)/lib
+PKC_FLAGS = -DENABLE_PKC -I$(ZSTD_INC) -L$(ZSTD_LIB) -lzstd
 HDF5_FLAGS = -DH5_USE_16_API -lhdf5 -DENABLE_HDF5 -I/mnt/csoft/libraries/hdf5-1.14.2/include -I/mnt/csoft/compilers/openmpi-4.1.5-gcc-11.2/include -L/mnt/csoft/libraries/hdf5-1.14.2/lib -L/mnt/csoft/compilers/openmpi-4.1.5-gcc-11.2/lib64
 
 all:
