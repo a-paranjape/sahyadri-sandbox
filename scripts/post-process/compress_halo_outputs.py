@@ -194,7 +194,40 @@ def build_metadata(args):
     for kv in args.meta or []:
         k, _, v = kv.partition('=')
         cards.append(card(k.strip().upper(), v.strip(), 'user'))
-    return cards, prov
+    return split_long_strings(cards), prov
+
+
+def split_long_strings(cards):
+    """Header strings that fitsio can read back.
+
+    fitsio (1.2.5) cannot read a header in which a HIERARCH card (keyword longer than 8 characters) has a string
+    value containing '=' ("bad string to double convert"; found with the pkdgrav3 run comment "Om=0.31..."), and
+    long strings in HIERARCH cards need CONTINUE cards, which the HIERARCH convention does not cover. So in
+    HIERARCH string values '=' is written as ':', and a string too long for one card is split over NAME, NAME_2,
+    NAME_3, ... (concatenate them). The exact text is in the PROVENANCE extension."""
+    out = []
+    for c in cards:
+        v, name = c['value'], c['name']
+        if not isinstance(v, str):
+            out.append(c)
+            continue
+        v = v.replace("'", '"')
+        hier = len(name) > 8
+        if hier:
+            v = v.replace('=', ':')
+        room = 80 - (9 if hier else 0) - len(name) - 4 - 2 - (0 if hier else max(0, 8 - len(name)))
+        if len(v) <= room:
+            out.append(dict(c, value=v))
+            continue
+        pieces, i = [], 0
+        while i < len(v):
+            nm = name if not pieces else '%s_%d' % (name, len(pieces) + 1)
+            r = 80 - 9 - len(nm) - 6 if (len(nm) > 8 or pieces) else room
+            pieces.append((nm, v[i:i + r]))
+            i += r
+        for nm, s in pieces:
+            out.append({'name': nm, 'value': s, 'comment': ''})
+    return out
 
 
 def ascii_header(path, max_lines=400):

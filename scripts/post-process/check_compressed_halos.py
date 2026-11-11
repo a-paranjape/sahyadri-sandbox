@@ -5,7 +5,8 @@ check_compressed_halos.py: independent check of compress_halo_outputs.py results
 Parses the ASCII with numpy (not pandas, which the converter uses) and requires, for every column:
 int64 columns equal exactly, float64 columns equal exactly, float32 columns equal float32(ASCII value).
 Also checks .vahc alignment, readers.py-style access (ConvertToFITS.fits_to_record), tree files, the
-FitsRow index of locations.fits.gz and forests.fits.gz. Run it before deleting any ASCII file.
+FitsRow index of locations.fits.gz and forests.fits.gz, and that the headers read back (with the run's
+SIM_STEM, SIM_REAL, SIM_IC_SEED). Run it before deleting any ASCII file.
 
 usage: check_compressed_halos.py <run dir with out_*.trees> [--snaps 0,5,99] [--outdir DIR] [--trees]
 """
@@ -46,6 +47,12 @@ def check_snapshot(R, out, snap):
             d = f[1].read()
             for c in d.dtype.names:
                 got[c] = d[c]
+    try:  # headers must read back (fitsio) and carry the run identity
+        h = fitsio.read_header(os.path.join(out, 'out_%s_basic.fits.gz' % snap), 1)
+        ident = ['%s=%s' % (k, h[k]) for k in ('SIM_STEM', 'SIM_REAL', 'SIM_IC_SEED') if k in h]
+        ok(True, 'out_%s: header readable (%s)' % (snap, ', '.join(ident) or 'no SIM_ cards'))
+    except Exception as e:
+        ok(False, 'out_%s: header not readable by fitsio: %s' % (snap, str(e).splitlines()[0]))
     ok(sorted(set(got) - {'b1'}) == sorted(names), 'out_%s: basic + extended hold every .trees column (%d)' % (snap, len(names)))
     nb = [c for j, c in enumerate(names) if not same(got[c], A[:, j])]
     ok(not nb, 'out_%s: %d columns x %d rows equal the ASCII%s' % (snap, len(names), len(A), (' (differ: %s)' % nb) if nb else ''))
