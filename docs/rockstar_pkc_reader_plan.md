@@ -599,7 +599,7 @@ headers, with and without `ENABLE_PKC` (no warnings). Not done yet: building the
 ### End-to-end on the Mac (2026-11-10)
 
 Rockstar built from upstream 36ce9eea36ee + our files (`make with_pkc ZSTD_DIR=/opt/homebrew`, scratch
-copy; only upstream warnings). `pkc_to_gadget` extended on pkdgrav3 branch `pkc-to-gadget-v3`
+copy; only upstream warnings). `pkc_to_gadget` extended on pkdgrav3 branch `pkc-to-gadget-v3`, merged into `main` on 2026-11-11 (`a99f6142`)
 (`--blocks K`, version-3 cosmology with `<out>.rockstar.cfg`, `--from-hdf5`).
 
 Input: `tmp.nosync/p1/n128_L200/snap.00090` of the pkdgrav3 checkout (128^3, 200 Mpc/h, z = 0, HDF5,

@@ -84,10 +84,11 @@ system: GCC 11, CMake 3.22, OpenMPI 5 (module), HDF5 1.10, GSL, FFTW 3, Boost, P
 and libdwarf are downloaded by CMake. `build_snapcomp/` also holds `pkc_check`, `pkc_to_gadget` and the
 zstd library that Rockstar links against.
 
-`pkc_to_gadget` with `--blocks` and `--from-hdf5` (only used to validate the Rockstar reader against Gadget
-input, not by the pipeline) is on the pkdgrav3 branch `pkc-to-gadget-v3` (pushed to `shadaba/pkdgrav3`, not
-merged into `main`). To get it: `git -C /storage/$USER/pkdgrav3_io/pkdgrav3 fetch origin && git -C ... checkout
-pkc-to-gadget-v3`, then rebuild `build_snapcomp` (`cmake --build build_snapcomp -j 16`).
+`pkc_to_gadget` with `--blocks`, `--from-hdf5` and version-3 headers (used to validate the Rockstar reader
+against Gadget input, not by the pipeline) is in pkdgrav3 `main` since 2026-11-11 (merge `a99f6142` of branch
+`pkc-to-gadget-v3`). An install built before that: `git -C /storage/$USER/pkdgrav3_io/pkdgrav3 pull --ff-only`,
+then rebuild only the tools (`cmake --build /storage/$USER/pkdgrav3_io/build_snapcomp -j 16`; the `pkdgrav3`
+binary is not affected).
 
 ### 2b. This repository and the halo codes
 
