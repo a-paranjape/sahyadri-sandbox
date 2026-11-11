@@ -238,7 +238,11 @@ pipeline's version of the same step.
 
 ## 9. What was tested
 
-Rockstar reader validation: [rockstar_pkc_reader_plan.md](rockstar_pkc_reader_plan.md).
+Rockstar reader validation: [rockstar_pkc_reader_plan.md](rockstar_pkc_reader_plan.md). Summary of the
+512^3 / 50 Mpc/h test on pawna (job 2536453): with one reader the PKC route gives byte-identical Rockstar
+output to the same particles read as Gadget-2; with 8 readers the PKC and Gadget catalogs differ only as much
+as two PKC runs differ from each other (median |dM/M| ~ 1e-5); .pkc quantization vs the unquantized HDF5
+output changes halo masses by about one particle (median |dM/M| 1e-3, no bias). consistent-trees ran on both.
 
 - **pawna, full chain, 2026-11-11** (`example_test128.conf`: 128^3 / 200 Mpc/h, 5 outputs z = 3, 2, 1, 0.5, 0;
   fresh clone of this branch, `setup_pawna.sh`, then `submit_pipeline.sh`; times from the job logs):

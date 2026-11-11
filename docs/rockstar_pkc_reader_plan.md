@@ -673,6 +673,37 @@ handled differently by the consistency step (code exercise, not a w0-wa simulati
   (ordered mode). Tested on an ID-sorted copy of the 128^3 snapshot: identical to the file with IDs;
   HDF5 vs .pkc per ID within half a step (max 0.977 kpc/h, 1.220 km/s).
 
+### 512^3 Rockstar validation results (job 2536453, node3, 2026-11-11)
+
+512^3 particles, 50 Mpc/h (m_p = 8.11e7 Msun/h), 6 outputs z = 3 ... 0. Routes (8 Rockstar readers, 8 blocks):
+`pkc` and `pkc2` = native PKC reader (same input, run twice), `gad` = the same quantized particles written
+as Gadget-2 by `pkc_to_gadget`, `h5g` = pkdgrav3's unquantized HDF5 output of the same run, written as
+Gadget-2. Times are Rockstar wall clock for all 6 outputs on 8 cores (from the job log).
+
+| route | wall | halos z=3 | z=2 | z=1 | z=0.5 | z=0.25 | z=0 |
+|---|---|---|---|---|---|---|---|
+| pkc  | 776 s | 315077 | 330087 | 305623 | 276672 | 258890 | 239934 |
+| pkc2 | 786 s | 315180 | 329995 | 305609 | 276570 | 258858 | 239917 |
+| gad  | 800 s | 315151 | 329928 | 305592 | 276435 | 258952 | 239996 |
+| h5g  | 775 s | 315104 | 329904 | 305348 | 276486 | 258850 | 239922 |
+
+- **Exact test:** `pkc1` vs `gad1` (one reader, one block, fixed-seed build, z = 0): `out_0.list`,
+  `halos_00060.0.ascii` and `halos_00060.0.bin` byte-identical (`cmp`). 239997 halos each, 737 s / 732 s.
+  The PKC reader hands Rockstar exactly the particles the Gadget route does.
+- **Multi-reader routes** (z = 0 `out_5.list`, halos with Mvir >= 1e11 Msun/h, i.e. >= 1230 particles,
+  matched to `gad` by nearest centre within 10 kpc/h, periodic KD-tree; script `rscmp.py` in the workspace):
+  pkc 99.90 % matched, median |dM/M| 1.1e-5, median |dVmax/Vmax| 5.2e-5; pkc2 99.85 %, 4.8e-5, 5.4e-5.
+  The pkc vs pkc2 spread (same input) is the size of pkc vs gad: what remains is Rockstar's own
+  run-to-run scatter with several readers (particle arrival order), not the reader.
+- **Effect of .pkc quantization** (h5g = unquantized): h5g vs gad 99.81 % matched, median |dM/M| 1.0e-3,
+  median |dVmax/Vmax| 1.1e-3; pkc vs h5g median signed dM/M = 0 (no bias), median |dM/M| 1.0e-3, which
+  is about one particle (1/1230 = 8e-4 at the smallest masses compared). Mass-bin counts at z = 0
+  (1e10-1e11-1e12-1e13-1e15): pkc 31726/4217/510/57, gad 31780/4210/511/57, h5g 31753/4215/513/56.
+  About 1 % of matches have |dM/M| ~ 1 (host/subhalo assignment flips), in every pair of routes.
+- **consistent-trees** (patched) on pkc and h5g: exit 0, 402 s and 388 s, 6 hlists each. z = 0 hlist:
+  pkc 237028 halos (199453 hosts, 4194 hosts with Mvir >= 1e11), h5g 236820 (198125, 4182).
+- Conversion of the inputs for the Gadget routes took 294 s; node-local scratch 53 GB (deleted by the job).
+
 ## 8. Work order
 
 1. **Rockstar reader (this branch, started 2026-11-10)**: decoder split into `io/pkc_core.{c,h}` (no
