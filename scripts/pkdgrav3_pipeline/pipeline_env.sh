@@ -18,7 +18,8 @@ stamp "job ${PBS_JOBID:-interactive} on $(hostname): stage ${STAGE:-?} for $STEM
 # memory of this job (all its processes): $LOGS/<stage>.<run>.<jobid>.mem.tsv, peak reported at exit
 if [ -n "${PBS_JOBID:-}" ] || [ "${MEMMON:-0}" = 1 ]; then
   MEMLOG=$LOGS/${STAGE:-job}.$(echo $STEM | tr / _)_r$REAL.${PBS_JOBID:-$$}.mem.tsv; MEMLOG=${MEMLOG/.pawna./.}
-  ( exec bash "$PIPE/memmon.sh" $$ "$MEMLOG" "${MEMMON_DT:-5}" $BASHPID ) & MEMMON_PID=$!
+  # detached (not a child of this shell), so that a bare `wait` in a job does not wait for the monitor
+  MEMMON_PID=$(bash "$PIPE/memmon.sh" $$ "$MEMLOG" "${MEMMON_DT:-5}" < /dev/null > /dev/null 2>&1 & echo $!)
   memmon_report() {
     kill $MEMMON_PID 2>/dev/null
     awk '!/^#/ && NF==4 {if($3>p){p=$3;t=$1;n=$2} if($4>r)r=$4; T=$1}

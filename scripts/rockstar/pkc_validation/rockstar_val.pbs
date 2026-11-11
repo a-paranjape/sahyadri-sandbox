@@ -4,16 +4,20 @@
 #   pkc   native PKC reader (run twice: pkc, pkc2 -> Rockstar's own run-to-run scatter)
 #   gad   pkc_to_gadget --blocks 8              (same particles as pkc, Gadget reader)
 #   h5g   pkc_to_gadget --blocks 8 --from-hdf5  (unquantized HDF5 particles, Gadget reader)
+#   pkcsub native PKC reader on the 1% + 3% subsamples only (PKC_SUBSAMPLES = "1,3", quick-look option)
+# Memory of every step (PSS/RSS of its process tree, scripts/pkdgrav3_pipeline/memmon.sh): $OUT/mem.<step>.tsv,
+# peaks in the log ("MEM <step>: ..."). Output directory: $OUT (qsub -v RSVAL_OUT=<name>, default rsval).
 # Exact test at the last output: fixed-seed test build, NUM_BLOCKS = NUM_WRITERS = 1: pkc1 vs gad1 byte-identical.
 # Then consistent-trees (Sahyadri-patched) on pkc and h5g. Gadget files live on the node's local disk only.
 #PBS -N pkc_rsval
 #PBS -q workq
 #PBS -l select=1:ncpus=16:mem=96gb
-#PBS -l walltime=08:00:00
+#PBS -l walltime=10:00:00
 #PBS -j oe
 #PBS -o /storage/shadab/pkc_rockstar/logs/rsval.pbs.out
 set -u
-W=/storage/shadab/pkc_rockstar; D=$W/val512; OUT=$W/rsval
+W=/storage/shadab/pkc_rockstar; D=$W/val512; OUT=$W/${RSVAL_OUT:-rsval}; mkdir -p $OUT
+MM=/storage/shadab/pipeline_test/sahyadri-sandbox/scripts/pkdgrav3_pipeline/memmon.sh
 exec > $W/logs/rsval.${PBS_JOBID%%.*}.log 2>&1
 TMP=/var/tmp/shadab_pkcval_${PBS_JOBID%%.*}; mkdir -p $TMP; trap 'rm -rf $TMP' EXIT
 P2G=$W/tools_build/pkc_to_gadget; RS=$W/rockstar/rockstar; RSD=$W/rockstar_det/rockstar; CT=$W/ctrees
@@ -21,13 +25,25 @@ echo "host $(hostname)  date $(date -Is)  job ${PBS_JOBID:-}"; df -h /var/tmp | 
 cd $D; ls snap.*.done | sed 's/^snap\.//; s/\.done$//' > $W/snapnames.txt; cat $W/snapnames.txt
 LAST=$(tail -1 $W/snapnames.txt); NS=$(grep -c . $W/snapnames.txt)
 
+mon() { # step-name command...: run the command, sample its memory every 2 s, print the peak
+  local name=$1; shift
+  "$@" & local p=$!
+  bash $MM $p $OUT/mem.$name.tsv 2 &
+  wait $p; local rc=$?; sleep 3
+  awk -v n=$name '!/^#/ && NF==4 {if($3>p){p=$3;k=$2} if($4>r)r=$4; T=$1}
+       END{printf "MEM %s: peak PSS %.2f GB (%d processes), peak RSS sum %.2f GB, %.0f s\n", n, p/1048576, k, r/1048576, T}' $OUT/mem.$name.tsv
+  return $rc
+}
+convert() {
+  for s in $(cat $W/snapnames.txt); do
+    $P2G --threads 16 --blocks 8 $D/snap.$s $TMP/gad/g.$s | head -1
+    $P2G --threads 16 --blocks 8 --from-hdf5 $D/snap.$s $D/snap.$s $TMP/h5g/g.$s | tail -3 | head -1
+  done
+  $P2G --threads 16 --blocks 1 $D/snap.$LAST $TMP/gad1/g.$LAST | head -1
+}
 t0=$(date +%s)
 mkdir -p $TMP/gad $TMP/h5g $TMP/gad1
-for s in $(cat $W/snapnames.txt); do
-  $P2G --threads 16 --blocks 8 $D/snap.$s $TMP/gad/g.$s | head -1
-  $P2G --threads 16 --blocks 8 --from-hdf5 $D/snap.$s $D/snap.$s $TMP/h5g/g.$s | tail -3 | head -1
-done
-$P2G --threads 16 --blocks 1 $D/snap.$LAST $TMP/gad1/g.$LAST | head -1
+mon convert convert
 echo "conversion $(( $(date +%s) - t0 )) s"; du -sh $TMP
 
 rs() { # name binary inbase filename nb nsnaps snapnames extra-config
@@ -45,20 +61,23 @@ rs() { # name binary inbase filename nb nsnaps snapnames extra-config
 }
 GCFG() { grep -v '^#' $1 | grep -v "NUM_BLOCKS"; }
 printf '%s\n' $LAST > $W/snapnames_last.txt
-rs pkc  $RS  $D        "snap.<snap>.<block>" 8 $NS $W/snapnames.txt 'FILE_FORMAT = "PKC"'
-rs pkc2 $RS  $D        "snap.<snap>.<block>" 8 $NS $W/snapnames.txt 'FILE_FORMAT = "PKC"'
-rs gad  $RS  $TMP/gad  "g.<snap>.<block>"    8 $NS $W/snapnames.txt "$(GCFG $TMP/gad/g.$LAST.rockstar.cfg)"
-rs h5g  $RS  $TMP/h5g  "g.<snap>.<block>"    8 $NS $W/snapnames.txt "$(GCFG $TMP/h5g/g.$LAST.rockstar.cfg)"
-rs pkc1 $RSD $D        "snap.<snap>.<block>" 1 1   $W/snapnames_last.txt 'FILE_FORMAT = "PKC"'
-rs gad1 $RSD $TMP/gad1 "g.<snap>.<block>"    1 1   $W/snapnames_last.txt "$(GCFG $TMP/gad1/g.$LAST.rockstar.cfg)"
-for f in out_0.list halos_0.0.ascii halos_0.0.bin; do cmp $OUT/pkc1/$f $OUT/gad1/$f && echo "EXACT: $f identical (pkc1 vs gad1)"; done
+mon pkc rs pkc  $RS  $D        "snap.<snap>.<block>" 8 $NS $W/snapnames.txt 'FILE_FORMAT = "PKC"'
+mon pkc2 rs pkc2 $RS  $D        "snap.<snap>.<block>" 8 $NS $W/snapnames.txt 'FILE_FORMAT = "PKC"'
+mon gad rs gad  $RS  $TMP/gad  "g.<snap>.<block>"    8 $NS $W/snapnames.txt "$(GCFG $TMP/gad/g.$LAST.rockstar.cfg)"
+mon h5g rs h5g  $RS  $TMP/h5g  "g.<snap>.<block>"    8 $NS $W/snapnames.txt "$(GCFG $TMP/h5g/g.$LAST.rockstar.cfg)"
+mon pkc1 rs pkc1 $RSD $D        "snap.<snap>.<block>" 1 1   $W/snapnames_last.txt 'FILE_FORMAT = "PKC"'
+mon gad1 rs gad1 $RSD $TMP/gad1 "g.<snap>.<block>"    1 1   $W/snapnames_last.txt "$(GCFG $TMP/gad1/g.$LAST.rockstar.cfg)"
+mon pkcsub rs pkcsub $RS $D "snap.<snap>.<block>" 8 $NS $W/snapnames.txt 'FILE_FORMAT = "PKC"
+PKC_SUBSAMPLES = "1,3"'
+for f in out_0.list halos_$LAST.0.ascii halos_$LAST.0.bin; do cmp $OUT/pkc1/$f $OUT/gad1/$f && echo "EXACT: $f identical (pkc1 vs gad1)"; done
 
 # consistent-trees (patched) on pkc and h5g
 for r in pkc h5g; do
   ( cd $OUT/$r && perl $W/rockstar/scripts/gen_merger_cfg.pl rockstar.cfg > gen.log 2>&1 )
   t=$(date +%s)
-  ( cd $CT && perl do_merger_tree.pl $OUT/$r/outputs/merger_tree.cfg $CT > $OUT/$r/trees.log 2>&1 && \
-              perl halo_trees_to_catalog.pl $OUT/$r/outputs/merger_tree.cfg $CT > $OUT/$r/cat.log 2>&1 )
+  ct() { cd $CT && perl do_merger_tree.pl $OUT/$r/outputs/merger_tree.cfg $CT > $OUT/$r/trees.log 2>&1 && \
+              perl halo_trees_to_catalog.pl $OUT/$r/outputs/merger_tree.cfg $CT > $OUT/$r/cat.log 2>&1; }
+  mon ctrees_$r ct
   echo "consistent-trees $r: exit $?, $(( $(date +%s) - t )) s, $(ls $OUT/$r/hlists 2>/dev/null | wc -l) hlists"
 done
 du -sh $OUT/*; echo "done $(date -Is)"

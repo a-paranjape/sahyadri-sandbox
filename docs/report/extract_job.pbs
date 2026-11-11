@@ -1,0 +1,14 @@
+#!/bin/bash
+# Run extract_data.py as a PBS job on pawna (reads ~4 GB of HDF5 into memory).
+# qsub -v RSVAL=<dir>,RSVAL_LOG=<log>,OUT=<dir> extract_job.pbs  (paths below are the defaults used for the report)
+#PBS -N extract
+#PBS -q workq
+#PBS -l select=1:ncpus=4:mem=32gb
+#PBS -l walltime=01:00:00
+#PBS -j oe
+HERE=/storage/shadab/pipeline_test/sahyadri-sandbox/docs/report
+exec > ${OUT:-$HERE/data}/extract.log 2>&1
+export HDF5_USE_FILE_LOCKING=FALSE
+/storage/shadab/pipeline_test/codes/venv/bin/python $HERE/extract_data.py --rsval ${RSVAL:-/storage/shadab/pkc_rockstar/rsval2} \
+  --val512 /storage/shadab/pkc_rockstar/val512 --logs /storage/shadab/pipeline_test/data/logs \
+  --rsval-log ${RSVAL_LOG:?} --out ${OUT:-$HERE/data}
