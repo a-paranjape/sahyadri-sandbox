@@ -89,7 +89,7 @@ class FastAddValue(AddValue):
         BK = self.B * self._kernel(Rs)
         s1, s2, s3 = self.s1, self.s2, self.s3
         if tensor == 'tidal':
-            inv = 1.0 / (s1**2 + s2**2 + s3**2 + self.TINY)
+            inv = 1.0 / (s1**2 + s2**2 + s3**2 + self.ps.TINY)
             filt = (lambda: s1**2 * inv, lambda: s2**2 * inv, lambda: s3**2 * inv,
                     lambda: s1 * s2 * inv, lambda: s1 * s3 * inv, lambda: s2 * s3 * inv)
         else:
