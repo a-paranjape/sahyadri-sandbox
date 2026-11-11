@@ -1,6 +1,7 @@
 # Gadget-4 compile options of the Sahyadri production runs, copied from the "Config" group of
 # sahyadri/default2048/r1/snapshot_ics_000.*.hdf5 (Gadget-4 commit 1e171a4). setup_gadget4_pawna.sh sets
 # PMGRID = 2 * NPART and NGENIC = NPART, and removes the NGenIC options from the build that only runs.
+# One addition: EVALPOTENTIAL (Gadget-4 computes the potential only with it).
 PERIODIC
 SELFGRAVITY
 LEAN
@@ -11,6 +12,7 @@ MAX_NUMBER_OF_RANKS_WITH_SHARED_MEMORY=32
 INITIAL_CONDITIONS_CONTAIN_ENTROPY
 PMGRID=@PMGRID@
 OUTPUT_POTENTIAL
+EVALPOTENTIAL        # NOT in the production Config: without it OUTPUT_POTENTIAL writes Potential = 0 (checked, 2026-11-11)
 POWERSPEC_ON_OUTPUT
 NGENIC=@NGENIC@
 NGENIC_2LPT

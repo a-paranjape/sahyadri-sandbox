@@ -12,7 +12,16 @@ cd "$HALO_DIR" || exit 1
 [ -f rockstar.cfg ] || { stamp "no $HALO_DIR/rockstar.cfg (run stage rockstar first)"; exit 1; }
 export OMP_NUM_THREADS=${PBS_NCPUS:-$CT_NCPU}
 t0=$(date +%s)
-perl "$CODES/rockstar/scripts/gen_merger_cfg.pl" rockstar.cfg > ctrees_gen.log 2>&1 || { cat ctrees_gen.log; exit 1; }
+GEN=$CODES/rockstar/scripts/gen_merger_cfg.pl
+if [ -n "${CT_MIN_LIST_BYTES:-}" ]; then
+  # gen_merger_cfg.pl skips every out_<snap>.list smaller than 20000 bytes ("too few halos"); in small test boxes
+  # that is every catalogue. Use a copy with the threshold from the config (e.g. header size + 1 = skip only
+  # catalogues without halos).
+  sed "s/< 20000)/< $CT_MIN_LIST_BYTES)/" "$GEN" > gen_merger_cfg.pl; GEN=$HALO_DIR/gen_merger_cfg.pl
+  grep -q "< $CT_MIN_LIST_BYTES)" "$GEN" || { stamp "could not patch the gen_merger_cfg.pl threshold"; exit 1; }
+fi
+perl "$GEN" rockstar.cfg > ctrees_gen.log 2>&1 || { cat ctrees_gen.log; exit 1; }
+stamp "$(grep -c . outputs/scales.txt) of $(ls out_*.list | wc -l) catalogues used (gen_merger_cfg.pl threshold ${CT_MIN_LIST_BYTES:-20000} bytes)"
 MT=$HALO_DIR/outputs/merger_tree.cfg
 grep -E "^(Om|Ol|h0|w0|wa|BOX_WIDTH|FORCE_RES|PARTICLE_MASS)" "$MT"
 ( cd "$CT" && perl do_merger_tree.pl "$MT" "$CT" ) > ctrees_trees.log 2>&1 || { stamp "do_merger_tree failed"; tail ctrees_trees.log; exit 1; }

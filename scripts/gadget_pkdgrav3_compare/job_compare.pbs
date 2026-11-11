@@ -1,14 +1,43 @@
 #!/bin/bash -l
-# Potential comparison (compare_potential.py) after both runs and their halo stages.
+# Potential comparison after both runs and their halo stages:
+#   1. compare_potential.py: particle by particle and matched halos, every output
+#   2. halo_potential_profile.py: stacked potential profiles around halos at the outputs closest to PROF_Z,
+#      Gadget-4 and pkdgrav3 (HDF5 and .pkc), each with its own consistent-trees halos; pkdgrav3 without its
+#      self-term and aligned by offset_median of particles.csv (the zero-point difference of the two codes)
 # qsub -v CONF=<compare32.conf>,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh,STAGE=compare
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
-mkdir -p "$CMP_DIR" || exit 1
+mkdir -p "$CMP_DIR/profiles" || exit 1
 export PYTHONPATH=$PKD_IO_ROOT/pkdgrav3/tools/pkcreader${PYTHONPATH:+:$PYTHONPATH}
 export OMP_NUM_THREADS=${PBS_NCPUS:-$CMP_NCPU}
-"$PY" "$SANDBOX/scripts/gadget_pkdgrav3_compare/compare_potential.py" "$GADGET_DIR" "$SIM_DIR" \
-  "$SCRATCH/halos/$GADGET_STEM/r$REAL" "$HALO_DIR" "$CMP_DIR" ${CMP_ARGS:-} > "$CMP_DIR/compare.log" 2>&1
+S=$SANDBOX/scripts/gadget_pkdgrav3_compare
+GH=$SCRATCH/halos/$GADGET_STEM/r$REAL
+"$PY" "$S/compare_potential.py" "$GADGET_DIR" "$SIM_DIR" "$GH" "$HALO_DIR" "$CMP_DIR" ${CMP_ARGS:-} \
+  > "$CMP_DIR/compare.log" 2>&1
 rc=$?
 tail -5 "$CMP_DIR/compare.log"
 stamp "compare_potential.py exit $rc: $CMP_DIR"
-exit $rc
+[ $rc -eq 0 ] || exit $rc
+
+PLOG=$CMP_DIR/profiles/profiles.log
+: > "$PLOG"
+for zt in ${PROF_Z:-0}; do
+  read -r i off < <("$PY" -c "
+import csv
+r = list(csv.DictReader(open('$CMP_DIR/particles.csv')))
+x = min(r, key=lambda x: abs(float(x['z']) - $zt))
+print(x['out'], x['offset_median'])")
+  g=$(sed -n "$((i+1))p" "$GADGET_DIR/snapnames.txt"); p=$(sed -n "$((i+1))p" "$SIM_DIR/snapnames.txt")
+  if [ ! -f "$GH/out_$i.trees" ] || [ ! -f "$HALO_DIR/out_$i.trees" ]; then
+    stamp "out $i (z target $zt): no out_$i.trees for both codes, skipped"; continue
+  fi
+  O=(--mbins "$PROF_MBINS" --rbins "$PROF_RBINS" --workers "$OMP_NUM_THREADS" ${PROF_ARGS:-})
+  { "$PY" "$S/halo_potential_profile.py" gadget "$GADGET_DIR/snapshot_$g.hdf5" "$GH/out_$i.trees" \
+      "$CMP_DIR/profiles/gadget_out$i.npz" "${O[@]}" &&
+    "$PY" "$S/halo_potential_profile.py" pkd "$SIM_DIR/snap.$p" "$HALO_DIR/out_$i.trees" \
+      "$CMP_DIR/profiles/pkd_out$i.npz" "${O[@]}" --par "$SIM_DIR/p.par" --offset "$off" &&
+    "$PY" "$S/halo_potential_profile.py" pkc "$SIM_DIR/snap.$p" "$HALO_DIR/out_$i.trees" \
+      "$CMP_DIR/profiles/pkc_out$i.npz" "${O[@]}" --par "$SIM_DIR/p.par" --offset "$off"; } >> "$PLOG" 2>&1 ||
+    { stamp "profiles failed for out $i"; tail "$PLOG"; exit 1; }
+  stamp "profiles out $i (z target $zt, offset $off): $(grep 'halos per mass bin' "$PLOG" | tail -3 | tr '\n' ' ')"
+done
