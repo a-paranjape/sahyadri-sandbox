@@ -377,8 +377,9 @@ Section~\ref{sec:running} (\code{SIM_NCPU=64} for the $512^3$ simulation).
   \code{PP_GRID=512}, measured largest process 25.5\,GB; 0.4\,GB for the $128^3$ run's grid of 128), and
   \code{PP_NPROC} snapshots run at once (4 at $512^3$, so 70--90\,GB for the first 30\,min, then $\approx40$\,GB
   for the last two of the six snapshots; Fig.~\ref{fig:resources}). This part does not grow with the resolution of the simulation: at the same
-  \code{PP_GRID}, a $1024^3$ or $2048^3$ run needs the same $\approx26$\,GB per process as measured here, and
-  with \code{PP_DOWN_TO=512} the particles read are capped at $512^3$ as well. Only a larger grid raises it,
+  \code{PP_GRID}, a $1024^3$ or $2048^3$ run needs the same $\approx26$\,GB per process as measured here. The
+  particles add almost nothing either: without downsampling the density is built block by block from the
+  \code{.pkc} files (byte-identical \code{.vahc}/\code{.tens} to loading all positions at once, same time). Only a larger grid raises it,
   as \code{PP_GRID}$^3$: $\approx87$\,GB per process for the grid of 768 that production used at $2048^3$
   (\code{PP_NPROC} $\leq6$--7 on one 755\,GB node).
 \item \textbf{Fits.} 5.9\,GB at $512^3$, 0.1\,GB at $128^3$; minutes.

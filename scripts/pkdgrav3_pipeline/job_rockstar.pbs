@@ -12,12 +12,17 @@ mkdir -p "$HALO_DIR" && cd "$HALO_DIR" || exit 1
 CFG=$HALO_DIR/rs_input.cfg
 if [ "${RS_RESTART:-0}" = 1 ] && [ -f restart.cfg ]; then
   CFG=$HALO_DIR/restart.cfg; stamp "restarting from $CFG"
+elif [ -n "$RS_CFG" ]; then   # configuration written in advance (setup_production.py)
+  [ -f "$RS_CFG" ] || { stamp "RS_CFG=$RS_CFG not found"; exit 1; }
+  rm -f auto-rockstar.cfg; CFG=$RS_CFG
+  nc=$(awk -F= '$1 ~ /^ *NUM_SNAPS *$/ {print $2+0}' "$CFG")
+  [ "$nc" = "$NS" ] || { stamp "NUM_SNAPS = $nc in $CFG but $NS lines in snapnames.txt"; exit 1; }
 else
   rm -f auto-rockstar.cfg
   cat > "$CFG" <<EOF
 # written by job_rockstar.pbs from $CONF
 FILE_FORMAT = "PKC"
-INBASE = "$SIM_DIR"
+INBASE = "$PKC_DIR"
 FILENAME = "snap.<snap>.<block>"
 SNAPSHOT_NAMES = "$SIM_DIR/snapnames.txt"
 NUM_SNAPS = $NS

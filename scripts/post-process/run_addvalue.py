@@ -16,7 +16,9 @@ Outputs: out_<snap>.vahc / out_<snap>.tens next to out_<snap>.trees.
 
 usage: run_addvalue.py <stem> [--real 1] [--snaps all|0-100|5,7] [--grid 512] [--down-to 512]
                        [--no-vahc] [--tens] [--nproc 4] [--overwrite]
-Memory per process is about 12 x 16 x grid^3 bytes (grid 512: ~26 GB; 768: ~85 GB) plus the particles.
+Memory per process is about 12 x 16 x grid^3 bytes (grid 512: ~26 GB; 768: ~85 GB). With .pkc input and no
+downsampling (--down-to 0, the default) the density is built block by block, so the particles add almost
+nothing at any resolution; with --down-to N (or Gadget input) the N^3 (all) positions are held at once.
 """
 import argparse
 import gc
@@ -47,6 +49,49 @@ def snaps_of(args):
     return [s for s in out if s in have]
 
 
+def streamed_density(pkc, ps, threads):
+    """CIC density contrast of all particles of a .pkc snapshot, built block by block.
+
+    Same result, bit for bit, as ps.density_field(pkc.read_block('pos')): the blocks are added in the
+    order read() stores them, with the same float32 rounding of the positions, through the same C
+    routine. Memory is the grid plus a few decoded blocks (65536 particles each) per thread, independent
+    of the number of particles, so a 2048^3 snapshot needs no downsampling.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from ctypes import c_long, c_int, c_double
+    from numpy.ctypeslib import ndpointer
+    import numpy as np
+    upd = ps.lib_cic.update_density
+    upd.restype = None
+    upd.argtypes = [c_long, c_int, ndpointer(c_double, flags="C_CONTIGUOUS"),
+                    ndpointer(c_double, flags="C_CONTIGUOUS"), ndpointer(c_double, flags="C_CONTIGUOUS"),
+                    ndpointer(c_double, flags="C_CONTIGUOUS"), c_double, c_double, c_double, c_double]
+    density = np.zeros(ps.grid**3)
+    jobs = [(f, i) for f in pkc.files for i in range(len(f.counts))]
+
+    def decode(job):
+        f, i = job
+        h = f.header
+        X = f.block(i)[0]
+        return ((X + 0.5) / h["q"] * h["box_size"]).astype(np.float32)  # as PkcSnapshot.read(units='mpc')
+
+    n = 0
+    chunk = 4 * max(1, threads)  # blocks in flight: bounds memory, keeps the order
+    with ThreadPoolExecutor(max(1, threads)) as ex:
+        for k in range(0, len(jobs), chunk):
+            for x in ex.map(decode, jobs[k:k + chunk]):
+                upd(c_long(x.shape[0]), c_int(ps.grid), density,
+                    np.ascontiguousarray(x[:, 0], np.float64), np.ascontiguousarray(x[:, 1], np.float64),
+                    np.ascontiguousarray(x[:, 2], np.float64),
+                    c_double(ps.cell_size_x), c_double(ps.cell_size_y), c_double(ps.cell_size_z), c_double(0.0))
+                n += x.shape[0]
+    if n != pkc.npart:
+        raise ValueError('decoded %d particles, header says %d' % (n, pkc.npart))
+    density = np.reshape(density, (ps.grid, ps.grid, ps.grid), order='F')
+    density = density * ps.grid**3 / (1.0 * n + ps.TINY) - 1.0
+    return density, n
+
+
 def do_snap(snap, args):
     from readers import SnapshotReader, HaloReader
     from correlations import PowerSpectrum
@@ -62,10 +107,15 @@ def do_snap(snap, args):
         return '%d: no %s.trees' % (snap, base)
     sr = SnapshotReader(sim_stem=args.stem, real=args.real, snap=snap, verbose=False)
     ps = PowerSpectrum(grid=args.grid, Lbox=sr.Lbox, verbose=False)
-    pos = sr.read_block('pos', down_to=args.down_to, seed=args.seed)
-    npos = pos.shape[1]
-    FT = ps.fourier_transform_density(ps.density_field(pos))
-    del pos
+    if getattr(sr, 'pkc', None) is not None and args.stream and (args.down_to == 0 or args.down_to**3 >= sr.npart):
+        density, npos = streamed_density(sr.pkc, ps, args.threads)
+    else:
+        pos = sr.read_block('pos', down_to=args.down_to, seed=args.seed)
+        npos = pos.shape[1]
+        density = ps.density_field(pos)
+        del pos
+    FT = ps.fourier_transform_density(density)
+    del density
     gc.collect()
     t1 = time.time()
     hpos, halos = hr.prep_halos(QE=None, Npmin=0.0, keep_subhalos=True, sorthalos=False)
@@ -105,7 +155,14 @@ def main():
     ap.add_argument('--tens', action='store_true', help='also write .tens')
     ap.add_argument('--nproc', type=int, default=1, help='snapshots in parallel')
     ap.add_argument('--overwrite', action='store_true')
+    ap.add_argument('--no-stream', dest='stream', action='store_false',
+                    help='.pkc without downsampling: load all positions at once instead of building the density '
+                         'block by block (same result, ~36 B per particle more memory; for tests)')
+    ap.add_argument('--threads', type=int, default=0,
+                    help='decoding threads per process (default: $NCPUS or the core count, divided by --nproc)')
     args = ap.parse_args()
+    if args.threads <= 0:
+        args.threads = max(1, int(os.environ.get('NCPUS', os.cpu_count() or 1)) // max(1, args.nproc))
     if not os.environ.get('SAHYADRI_SCRATCH'):
         print('note: SAHYADRI_SCRATCH not set; using the paths hard-coded in utilities.Paths')
     snaps = snaps_of(args)

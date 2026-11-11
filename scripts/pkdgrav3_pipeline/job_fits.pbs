@@ -12,7 +12,7 @@ LAST=$(tail -1 "$SIM_DIR/snapnames.txt")
 DEL=; [ "$FITS_DELETE_ASCII" = 1 ] && DEL=--delete-ascii
 WHAT=all; [ -d trees ] || WHAT=halos
 "$PY" "$PP/compress_halo_outputs.py" $WHAT --indir "$HALO_DIR" --nproc "$FITS_NPROC" --tmpdir "$TMP" \
-    --rockstar-cfg logs/rockstar.cfg --ctrees-cfg logs/merger_tree.cfg --pkc "$SIM_DIR/snap.$LAST" \
+    --rockstar-cfg logs/rockstar.cfg --ctrees-cfg logs/merger_tree.cfg --pkc "$PKC_DIR/snap.$LAST" \
     --meta SIM_STEM="$STEM" --meta SIM_REAL="$REAL" $DEL > "$LOGS/fits.${PBS_JOBID%%.*}.log" 2>&1
 rc=$?
 tail -2 "$LOGS/fits.${PBS_JOBID%%.*}.log"

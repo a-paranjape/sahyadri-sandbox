@@ -2,21 +2,23 @@
 # Submit the Sahyadri pkdgrav3 pipeline for one run as a chain of PBS jobs:
 #   sim -> rockstar -> ctrees -> vahc -> fits     (each starts only if the previous one succeeded: afterok)
 #
-# usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits] [--after JOBID] [--hold] [--dry-run]
+# usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits] [--after JOBID] [--hold] [--restart CHK] [--dry-run]
 #   --stages  any subset, in pipeline order (e.g. "ctrees,vahc,fits" to redo the later stages)
 #   --after   make the first stage wait for an existing job (afterok), e.g. a running simulation
 #   --hold    submit the first job held (qrls <id> to start the chain)
+#   --restart CHK  the sim stage continues from checkpoint CHK (latest = newest $SIM_DIR/checkpoints/*.chk)
 #   --dry-run print the qsub commands only
 # Prints the job ids; the chain is also written to $LOGS/chain.<run>.<date>.txt.
 set -eu
 [ $# -ge 1 ] || { sed -n '2,12p' "$0"; exit 1; }
 CONF=$(readlink -f "$1"); shift
-STAGES=sim,rockstar,ctrees,vahc,fits; AFTER=; HOLD=; DRY=
+STAGES=sim,rockstar,ctrees,vahc,fits; AFTER=; HOLD=; DRY=; RESTART=
 while [ $# -gt 0 ]; do
   case $1 in
     --stages) STAGES=$2; shift 2 ;;
     --after) AFTER=$2; shift 2 ;;
     --hold) HOLD="-h"; shift ;;
+    --restart) RESTART=$2; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     *) echo "unknown option $1"; exit 1 ;;
   esac
@@ -40,8 +42,10 @@ for st in sim rockstar ctrees vahc fits; do
   esac
   DEP=; [ -n "$prev" ] && DEP="-W depend=afterok:$prev"
   H=; [ -z "$prev" ] && H=$HOLD
+  V="CONF=$CONF,PIPE_ENV=$HERE/pipeline_env.sh,STAGE=$st"
+  [ "$st" = sim ] && [ -n "$RESTART" ] && V="$V,RESTART=$RESTART"
   cmd=("$QSUB" -N "${st}_$REAL" -q workq -l "$R" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
-       -v "CONF=$CONF,PIPE_ENV=$HERE/pipeline_env.sh,STAGE=$st" "$HERE/job_$st.pbs")
+       -v "$V" "$HERE/job_$st.pbs")
   if [ -n "$DRY" ]; then echo "${cmd[*]}"; prev="<$st>"; continue; fi
   id=$("${cmd[@]}")
   echo "$st $id ($R, $W${DEP:+, $DEP})" | tee -a "$CHAIN"

@@ -1,22 +1,63 @@
 #!/bin/bash -l
-# Stage 1: pkdgrav3 simulation -> $SIM_DIR/snap.<step>.s<pct>.<writer>.pkc (+ snapnames.txt for Rockstar).
+# Stage 1: pkdgrav3 simulation -> $PKC_DIR/snap.<step>.s<pct>.<writer>.pkc (+ $SIM_DIR/snapnames.txt for Rockstar).
 # Submit with submit_pipeline.sh (or: qsub -v CONF=<run.conf>,PIPE_ENV=<this dir>/pipeline_env.sh -l select=1:ncpus=192:mem=700gb job_sim.pbs).
-# Restart: rerunning starts the simulation again from the ICs (no checkpoints in this template).
+# Parameter file: $PKD_PAR if the config sets it (written by setup_production.py), else p.par generated from the
+# config by make_pkdgrav3_par.py.
+# Restart: RESTART=<checkpoint> (or RESTART=latest: newest checkpoints/*.chk) continues from a checkpoint
+# (submit_pipeline.sh --restart latest). Without RESTART the simulation starts again from the ICs.
+# Outputs: if $SIM_DIR/output_steps.txt exists (planned output steps), snapnames.txt lists exactly those steps
+# (a snapshot written when pkdgrav3 stops at iWallRunTime or on a STOP file is not a planned output and is ignored).
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
-mkdir -p "$SIM_DIR" && cd "$SIM_DIR" || exit 1
+mkdir -p "$SIM_DIR" "$PKC_DIR" && cd "$SIM_DIR" || exit 1
 export PKD_IO_ROOT
 source "$PKD_IO_ROOT/pkdgrav3/bench/phase0/env_pawna.sh"
 (cd "$PKD_IO_ROOT/pkdgrav3" && git log -1 --format="pkdgrav3 source %h %s")
-python3 "$PIPE/make_pkdgrav3_par.py" p.par || exit 1
+if [ -n "$PKD_PAR" ]; then
+  [ -f "$PKD_PAR" ] || { stamp "PKD_PAR=$PKD_PAR not found"; exit 1; }
+  PAR=$PKD_PAR
+else
+  python3 "$PIPE/make_pkdgrav3_par.py" p.par || exit 1
+  PAR=p.par
+fi
+mkdir -p checkpoints
+if [ -n "${RESTART:-}" ]; then
+  CHK=$RESTART
+  [ "$CHK" = latest ] && CHK=$(ls checkpoints/*.chk 2>/dev/null | sort | tail -1)
+  [ -n "$CHK" ] && [ -f "$CHK" ] || { stamp "RESTART=$RESTART: no checkpoint found (checkpoints/*.chk)"; exit 1; }
+  # `import PKDGRAV; PKDGRAV.restore(...)`: the `from PKDGRAV import restore` form makes pkdgrav3 run the whole
+  # simulation again from the ICs after the restart (pkdgrav3 docs/compressed_io_plan.md)
+  PAR=restart.${PBS_JOBID%%.*}.par
+  printf 'import PKDGRAV\nPKDGRAV.restore("%s")\n' "$CHK" > "$PAR"
+  stamp "restart from $CHK"
+fi
 NTH=${PBS_NCPUS:-$SIM_NCPU}
-stamp "pkdgrav3 with $NTH threads"
-/usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" p.par > run.log 2> time.log
+stamp "pkdgrav3 with $NTH threads, parameter file $PAR"
+J=${PBS_JOBID%%.*}; J=${J:-$$}
+/usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
 rc=$?
-grep -E "Elapsed|Maximum resident" time.log
+ln -sf run.$J.log run.log
+grep -E "Elapsed|Maximum resident" time.$J.log
 # Rockstar's snapshot number <snap> = line <snap> of snapnames.txt (zero-padded pkdgrav3 steps of the outputs)
-ls snap.*.done 2>/dev/null | sed 's/^snap\.//; s/\.done$//' | sort > snapnames.txt
-stamp "pkdgrav3 exit $rc; $(grep -c . snapnames.txt) of $(echo $OUT_Z | wc -w) outputs: $(tr '\n' ' ' < snapnames.txt)"
-for s in $(cat snapnames.txt); do "$PKD_IO_ROOT/build_snapcomp/pkc_check" "snap.$s" | tail -1; done
-du -sh "$SIM_DIR"
-[ $rc -eq 0 ] && [ "$(grep -c . snapnames.txt)" -eq "$(echo $OUT_Z | wc -w)" ] || exit 1
+if [ -f output_steps.txt ]; then
+  NOUT=$(grep -vc '^#' output_steps.txt)
+  awk '!/^#/ {print $1}' output_steps.txt | while read -r s; do [ -f "$PKC_DIR/snap.$s.done" ] && echo "$s"; done > snapnames.txt
+  extra=$(ls "$PKC_DIR"/snap.*.done 2>/dev/null | sed 's#.*/snap\.##; s#\.done$##' | grep -vxF -f snapnames.txt | tr '\n' ' ')
+  [ -n "$extra" ] && stamp "snapshots that are not planned outputs (wall-time/STOP exits), not used: $extra"
+else
+  NOUT=$(echo $OUT_Z | wc -w)
+  ls "$PKC_DIR"/snap.*.done 2>/dev/null | sed 's#.*/snap\.##; s#\.done$##' | sort > snapnames.txt
+fi
+NDONE=$(grep -c . snapnames.txt)
+stamp "pkdgrav3 exit $rc; $NDONE of $NOUT outputs: $(tr '\n' ' ' < snapnames.txt | cut -c1-300)"
+touch pkc_checked.txt   # outputs already checked by an earlier job of this run
+for s in $(cat snapnames.txt); do
+  grep -qx "$s" pkc_checked.txt && continue
+  "$PKD_IO_ROOT/build_snapcomp/pkc_check" "$PKC_DIR/snap.$s" | tail -1 && echo "$s" >> pkc_checked.txt
+done
+du -sh "$PKC_DIR"
+if [ $rc -eq 0 ] && [ "$NDONE" -lt "$NOUT" ]; then
+  stamp "pkdgrav3 stopped before the last output (iWallRunTime or STOP): continue with submit.sh restart"
+  ls checkpoints/*.chk 2>/dev/null | tail -2
+fi
+[ $rc -eq 0 ] && [ "$NDONE" -eq "$NOUT" ] || exit 1
