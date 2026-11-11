@@ -6,7 +6,13 @@ The scripts are in [`scripts/pkdgrav3_pipeline/`](../scripts/pkdgrav3_pipeline/)
 run; `submit_pipeline.sh` submits the stages as a chain of PBS jobs.
 
 Branch: `rockstar-pkc-reader` (not merged into `master`). Status of the tests is in
-[section 9](#9-what-was-tested).
+[section 9](#9-what-was-tested); problems and fixes in [section 10](#10-troubleshooting).
+
+**Contents:** [Quick start](#0-quick-start-1283-test-about-1-h) ·
+[1 Layout](#1-directory-layout-of-a-run) · [2 Setup](#2-one-time-setup) · [3 Configure](#3-configure-a-run) ·
+[4 Submit](#4-submit) · [5 Stages](#5-the-stages) · [6 postprocess.py](#6-other-post-processing-postprocesspy) ·
+[7 Fixes](#7-fixes-made-while-setting-this-up-2026-11-11) · [8 Larger runs](#8-larger-runs-resources-and-pegasus) ·
+[9 Tests](#9-what-was-tested) · [10 Troubleshooting](#10-troubleshooting)
 
 ```
  job_sim.pbs        job_rockstar.pbs       job_ctrees.pbs            job_vahc.pbs            job_fits.pbs
@@ -15,6 +21,33 @@ Branch: `rockstar-pkc-reader` (not merged into `master`). Status of the tests is
  snapnames.txt      halos_<snap>.*         trees/, ../scales.txt                             (+ check_compressed_halos.py)
         └──────────── particles (.pkc) are read again by job_vahc ──────────┘
 ```
+
+## 0. Quick start (128^3 test, about 1 h)
+
+On the pawna login node, as your own user (replace the paths if you keep things elsewhere):
+
+```bash
+# 1. pkdgrav3 with .pkc output (once; 20-40 min)        -> /storage/$USER/pkdgrav3_io
+git clone -b main https://github.com/shadaba/pkdgrav3.git /tmp/$USER-pkd-setup
+bash /tmp/$USER-pkd-setup/tools/pawna/setup_pawna.sh /storage/$USER/pkdgrav3_io
+
+# 2. this repository, Rockstar, consistent-trees, Python venv (once; ~40 min, mostly pip)
+mkdir -p /storage/$USER/pipeline_test && cd /storage/$USER/pipeline_test
+git clone -b rockstar-pkc-reader https://github.com/a-paranjape/sahyadri-sandbox.git
+bash sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pawna.sh $PWD/codes /storage/$USER/pkdgrav3_io
+
+# 3. one config per run: the 128^3 test config already points to these paths
+cp sahyadri-sandbox/scripts/pkdgrav3_pipeline/example_test128.conf test128.conf
+sahyadri-sandbox/scripts/pkdgrav3_pipeline/submit_pipeline.sh test128.conf --dry-run   # look first
+sahyadri-sandbox/scripts/pkdgrav3_pipeline/submit_pipeline.sh test128.conf             # 5 chained jobs
+
+# 4. follow it
+qstat -u $USER
+tail -f data/logs/*.pkdtest_lcdm128_r1.*.log
+ls data/halos/pkdtest/lcdm128/r1/compressed            # the result: FITS catalogs + trees
+```
+
+For a production-size run start from `example_512.conf` (section 3) instead.
 
 ## 1. Directory layout of a run
 
@@ -46,6 +79,11 @@ This gives `/storage/$USER/pkdgrav3_io/{pkdgrav3,build/pkdgrav3,build_snapcomp,v
 system: GCC 11, CMake 3.22, OpenMPI 5 (module), HDF5 1.10, GSL, FFTW 3, Boost, Python 3.10. zstd, cpptrace
 and libdwarf are downloaded by CMake. `build_snapcomp/` also holds `pkc_check`, `pkc_to_gadget` and the
 zstd library that Rockstar links against.
+
+`pkc_to_gadget` with `--blocks` and `--from-hdf5` (only used to validate the Rockstar reader against Gadget
+input, not by the pipeline) is on the pkdgrav3 branch `pkc-to-gadget-v3` (pushed to `shadaba/pkdgrav3`, not
+merged into `main`). To get it: `git -C /storage/$USER/pkdgrav3_io/pkdgrav3 fetch origin && git -C ... checkout
+pkc-to-gadget-v3`, then rebuild `build_snapcomp` (`cmake --build build_snapcomp -j 16`).
 
 ### 2b. This repository and the halo codes
 
@@ -229,7 +267,19 @@ pipeline's version of the same step.
 - The production `cic_update.c` (pegasus) passes the particle count as `int`, which overflows above 2^31
   particles; the repo version uses `long`. With `down_to=512` production stayed below the limit.
 
-## 8. Larger runs and pegasus
+## 8. Larger runs, resources and pegasus
+
+Measured wall times (pawna, from job logs) to size the `*_WALL` entries:
+
+| Run | Stage | Cores | Wall time |
+|---|---|---|---|
+| 128^3 / 200 Mpc/h, 5 outputs | sim / rockstar / ctrees / vahc / fits | 32 / 8 / 8 / 8 / 8 | 93 s / 40 s / 7 s / 52 s / < 1 min |
+| 512^3 / 50 Mpc/h, 6 outputs | rockstar (8 readers, `.pkc`) | 8 | 776 s (~130 s per output) |
+| 512^3 / 50 Mpc/h, 6 outputs | ctrees | 8 | 402 s |
+
+Not measured above 512^3: a 2048^3 run has 64 times the particles, so if Rockstar time scales with the
+particle number (an assumption) that is a few hours per output on 8 cores; use more readers
+(`RS_NUM_BLOCKS`, `RS_WRITERS`, `RS_NCPU`) and a long `RS_WALL`. Peak memory was not recorded by these jobs.
 
 - Above 512^3 nothing may be submitted without approval. For 2048^3: simulation as in pkdgrav3's pawna doc;
   Rockstar memory on one node has not been measured for 2048^3; `PP_GRID=768`, `PP_DOWN_TO=512`, `PP_NPROC`
@@ -241,8 +291,22 @@ pipeline's version of the same step.
 Rockstar reader validation: [rockstar_pkc_reader_plan.md](rockstar_pkc_reader_plan.md). Summary of the
 512^3 / 50 Mpc/h test on pawna (job 2536453): with one reader the PKC route gives byte-identical Rockstar
 output to the same particles read as Gadget-2; with 8 readers the PKC and Gadget catalogs differ only as much
-as two PKC runs differ from each other (median |dM/M| ~ 1e-5); .pkc quantization vs the unquantized HDF5
-output changes halo masses by about one particle (median |dM/M| 1e-3, no bias). consistent-trees ran on both.
+as two PKC runs differ from each other (median |dM/M| ~ 1e-5). consistent-trees ran on both.
+
+**Effect of compression on halos** (raw pkdgrav3 particles vs `.pkc`, same run, z = 0; method and all
+redshifts in [rockstar_pkc_reader_plan.md](rockstar_pkc_reader_plan.md#effect-of-pkc-compression-on-halos-raw-pkdgrav3-particles-vs-pkc-5123-test)).
+Position step 1.95 kpc/h (= softening), velocity step 2.44 km/s:
+
+| | 123-1230 particles | 1230-12300 | > 12300 |
+|---|---|---|---|
+| halo counts | same within Poisson (-0.09 %) | +0.05 % | within Poisson |
+| mass, Vmax: bias / median scatter | 0 / 0.4-0.5 % | 0 / 0.1 % | < 0.01 % / < 0.05 % |
+| centre / bulk velocity offset (median) | 0.9 kpc/h / 1 km/s | 0.6 kpc/h / 1.7 km/s | 0.7 kpc/h / 0.9 km/s |
+| Rs scatter (bias) | 5.5 % (+0.4 %) | 1.7 % (+0.1 %) | 0.3 % (< 0.1 %) |
+| spin scatter (bias) | 3.8 % (-0.3 %) | 1.1 % (-0.1 %) | 0.3 % (< 0.1 %) |
+
+Counts, masses, Vmax, positions and velocities are unbiased and agree at the per-mille level; the shape
+of the cores of halos with fewer than ~1000 particles (Rs, concentration, spin) is the most sensitive.
 
 - **pawna, full chain, 2026-11-11** (`example_test128.conf`: 128^3 / 200 Mpc/h, 5 outputs z = 3, 2, 1, 0.5, 0;
   fresh clone of this branch, `setup_pawna.sh`, then `submit_pipeline.sh`; times from the job logs):
@@ -263,3 +327,19 @@ output changes halo masses by about one particle (median |dM/M| 1e-3, no bias). 
   `run_addvalue.py` (3 processes) byte-identical to `postprocess.py`; `.tens` equal except 2 of 204,000
   values in the last printed digit; FITS of `.trees/.vahc/.tens` pass `check_compressed_halos.py` (21 checks);
   a `.vahc` with rows sorted by mass is refused by the FITS converter.
+
+## 10. Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| A stage fails and the later jobs disappear from `qstat` | Normal for `afterok`: PBS deletes the dependants. Fix the cause, then `submit_pipeline.sh my.conf --stages <failed>,<later...>` |
+| No log under `$LOGS` | The job did not start the script: look at `$LOGS/pbs.<stage>.<run>.out` and `qstat -xf <id>` (if the server keeps history) |
+| `ModuleNotFoundError: numpy` (or scipy) in vahc/fits | `setup_pawna.sh` did not finish its venv step; rerun it (do not rerun it while jobs use the venv) |
+| scipy warning `NumPy version >=1.17.3 and <1.25.0 is required` | The system scipy got picked up instead of the venv's; jobs use `$CODES/venv/bin/python`, check `CODES` in the config |
+| Rockstar: `zstd not found` at setup | pkdgrav3 (`build_snapcomp`) is not built under `PKD_IO_ROOT`; do section 2a first |
+| Rockstar fails reading an output | The simulation did not write all outputs: compare `snapnames.txt` with the `snap.*.pkc` files and the `pkc_check` lines in the sim log |
+| ctrees: hlists overwrite each other | Two outputs closer than 0.001 in scale factor (`clean_trees.pl` uses 5 characters of `a`); space the outputs |
+| vahc: `Please specify number density nbar` | Old `correlations.py`; use this branch (section 7) |
+| FITS converter refuses a `.vahc` | Its rows are not in `.trees` order (made by the old `postprocess.py`); remake with `run_addvalue.py --overwrite` |
+| Out of memory in vahc | Lower `PP_NPROC` or raise `PP_MEM` (≈ 12 × 16 × `PP_GRID`^3 bytes per process plus particles) |
+

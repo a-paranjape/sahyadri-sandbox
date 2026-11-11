@@ -704,6 +704,56 @@ Gadget-2. Times are Rockstar wall clock for all 6 outputs on 8 cores (from the j
   pkc 237028 halos (199453 hosts, 4194 hosts with Mvir >= 1e11), h5g 236820 (198125, 4182).
 - Conversion of the inputs for the Gadget routes took 294 s; node-local scratch 53 GB (deleted by the job).
 
+### Effect of .pkc compression on halos: raw pkdgrav3 particles vs .pkc (512^3 test)
+
+**Question:** does finding halos in the compressed `.pkc` particles instead of pkdgrav3's raw (unquantized)
+particles change the halos?
+
+**How it was measured:** same pkdgrav3 run (512^3, 50 Mpc/h, m_p = 8.11e7 Msun/h, 6 outputs z = 3 ... 0), written
+both as `.pkc` (default precision) and as standard HDF5 (`bCompAlsoStandard`, raw float positions and
+velocities). Rockstar (8 readers, same settings) on `.pkc` directly ("pkc") and on the HDF5 particles converted
+to Gadget-2 ("raw"). The noise floor is Rockstar itself: the same `.pkc` input run twice (pkc vs pkc2). Halos of
+`out_<snap>.list` in four Mvir bins matched by nearest centre (periodic KD tree, within 10 kpc/h below 1e12,
+50 kpc/h above); "flips" (|dM/M| > 0.5, host/subhalo split differently) are counted and left out of the medians.
+Script `scripts/rockstar/pkc_validation/compare_quantization.py`, full table (all redshifts, also velocities,
+counts) in `compare_quantization_512.out`; run on pawna in 240 s.
+
+**Quantization of this run** (from the `.pkc` header): position step = box/(ncell × sub) = 50/(512 × 50) =
+1.95 kpc/h, equal to the force softening (L/N/50); maximum error half a step (0.98 kpc/h), rms per coordinate
+0.56 kpc/h. Velocity step 2.44 km/s (rms error 0.70 km/s).
+
+**Results at z = 0** (pkc vs raw; in brackets pkc vs pkc2, the Rockstar noise floor):
+
+| Mvir [Msun/h] | particles | N pkc / N raw - 1 (Poisson) | matched | flips | median |dM/M| | median dM/M | median |dVmax/Vmax| | median centre offset | median |dRs/Rs| (signed) | median |dSpin/Spin| (signed) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1e10-1e11 | 123-1230 | -0.09 % (0.56 %) | 99.55 % (99.89) | 0.9 % (0.3) | 3.9e-3 (0) | 0 | 5.1e-3 (0) | 0.87 kpc/h (0) | 5.5 % (0), +0.42 % | 3.8 % (0), -0.30 % |
+| 1e11-1e12 | 1230-12300 | +0.05 % (1.5 %) | 99.67 % (99.93) | 1.4 % (0.4) | 1.1e-3 (0) | 0 | 1.2e-3 (0) | 0.63 kpc/h (0.02) | 1.7 % (0.11), +0.08 % | 1.1 % (0.09), -0.07 % |
+| 1e12-1e13 | 1.2e4-1.2e5 | -0.6 % (4.4 %) | 100 % (100) | 3.5 % (2.0) | 4.3e-4 (1.6e-4) | 0 | 3.5e-4 (1.1e-4) | 0.68 kpc/h (0.15) | 0.34 % (0.13), -0.06 % | 0.34 % (0.10), -0.03 % |
+| > 1e13 | > 1.2e5 | +1.8 % (13 %), 57 vs 56 | 100 % (100) | 10.5 % (3.5), 6 halos | 2.5e-4 (9e-5) | -9e-5 | 1.1e-4 (5e-5) | 0.82 kpc/h (0.28) | 0.15 % (0.07), -0.06 % | 0.15 % (0.06), 0 |
+
+**Summary:**
+- **Halo counts / mass function:** unchanged within Poisson noise: in every bin at every redshift the
+  difference is smaller than 1/sqrt(N) (at most 0.56 % below 1e12, where 1/sqrt(N) is 0.5-2 %); pkc vs pkc2
+  differs by similar amounts.
+- **Masses and Vmax:** no bias (median signed dM/M = 0 below 1e12 at every redshift, |.| ≤ 2.5e-4 above).
+  Random scatter: median |dM/M| 4-7e-3 for 123-1230 particle halos (about one particle), 1-3e-3 at
+  1230-12300 particles, ≤ 1.2e-3 above. Vmax the same size. The scatter falls with time (z = 3 → 0: 7e-3 →
+  4e-3 for the smallest bin) as halos become denser relative to the fixed quantization step.
+- **Centres and bulk velocities:** move by a median 0.6-1.5 kpc/h (below one position step / softening) and
+  0.5-4.5 km/s (about the velocity step); Rockstar alone moves them by 0-0.5 kpc/h.
+- **Matching:** at z ≤ 1 more than 98.4 % of halos above 1e10 match within 10 kpc/h (94.7 % at z = 3 for the
+  smallest halos, against 98.8 % for pkc vs pkc2); host/subhalo flips 1-6 % below 1e13 (Rockstar alone 0.2-4 %).
+- **Internal structure is the most sensitive:** scale radius Rs scatters by a median 5.5-7 % for 123-1230
+  particle halos, 1.6-1.9 % at 1230-12300, < 0.7 % above 1e12; spin 3.8-5 %, 1.1-2.3 %, < 1.1 %. There is a small
+  systematic in the smallest bin: Rs larger by +0.1 to +0.4 % (median, about 7 standard errors at z = 0; i.e.
+  concentration lower by the same fraction) and spin lower by 0.1-0.3 %. Above 1230 particles the signed
+  medians are ≤ 0.2 %. This is what positions jittered by up to half a softening length do to the cores of
+  halos resolved with a few hundred particles.
+- **Conclusion:** for counts, masses, Vmax, positions and velocities, halos from `.pkc` are equivalent to those
+  from the raw particles at the per-mille level, with no bias. Rs/concentration and spin of halos with fewer
+  than ~1000 particles carry an extra few-per-cent random scatter and a ≤ 0.4 % bias (with the default position step of L/N/50); if that matters for a
+  science case, use a finer position step (`dCompPosStep`) or a larger particle-count cut.
+
 ## 8. Work order
 
 1. **Rockstar reader (this branch, started 2026-11-10)**: decoder split into `io/pkc_core.{c,h}` (no
