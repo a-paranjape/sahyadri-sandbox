@@ -15,8 +15,9 @@ Inputs (readers.py layout; set SAHYADRI_SCRATCH to the directory holding sims/ a
 Outputs: out_<snap>.vahc / out_<snap>.tens next to out_<snap>.trees.
 
 usage: run_addvalue.py <stem> [--real 1] [--snaps all|0-100|5,7] [--grid 512] [--down-to 512]
-                       [--no-vahc] [--tens] [--nproc 4] [--overwrite] [--fast]
+                       [--no-vahc] [--tens] [--nproc 4] [--overwrite] [--fast] [--pot]
 --fast uses vahc_fast.py (same quantities, much faster; see that file); without it addvalue.AddValue as before.
+--pot (with --fast) also writes out_<snap>.vpot for snapshots whose .pkc files store the potential.
 Memory per process is about 12 x 16 x grid^3 bytes (grid 512: ~26 GB; 768: ~85 GB). With .pkc input and no
 downsampling (--down-to 0, the default) the density is built block by block, so the particles add almost
 nothing at any resolution; with --down-to N (or Gadget input) the N^3 (all) positions are held at once.
@@ -100,14 +101,20 @@ def do_snap(snap, args):
     t0 = time.time()
     hr = HaloReader(sim_stem=args.stem, real=args.real, snap=snap, verbose=False)
     base = hr.halo_path + hr.halocat_stem
-    want = [k for k, on in (('vahc', args.vahc), ('tens', args.tens)) if on]
+    want = [k for k, on in (('vahc', args.vahc), ('tens', args.tens), ('vpot', args.pot)) if on]
     todo = [k for k in want if args.overwrite or not os.path.isfile(base + '.' + k)]
     if not todo:
         return '%d: skipped (exists)' % snap
     if not os.path.isfile(base + '.trees'):
         return '%d: no %s.trees' % (snap, base)
     sr = SnapshotReader(sim_stem=args.stem, real=args.real, snap=snap, verbose=False)
+    if 'vpot' in todo and not getattr(getattr(sr, 'pkc', None), 'has_potential', False):
+        todo.remove('vpot')     # .vpot only for snapshots that store the potential
+        if not todo:
+            return '%d: skipped (outputs exist; no potential in this snapshot, no .vpot)' % snap
     ps = PowerSpectrum(grid=args.grid, Lbox=sr.Lbox, verbose=False)
+    if args.fast:
+        return _fast_snap(snap, args, hr, sr, ps, base, todo, t0)
     if getattr(sr, 'pkc', None) is not None and args.stream and (args.down_to == 0 or args.down_to**3 >= sr.npart):
         density, npos = streamed_density(sr.pkc, ps, args.threads)
     else:
@@ -115,12 +122,10 @@ def do_snap(snap, args):
         npos = pos.shape[1]
         density = ps.density_field(pos)
         del pos
-    t1 = time.time()
-    if args.fast:
-        return _fast_snap(snap, args, hr, sr, ps, density, npos, base, todo, t0, t1)
     FT = ps.fourier_transform_density(density)
     del density
     gc.collect()
+    t1 = time.time()
     hpos, halos = hr.prep_halos(QE=None, Npmin=0.0, keep_subhalos=True, sorthalos=False)
     av = AddValue(sim_stem=args.stem, real=args.real, snap=snap, grid=args.grid, kmax=args.kmax,
                   massdef=args.massdef, ps=ps, density=FT, hpos=hpos, halos=halos, input_is_FTdensity=True,
@@ -143,15 +148,27 @@ def do_snap(snap, args):
         snap, '+'.join(todo), halos.size, npos, sr.snapshot_file + sr.snapshot_ext, t1 - t0, time.time() - t1)
 
 
-def _fast_snap(snap, args, hr, sr, ps, density, npos, base, todo, t0, t1):
-    """vahc_fast.FastAddValue: both outputs from one pass (see vahc_fast.py); files written to a temporary name
-    and renamed when complete."""
-    from vahc_fast import FastAddValue
+def _fast_snap(snap, args, hr, sr, ps, base, todo, t0):
+    """vahc_fast.FastAddValue: .vahc, .tens (and .vpot) from one pass (see vahc_fast.py); files written to a
+    temporary name and renamed when complete."""
+    from vahc_fast import FastAddValue, streamed_fields
     hpos, halos = hr.prep_halos(QE=None, Npmin=0.0, keep_subhalos=True, sorthalos=False)
+    vpot = None
+    if getattr(sr, 'pkc', None) is not None and args.stream and (args.down_to == 0 or args.down_to**3 >= sr.npart):
+        density, npos, vpot = streamed_fields(sr.pkc, ps, args.threads, halos=halos if 'vpot' in todo else None,
+                                              hpos=hpos, Om=hr.Om)
+    else:
+        pos = sr.read_block('pos', down_to=args.down_to, seed=args.seed)
+        npos = pos.shape[1]
+        density = ps.density_field(pos)
+        del pos
+        if 'vpot' in todo:
+            todo.remove('vpot')
+    t1 = time.time()
     tm = {}
-    av = FastAddValue(density, threads=args.threads, timing=tm, sim_stem=args.stem, real=args.real, snap=snap,
-                      grid=args.grid, kmax=args.kmax, massdef=args.massdef, ps=ps, hpos=hpos, halos=halos,
-                      verbose=False)
+    av = FastAddValue(density, threads=args.threads, timing=tm, vpot=vpot, sim_stem=args.stem, real=args.real,
+                      snap=snap, grid=args.grid, kmax=args.kmax, massdef=args.massdef, ps=ps, hpos=hpos,
+                      halos=halos, verbose=False)
     del density
     gc.collect()
     res = av.compute(want=todo)
@@ -187,7 +204,12 @@ def main():
     ap.add_argument('--fast', action='store_true',
                     help='vahc_fast.py: one pass for .vahc and .tens, multithreaded real FFTs, no per-halo loops '
                          '(same results to rounding; uses --threads FFT threads per process)')
+    ap.add_argument('--pot', action='store_true',
+                    help='also write out_<snap>.vpot (mean particle potential within rs, R200b and at the .vahc scales; '
+                         'only snapshots that store the potential; implies --fast)')
     args = ap.parse_args()
+    if args.pot:
+        args.fast = True
     if args.threads <= 0:
         args.threads = max(1, int(os.environ.get('NCPUS', os.cpu_count() or 1)) // max(1, args.nproc))
     if not os.environ.get('SAHYADRI_SCRATCH'):

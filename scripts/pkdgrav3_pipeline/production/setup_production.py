@@ -368,6 +368,8 @@ CLEAN_ROCKSTAR=1        # clean_trees.pl: keep out_<snap>.trees, logs/; delete o
 PP_GRID=512             # production grid; memory ~26 GB per process
 PP_DOWN_TO=0            # 0 = all particles (no downsampling)
 PP_TENS=1
+PP_FAST=0               # 1: vahc_fast.py (same results as the default, much faster; being validated)
+PP_POT=0                # 1 (needs PP_FAST): out_<snap>.vpot, mean particle potential around halos (snapshots with potential)
 PP_NPROC=%(ppn)d             # snapshots in parallel
 
 # FITS

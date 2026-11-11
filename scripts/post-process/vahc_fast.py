@@ -22,14 +22,158 @@ What is different from AddValue.add_value (and why the results are the same):
      the halo, so b1 = sum over the 8 CIC corners of weight x G(corner), with G = Re fftn(c(k) FT(k)) and
      c = Vbox w_bin / ((N_modes,bin + TINY)(P_bin + TINY)) on the modes of the bins: one FFT plus a lookup instead
      of N_halo x N_modes complex exponentials.
+
+.vpot (with run_addvalue.py --pot; only snapshots whose .pkc files store the potential): mean pkdgrav3 particle
+potential phi around each halo, (km/s)^2, with pkdgrav3's constant softened self term -(105/64) m/eps (the same for
+every particle) removed:
+  Np_rs, phi_rs        particles within rs (Rockstar's NFW scale radius) of the halo centre and their mean phi
+  Np_R200b, phi_R200b  the same within R200b = (3 M200b / (4 pi 200 rho_m))^(1/3) (comoving), from M200b
+  phi_<scale>          Gaussian-weighted mean phi at the 7 .vahc scales (2, 4, 6, 8 x R200b by interpolation over
+                       the same table of smoothing radii as the tidal eigenvalues; 2, 3, 5 Mpc/h), as
+                       [W * sum_i phi_i CIC_i] / [W * sum_i CIC_i] at the halo's cell, both grids built in the
+                       same pass and smoothed with the .vahc kernel W (same CIC deconvolution)
+  Undefined values are nan: no particle within the sphere, or (grid scales) halos below the .vahc mass cut.
+  Sphere sums: vpot_sums.c (OpenMP), particles in chunks; every particle is read once (same pass as the density).
 """
+import ctypes
 import gc
+import os
+import subprocess
 import time
 
 import numpy as np
 import scipy.fft as sfft
 
 from addvalue import AddValue
+
+
+RHO_CRIT = 2.77519737e11   # (Msun/h) / (Mpc/h)^3, as Rockstar (universal_constants.h)
+
+
+def vpot_lib():
+    """vpot_sums.so from $SAHYADRI_LIBDIR (setup_pawna.sh builds it), else built next to this file."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for d in (os.environ.get('SAHYADRI_LIBDIR', ''), here):
+        f = os.path.join(d, 'vpot_sums.so')
+        if d and os.path.isfile(f) and os.path.getmtime(f) >= os.path.getmtime(os.path.join(here, 'vpot_sums.c')):
+            break
+    else:
+        f = os.path.join(here, 'vpot_sums.so')
+        subprocess.check_call(['cc', '-O3', '-fopenmp', '-shared', '-fPIC', '-o', f, os.path.join(here, 'vpot_sums.c')])
+    lib = ctypes.CDLL(f)
+    D = np.ctypeslib.ndpointer(np.float64, flags='C_CONTIGUOUS')
+    L = np.ctypeslib.ndpointer(np.int64, flags='C_CONTIGUOUS')
+    lib.deposit_weighted.restype = None
+    lib.deposit_weighted.argtypes = [ctypes.c_long, ctypes.c_int, D, D, D, D, D, ctypes.c_double, ctypes.c_double,
+                                     ctypes.c_double]
+    lib.sphere_sums.restype = ctypes.c_int
+    lib.sphere_sums.argtypes = [ctypes.c_long, D, D, D, D, ctypes.c_long, D, D, D, D, D, ctypes.c_double,
+                                ctypes.c_int, ctypes.c_int, D, L, D, L]
+    return lib
+
+
+def self_term(pkc):
+    """pkdgrav3's softened self potential -(105/64) m/eps in (km/s)^2 at this snapshot (constant for all particles):
+    code units m = Omega_m / N (box = 1, rho_crit = 1), eps = softening / L; pot_to_kms2 = (100 L / H0_code)^2 / a."""
+    import json
+    h = pkc.files[0].header
+    info = json.loads(h['info']) if isinstance(h.get('info'), str) else h.get('info', {})
+    box = info['box']
+    if box.get('softening_source') == 'per particle (input file)':
+        raise ValueError('per-particle softening: no single self term')
+    m = h['omega_m'] / float(h['n_total'])
+    eps = box['softening_kpch'] / 1000.0 / h['box_size']
+    return -(105.0 / 64.0) * m / eps * h['pot_to_kms2']
+
+
+def streamed_fields(pkc, ps, threads, halos=None, hpos=None, Om=None, chunk=1 << 25):
+    """CIC density contrast of a .pkc snapshot built block by block (bit for bit as run_addvalue.streamed_density),
+    and, with halos given and the potential stored, in the same pass: the CIC grid of phi (self term removed) and
+    the sphere sums within rs and R200b. Returns (density, n, vpot) with vpot None or a dict."""
+    from concurrent.futures import ThreadPoolExecutor
+    from ctypes import c_long, c_int, c_double
+    from numpy.ctypeslib import ndpointer
+    upd = ps.lib_cic.update_density
+    upd.restype = None
+    upd.argtypes = [c_long, c_int, ndpointer(c_double, flags="C_CONTIGUOUS"),
+                    ndpointer(c_double, flags="C_CONTIGUOUS"), ndpointer(c_double, flags="C_CONTIGUOUS"),
+                    ndpointer(c_double, flags="C_CONTIGUOUS"), c_double, c_double, c_double, c_double]
+    G = ps.grid
+    density = np.zeros(G**3)
+    want_pot = halos is not None and getattr(pkc, 'has_potential', False)
+    if want_pot:
+        lib = vpot_lib()
+        C = self_term(pkc)
+        potgrid = np.zeros(G**3)
+        L = float(ps.Lbox)
+        nh = halos.size
+        hx, hy, hz = (np.ascontiguousarray(hpos[:, i] % L, np.float64) for i in range(3))
+        r_rs = np.ascontiguousarray(halos['rs'] / 1000.0, np.float64)               # kpc/h -> Mpc/h
+        m = np.asarray(halos['m200b'], np.float64)
+        r_200 = np.ascontiguousarray(np.cbrt(3.0 * m / (4.0 * np.pi * 200.0 * Om * RHO_CRIT)), np.float64)
+        s1, s2 = np.zeros(nh), np.zeros(nh)
+        n1, n2 = np.zeros(nh, np.int64), np.zeros(nh, np.int64)
+        nc = int(max(1, min(256, L / 0.5)))
+        buf, nbuf = [], 0
+        tsph = 0.0
+
+        def flush():
+            nonlocal buf, nbuf, tsph
+            if not nbuf:
+                return
+            t = time.time()
+            X = np.concatenate([b[0] for b in buf])
+            P = np.concatenate([b[1] for b in buf])
+            buf, nbuf = [], 0
+            rc = lib.sphere_sums(X.shape[0], np.ascontiguousarray(X[:, 0]), np.ascontiguousarray(X[:, 1]),
+                                 np.ascontiguousarray(X[:, 2]), P, nh, hx, hy, hz, r_rs, r_200, L, nc,
+                                 max(1, threads), s1, n1, s2, n2)
+            if rc:
+                raise MemoryError('sphere_sums: out of memory')
+            tsph += time.time() - t
+
+    jobs = [(f, i) for f in pkc.files for i in range(len(f.counts))]
+
+    def decode(job):
+        f, i = job
+        h = f.header
+        if want_pot:
+            X, _, _, P = f.block(i, pot=True)
+            return ((X + 0.5) / h["q"] * h["box_size"]).astype(np.float32), P * h["pot_step"] - C
+        X = f.block(i)[0]
+        return ((X + 0.5) / h["q"] * h["box_size"]).astype(np.float32), None
+
+    n = 0
+    nchunk = 4 * max(1, threads)
+    with ThreadPoolExecutor(max(1, threads)) as ex:
+        for k in range(0, len(jobs), nchunk):
+            for x, phi in ex.map(decode, jobs[k:k + nchunk]):
+                xx = np.ascontiguousarray(x[:, 0], np.float64)
+                yy = np.ascontiguousarray(x[:, 1], np.float64)
+                zz = np.ascontiguousarray(x[:, 2], np.float64)
+                upd(c_long(x.shape[0]), c_int(G), density, xx, yy, zz,
+                    c_double(ps.cell_size_x), c_double(ps.cell_size_y), c_double(ps.cell_size_z), c_double(0.0))
+                if want_pot:
+                    phi = np.ascontiguousarray(phi, np.float64)
+                    lib.deposit_weighted(x.shape[0], G, potgrid, xx, yy, zz, phi,
+                                         ps.cell_size_x, ps.cell_size_y, ps.cell_size_z)
+                    buf.append((x.astype(np.float64), phi))
+                    nbuf += x.shape[0]
+                    if nbuf >= chunk:
+                        flush()
+                n += x.shape[0]
+    if n != pkc.npart:
+        raise ValueError('decoded %d particles, header says %d' % (n, pkc.npart))
+    density = np.reshape(density, (G, G, G), order='F')
+    density = density * G**3 / (1.0 * n + ps.TINY) - 1.0
+    vpot = None
+    if want_pot:
+        flush()
+        with np.errstate(invalid='ignore', divide='ignore'):
+            vpot = dict(potgrid=np.reshape(potgrid, (G, G, G), order='F'), nbar=n / float(G)**3, self_term=C,
+                        n_rs=n1, phi_rs=np.where(n1 > 0, s1 / n1, np.nan),
+                        n_r200b=n2, phi_r200b=np.where(n2 > 0, s2 / n2, np.nan), sphere_s=tsph, chunk=chunk)
+    return density, n, vpot
 
 
 class FastAddValue(AddValue):
@@ -40,7 +184,7 @@ class FastAddValue(AddValue):
     The other arguments are AddValue's (sim_stem, real, snap, kmax, massdef, hpos, halos, ps, grid, CIC, ...).
     """
 
-    def __init__(self, density_real, threads=1, timing=None, **kw):
+    def __init__(self, density_real, threads=1, timing=None, vpot=None, **kw):
         kw['density'] = None
         kw['input_is_FTdensity'] = True
         AddValue.__init__(self, **kw)
@@ -64,6 +208,12 @@ class FastAddValue(AddValue):
             R /= ngp**2       # = N^3 conj(FT) on the half grid
         del ngp
         self.B = R
+        self.vpot = vpot
+        if vpot is not None:   # potential grid: transformed and CIC-deconvolved as the density
+            Rp = sfft.rfftn(vpot.pop('potgrid'), workers=self.threads)
+            if self.CIC:
+                Rp /= (np.sinc(1.0 * a / N) * np.sinc(1.0 * b / N) * np.sinc(1.0 * c / N))**2
+            self.Bpot = Rp
         self.s1 = np.sin(ps.grid_inv * a)
         self.s2 = np.sin(ps.grid_inv * b)
         self.s3 = np.sin(ps.grid_inv * c)
@@ -257,12 +407,51 @@ class FastAddValue(AddValue):
             out['b1'] = self.calc_b1_fast()
             T['b1'] = time.time() - t
             res['vahc'] = out
+        if 'vpot' in want:
+            t = time.time()
+            res['vpot'] = self._vpot(allowed, idx, per_scale)
+            T['vpot'] = time.time() - t
         del comp
         gc.collect()
         return res
 
+    def _vpot(self, allowed, idx, per_scale):
+        """.vpot columns (see module docstring)."""
+        if self.vpot is None:
+            raise ValueError('vpot requested but no potential fields were built')
+        V = self.vpot
+        nS = self.N_scales
+        mean = np.zeros((allowed.size, nS, 1))
+        with np.errstate(invalid='ignore', divide='ignore'):
+            for s in range(nS):
+                K = self._kernel(self.smoothing_scales[s])
+                num = self._irfft(self.Bpot * K)[idx]
+                den = V['nbar'] * (1.0 + self._irfft(self.B * K)[idx])
+                mean[:, s, 0] = np.where(den > 0, num / den, np.nan)
+                del K
+        dt = [('ID', 'i8'), ('Np_rs', 'i8'), ('phi_rs', 'f'), ('Np_R200b', 'i8'), ('phi_R200b', 'f')]
+        dt += [('phi_' + s, 'f') for s in self.scale_strings]
+        out = np.zeros(self.Nhalo, dtype=dt)
+        out['ID'] = self.halos['ID']
+        out['Np_rs'], out['phi_rs'] = V['n_rs'], V['phi_rs']
+        out['Np_R200b'], out['phi_R200b'] = V['n_r200b'], V['phi_r200b']
+        for s, v in zip(self.scale_strings, per_scale(mean)):
+            col = np.full(self.Nhalo, np.nan)
+            col[allowed] = v[:, 0]
+            out['phi_' + s] = col
+        return out
+
     # ------------------------------------------------------------------
     def header(self, kind):
+        if kind == 'vpot':
+            V = self.vpot
+            h = ("# Mean pkdgrav3 particle potential around halos, (km/s)^2, self term %.6g (km/s)^2 removed; "
+                 "Np_*/phi_* within rs and R200b (spheres), phi_<scale> Gaussian-weighted on %d^3 grid (vahc_fast.py)\n"
+                 % (V['self_term'], self.grid))
+            h += '# haloID Np_rs phi_rs Np_R200b phi_R200b ' + ' '.join('phi_' + s for s in self.scale_strings) + '\n'
+            h += '# self_term_kms2 = %.10g ; R200b from M200b with rho_m = Om * %.9g (Msun/h)/(Mpc/h)^3 ; nan = undefined\n' % (
+                V['self_term'], RHO_CRIT)
+            return h
         h = "# Value added halo catalog. All quantities computed on {0:d}^3 grid\n".format(self.grid)
         h += '# haloID'
         if kind == 'vahc':

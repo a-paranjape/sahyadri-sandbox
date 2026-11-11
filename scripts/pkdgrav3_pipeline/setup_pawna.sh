@@ -50,5 +50,6 @@ echo "== Python venv"
 
 echo "== post-process C helpers"
 for f in cic_update ngp_update; do cc -O2 -shared -fPIC -o "$CODES/lib/$f.so" "$SB/scripts/post-process/$f.c"; done
+cc -O3 -fopenmp -shared -fPIC -o "$CODES/lib/vpot_sums.so" "$SB/scripts/post-process/vpot_sums.c"   # .vpot (vahc_fast.py)
 ls -l "$CODES/lib"
 echo "setup done: CODES=$CODES (put it in the run config)"

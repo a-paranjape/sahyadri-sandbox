@@ -6,9 +6,11 @@ Replaces ConvertToFITS.convert_fits (halo catalogs) and consistent_trees_compres
 Sahyadri pipeline (2026-11-11; plan: docs/rockstar_pkc_reader_plan.md, section 3d). Output names, HDU
 layout and column names are those of the existing files, so readers.py (prep_halos_fits) works unchanged:
 
-  halos  <indir>/out_<snap>.trees (+ .vahc, .tens)  ->  <outdir>/out_<snap>_{basic,extended,vahc,tens}.fits.gz
+  halos  <indir>/out_<snap>.trees (+ .vahc, .tens, .vpot)  ->  <outdir>/out_<snap>_{basic,extended,vahc,tens}.fits.gz
          basic    = BASIC_COLS from .trees (+ b1 from .vahc, rows aligned by id == haloID, checked)
          extended = all other .trees columns;  vahc / tens = their columns except BASIC_COLS
+         .vpot (mean particle potential, vahc_fast.py; only snapshots with the potential): its columns except
+         haloID are appended to the vahc file (header card HAS_VPOT)
   trees  <treedir>/tree_X_Y_Z.dat  ->  <outdir>/tree_X_Y_Z.fits.gz      (rows in file order, HDU "HALOS")
          <treedir>/locations.dat ->  <outdir>/locations.fits.gz       (all 6 columns + FitsRow, FitsRows)
          <treedir>/forests.list  ->  <outdir>/forests.fits.gz         (TreeRootID, ForestID)
@@ -65,7 +67,7 @@ INT64_COLS = {
     'breadth_first_id', 'depth_first_id', 'tree_root_id', 'orig_halo_id', 'snap_idx', 'snap_num',
     'next_coprogenitor_depthfirst_id', 'last_progenitor_depthfirst_id', 'last_mainleaf_depthfirst_id',
     'tidal_id', 'future_merger_mmp_id', 'haloid', 'treerootid', 'forestid', 'fileid', 'offset',
-    'num_halos', 'num_bytes'}
+    'num_halos', 'num_bytes', 'np_rs', 'np_r200b'}
 FLOAT64_COLS = {'scale', 'desc_scale', 'scale_of_last_mm', 'x', 'y', 'z'}
 
 
@@ -394,8 +396,10 @@ def halo_header_names(path, kind):
 def convert_halo_snapshot(task):
     snap, args, run_cards, run_prov = task
     base = os.path.join(args.indir, 'out_%s' % snap)
-    src = {k: base + '.' + k for k in ('trees', 'vahc', 'tens')}
+    src = {k: base + '.' + k for k in ('trees', 'vahc', 'tens', 'vpot')}
     have = {k: os.path.isfile(p) for k, p in src.items()}
+    if have['vpot'] and not have['vahc']:
+        return [{'snap': snap, 'error': '%s without %s' % (src['vpot'], src['vahc'])}]
     if not have['trees']:
         return [{'snap': snap, 'error': 'missing ' + src['trees']}]
     want = [t for t in args.types if t in ('basic', 'extended') or have.get(t)]
@@ -406,8 +410,9 @@ def convert_halo_snapshot(task):
     names = {k: halo_header_names(p, k) for k, p in src.items() if have[k]}
     hdr_lines, hdr_cards = ascii_header(src['trees'])
     prov = run_prov + [('out_%s.trees header' % snap, '\n'.join(hdr_lines))]
-    if have['vahc']:
-        prov.append(('out_%s.vahc header' % snap, '\n'.join(ascii_header(src['vahc'])[0])))
+    for k in ('vahc', 'vpot'):
+        if have[k]:
+            prov.append(('out_%s.%s header' % (snap, k), '\n'.join(ascii_header(src[k])[0])))
     prov_arr = provenance_table(prov)
 
     # columns of each output: list of (source kind, column name)
@@ -421,6 +426,8 @@ def convert_halo_snapshot(task):
             cols = [('trees', c) for c in names['trees'] if c not in BASIC_COLS]
         else:
             cols = [(t, c) for c in names[t] if c not in BASIC_COLS]
+            if t == 'vahc' and have['vpot']:
+                cols += [('vpot', c) for c in names['vpot'] if c != 'haloID']
         plan[t] = cols
     sources = sorted({k for cols in plan.values() for k, _ in cols} | ({'vahc'} if 'basic' in todo and have['vahc'] else set()))
 
@@ -433,6 +440,8 @@ def convert_halo_snapshot(task):
                           card('SRCFILE', ','.join(sorted({os.path.basename(src[k]) for k, _ in cols})))]
         if t == 'basic':
             cards.append(card('HAS_B1', bool(have['vahc']), 'b1 from .vahc included'))
+        if t == 'vahc':
+            cards.append(card('HAS_VPOT', bool(have['vpot']), 'mean particle potential columns from .vpot included'))
         tmp = os.path.join(tmpdir, '.tmp_out_%s_%s_%d.fits' % (snap, t, os.getpid()))
         writers[t] = (TableWriter(tmp, dt, 'HALOS', cards), cols)
 
@@ -446,7 +455,7 @@ def convert_halo_snapshot(task):
         for k in sources:
             if data[k].shape != (n, len(names[k])):
                 raise RuntimeError('%s: chunk shape %s, expected (%d, %d)' % (src[k], data[k].shape, n, len(names[k])))
-        for k in ('vahc', 'tens'):  # rows must be the same halos (postprocess must not sort them)
+        for k in ('vahc', 'tens', 'vpot'):  # rows must be the same halos (postprocess must not sort them)
             if k in data and 'trees' in data and \
                     not np.array_equal(data['trees'][:, names['trees'].index('id')], data[k][:, names[k].index('haloID')]):
                 raise RuntimeError('out_%s: .trees id and .%s haloID differ row by row' % (snap, k))
@@ -482,6 +491,8 @@ def convert_halo_snapshot(task):
             os.remove(src['trees'])
             if have['vahc']:
                 os.remove(src['vahc'])
+            if have['vpot']:
+                os.remove(src['vpot'])
         if have['tens'] and done('tens'):
             os.remove(src['tens'])
     return out

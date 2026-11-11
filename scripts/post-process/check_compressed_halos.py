@@ -34,8 +34,8 @@ def same(v, a):
     if v.dtype.kind == 'i':
         return np.array_equal(v, a.astype(np.int64))
     if v.dtype.itemsize == 8:
-        return np.array_equal(v, a)
-    return np.array_equal(v, a.astype(np.float32))
+        return np.array_equal(v, a, equal_nan=True)
+    return np.array_equal(v, a.astype(np.float32), equal_nan=True)
 
 
 def check_snapshot(R, out, snap):
@@ -67,6 +67,14 @@ def check_snapshot(R, out, snap):
             nb += [] if same(got['b1'], V[:, vn.index('b1')]) else ['b1 (basic)']
         ok(not nb, 'out_%s: .vahc columns equal the ASCII%s' % (snap, (' (differ: %s)' % nb) if nb else ''))
         ok(np.array_equal(V[:, vn.index('haloID')], A[:, names.index('id')]), 'out_%s: .vahc rows are the .trees halos in order' % snap)
+        vpot = os.path.join(R, 'out_%s.vpot' % snap)
+        if os.path.isfile(vpot):
+            pn = C.halo_header_names(vpot, 'vpot')
+            P = np.loadtxt(vpot, ndmin=2)
+            nb = [c for c in pn if c != 'haloID' and (c not in d.dtype.names or not same(d[c], P[:, pn.index(c)]))]
+            ok(not nb and np.array_equal(P[:, pn.index('haloID')], A[:, names.index('id')]),
+               'out_%s: .vpot columns (%d) in the vahc file equal the ASCII, rows in order%s' % (
+                   snap, len(pn) - 1, (' (differ: %s)' % nb) if nb else ''))
     tens = os.path.join(R, 'out_%s.tens' % snap)
     if os.path.isfile(tens) and os.path.isfile(os.path.join(out, 'out_%s_tens.fits.gz' % snap)):
         tn = C.halo_header_names(tens, 'tens')
