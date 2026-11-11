@@ -291,7 +291,9 @@ can be missed.
 | | `pkc_to_gadget` of 6 outputs | | 388 s | 10.0 GB |
 | | ctrees | 8 | 450-650 s | 1.4 GB |
 
-Memory of vahc is `PP_NPROC` × 12 × 16 × `PP_GRID`^3 bytes, independent of the particle number. Not measured
+Memory of vahc is `PP_NPROC` × 12 × 16 × `PP_GRID`^3 bytes and does not grow with the resolution of the
+run: at the same `PP_GRID` a 2048^3 run needs the same ~26 GB per process as the 512^3 run (and
+`PP_DOWN_TO=512` caps the particles read at 512^3); only a larger grid raises it (768: ~87 GB per process). Not measured
 above 512^3: a 2048^3 run has 64 times the particles. From 128^3 to 512^3 the simulation grew by a factor
 4.3 (fixed overhead at 128^3) and Rockstar by 40. Rockstar needs about twice its particle array (32 B per particle): ~0.53 TB at
 2048^3 of a node's 755 GB, so check at 1024^3 that one node suffices. Rockstar time ~130 s per output at 512^3 on 8 cores;

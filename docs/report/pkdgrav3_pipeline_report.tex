@@ -376,16 +376,19 @@ Section~\ref{sec:running} (\code{SIM_NCPU=64} for the $512^3$ simulation).
   complex grids of the tensor calculation, about $12\times16\times$\code{PP_GRID}$^3$ bytes (25.8\,GB for
   \code{PP_GRID=512}, measured largest process 25.5\,GB; 0.4\,GB for the $128^3$ run's grid of 128), and
   \code{PP_NPROC} snapshots run at once (4 at $512^3$, so 70--90\,GB for the first 30\,min, then $\approx40$\,GB
-  for the last two of the six snapshots; Fig.~\ref{fig:resources}). For a $2048^3$ run with the production
-  settings (\code{PP_GRID=768}, \code{PP_DOWN_TO=512}) this predicts $\approx87$\,GB per process, so
-  \code{PP_NPROC} $\leq6$--7 on one 755\,GB node.
+  for the last two of the six snapshots; Fig.~\ref{fig:resources}). This part does not grow with the resolution of the simulation: at the same
+  \code{PP_GRID}, a $1024^3$ or $2048^3$ run needs the same $\approx26$\,GB per process as measured here, and
+  with \code{PP_DOWN_TO=512} the particles read are capped at $512^3$ as well. Only a larger grid raises it,
+  as \code{PP_GRID}$^3$: $\approx87$\,GB per process for the grid of 768 that production used at $2048^3$
+  (\code{PP_NPROC} $\leq6$--7 on one 755\,GB node).
 \item \textbf{Fits.} 5.9\,GB at $512^3$, 0.1\,GB at $128^3$; minutes.
 \end{itemize}
 Extrapolating to Sahyadri's $2048^3$ (64 times the $512^3$ particle number), and keeping in mind that only two sizes
 were measured: the simulation needs at most $\sim1.6$\,TB in total if memory scaled with the particle number
 (spread over several nodes); Rockstar needs about twice its particle array, i.e.\ $\sim0.53$\,TB of a node's 755\,GB if that ratio holds,
 which should be checked with a $1024^3$ run; consistent-trees and
-the FITS stage are small; \code{run_addvalue} is bounded by \code{PP_GRID} and \code{PP_NPROC} as above.
+the FITS stage are small; \code{run_addvalue} does not grow with resolution at fixed \code{PP_GRID} and is set by \code{PP_GRID}
+and \code{PP_NPROC} as above.
 
 \begin{table}[htbp]
 \centering\footnotesize
