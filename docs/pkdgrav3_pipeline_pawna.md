@@ -5,7 +5,9 @@ reading `.pkc` directly) → merger trees (consistent-trees) → value-added cat
 The scripts are in [`scripts/pkdgrav3_pipeline/`](../scripts/pkdgrav3_pipeline/). One config file describes a
 run; `submit_pipeline.sh` submits the stages as a chain of PBS jobs.
 
-Branch: `rockstar-pkc-reader` (not merged into `master`). Status of the tests is in
+Branch: `rockstar-pkc-reader` (not merged into `master`). A LaTeX report with all tests, bugs, plots and
+resource measurements is in [`docs/report/`](report/) (`pkdgrav3_pipeline_report.pdf`; figures made by
+`make_figures.ipynb` from `data/`). Status of the tests is in
 [section 9](#9-what-was-tested); problems and fixes in [section 10](#10-troubleshooting).
 
 **Contents:** [Quick start](#0-quick-start-1283-test-about-1-h) ·
@@ -224,7 +226,7 @@ same kind of random subset production took from the full Gadget snapshot, at abo
 
 Memory: about 12 × 16 × `PP_GRID`^3 bytes per process (complex grids of the tensor calculation) plus the
 particles: ~26 GB at grid 512, ~85 GB at 768. Choose `PP_NPROC` so that `PP_NPROC` times that fits in
-`PP_MEM`.
+`PP_MEM`. Measured (512^3 run, `PP_GRID=512`, `PP_NPROC=4`): largest process 25.5 GB, job peak 91.6 GB.
 
 **When to run it.** `.vahc`/`.tens` rows are the halos of `out_<snap>.trees`, with consistent-trees IDs
 (`haloID` = `id` of the hlist), so this stage needs the finished consistent-trees catalogs and cannot start
@@ -269,21 +271,36 @@ pipeline's version of the same step.
 
 ## 8. Larger runs, resources and pegasus
 
-Measured wall times (pawna, from job logs) to size the `*_WALL` entries:
+Measured wall time and peak memory (pawna, 2026-11-11). Every job runs `memmon.sh`, which every 5 s sums
+the PSS of the job's process tree (shared pages counted once; RSS sum in brackets where it differs) and writes
+`$LOGS/<stage>.<run>.<jobid>.mem.tsv`; the job log ends with a `peak memory:` line. pawna keeps no per-job
+memory accounting itself (all PBS jobs share one cgroup), so this is the only record. Peaks shorter than 5 s
+can be missed.
 
-| Run | Stage | Cores | Wall time |
-|---|---|---|---|
-| 128^3 / 200 Mpc/h, 5 outputs | sim / rockstar / ctrees / vahc / fits | 32 / 8 / 8 / 8 / 8 | 93 s / 40 s / 7 s / 52 s / < 1 min |
-| 512^3 / 50 Mpc/h, 6 outputs | rockstar (8 readers, `.pkc`) | 8 | 776 s (~130 s per output) |
-| 512^3 / 50 Mpc/h, 6 outputs | ctrees | 8 | 402 s |
+| Run | Stage | Cores (procs) | Wall time | Peak memory |
+|---|---|---|---|---|
+| 512^3 / 200 Mpc/h, 6 outputs (`example_512.conf`, `SIM_NCPU=64`) | sim | 64 | 4780 s | 25.1 GB |
+| | rockstar (8 readers, 16 writers) | 16 | 475 s | 8.0 GB (8.2) |
+| | ctrees | 16 | 506 s | 0.8 GB |
+| | vahc (`PP_GRID=512`, `PP_NPROC=4`) | 16 | 3666 s | 91.6 GB |
+| | fits | 16 | 153 s | 5.9 GB |
+| 128^3 / 200 Mpc/h, 5 outputs (`example_test128.conf`) | sim / rockstar / ctrees / vahc / fits | 32 / 8 / 8 / 8 / 8 | 110 / 41 / 9 / 49 / 6 s | 5.9 / 0.2 / < 0.1 / 2.3 / 0.1 GB |
+| 512^3 / 50 Mpc/h, 6 outputs (validation) | rockstar, any input route (8 readers) | 8 | 800-850 s | 8.2-8.4 GB (8.9) |
+| | rockstar, 1 reader, z = 0 only | | 764-798 s | 6.5 GB |
+| | rockstar on the 1%+3% subsamples (`RS_PKC_SUBSAMPLES="1,3"`) | 8 | 105 s | 0.8 GB |
+| | `pkc_to_gadget` of 6 outputs | | 388 s | 10.0 GB |
+| | ctrees | 8 | 450-650 s | 1.4 GB |
 
-Not measured above 512^3: a 2048^3 run has 64 times the particles, so if Rockstar time scales with the
-particle number (an assumption) that is a few hours per output on 8 cores; use more readers
-(`RS_NUM_BLOCKS`, `RS_WRITERS`, `RS_NCPU`) and a long `RS_WALL`. Peak memory was not recorded by these jobs.
+Memory of vahc is `PP_NPROC` × 12 × 16 × `PP_GRID`^3 bytes, independent of the particle number. Not measured
+above 512^3: a 2048^3 run has 64 times the particles. From 128^3 to 512^3 the simulation grew by a factor
+4.3 (fixed overhead at 128^3) and Rockstar by 40. Rockstar needs about twice its particle array (32 B per particle): ~0.53 TB at
+2048^3 of a node's 755 GB, so check at 1024^3 that one node suffices. Rockstar time ~130 s per output at 512^3 on 8 cores;
+use more readers (`RS_NUM_BLOCKS`, `RS_WRITERS`, `RS_NCPU`) and a long `RS_WALL` for large runs. Plots and the
+full measurement: [report](report/pkdgrav3_pipeline_report.pdf), section 6.
 
 - Above 512^3 nothing may be submitted without approval. For 2048^3: simulation as in pkdgrav3's pawna doc;
-  Rockstar memory on one node has not been measured for 2048^3; `PP_GRID=768`, `PP_DOWN_TO=512`, `PP_NPROC`
-  ≤ 6 on one node.
+  Rockstar memory on one node has not been measured for 2048^3; `PP_GRID=768`, `PP_DOWN_TO=512` (~87 GB per
+  process), `PP_NPROC` ≤ 6 on one node.
 - pegasus: the same scripts work with a different `CODES`/`SCRATCH` and PBS resource names; not tested there.
 
 ## 9. What was tested

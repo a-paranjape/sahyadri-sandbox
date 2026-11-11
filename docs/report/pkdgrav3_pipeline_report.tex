@@ -1,7 +1,7 @@
 \documentclass[10pt,a4paper]{article}
 \usepackage[margin=2.2cm]{geometry}
 \usepackage[T1]{fontenc}
-\usepackage{lmodern,microtype,amsmath,graphicx,booktabs,array,xcolor,tabularx,multirow,enumitem}
+\usepackage{lmodern,microtype,amsmath,amssymb,graphicx,booktabs,array,xcolor,tabularx,multirow,enumitem}
 \usepackage{listings}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,fit}
@@ -9,6 +9,7 @@
 \lstset{basicstyle=\ttfamily\footnotesize,columns=fullflexible,keepspaces,frame=single,framerule=0.3pt,
   rulecolor=\color{black!30},backgroundcolor=\color{black!3},breaklines,showstringspaces=false,
   commentstyle=\color{black!55},morecomment=[l]{\#},xleftmargin=2pt,xrightmargin=2pt}
+\newcommand{\hd}[2]{\begin{tabular}[b]{@{}c@{}}#1\\\relax #2\end{tabular}}
 \newcommand{\code}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\hMsun}{$h^{-1}M_\odot$}
 \setlist{itemsep=1pt,topsep=3pt}
@@ -39,23 +40,23 @@ made by a notebook from data files kept in the repository.
 \section{Overview}
 \label{sec:overview}
 
-\begin{figure}[h]
+\begin{figure}[htbp]
 \centering
-\begin{tikzpicture}[node distance=4mm and 7mm, every node/.style={font=\footnotesize},
-  st/.style={draw,rounded corners,fill=blue!6,align=center,minimum height=12mm,text width=24mm},
-  da/.style={align=center,text width=26mm,font=\scriptsize\ttfamily},
+\begin{tikzpicture}[node distance=4mm and 9mm, every node/.style={font=\footnotesize},
+  st/.style={draw,rounded corners,fill=blue!6,align=center,minimum height=12mm,text width=22mm,font=\scriptsize},
+  da/.style={align=center,text width=24mm,font=\scriptsize},
   ar/.style={-{Stealth[length=2mm]},thick}]
 \node[st] (sim) {\textbf{sim}\\pkdgrav3\\\code{job_sim.pbs}};
 \node[st,right=of sim] (rs) {\textbf{rockstar}\\Rockstar (PKC)\\\code{job_rockstar.pbs}};
 \node[st,right=of rs] (ct) {\textbf{ctrees}\\consistent-trees\\\code{job_ctrees.pbs}};
 \node[st,right=of ct] (va) {\textbf{vahc}\\\code{run_addvalue.py}\\\code{job_vahc.pbs}};
-\node[st,right=of va] (fi) {\textbf{fits}\\\code{compress_halo_outputs}\\\code{job_fits.pbs}};
-\foreach \a/\b in {sim/rs,rs/ct,ct/va,va/fi} \draw[ar] (\a) -- node[above,font=\scriptsize]{afterok} (\b);
-\node[da,below=of sim] {snap.<step>.s<pct>.<w>.pkc\\snapnames.txt};
-\node[da,below=of rs] {out_<snap>.list\\halos_<snap>.*};
-\node[da,below=of ct] {out_<snap>.trees\\trees/, scales.txt};
-\node[da,below=of va] {out_<snap>.vahc\\out_<snap>.tens};
-\node[da,below=of fi] {compressed/*.fits.gz\\+ check log};
+\node[st,right=of va] (fi) {\textbf{fits}\\\code{compress_halo_}\\\code{outputs.py}\\\code{job_fits.pbs}};
+\foreach \a/\b in {sim/rs,rs/ct,ct/va,va/fi} \draw[ar] (\a) -- node[above,font=\tiny]{afterok} (\b);
+\node[da,below=of sim] {\code{snap.<step>.}\\\code{s<pct>.<w>.pkc}\\\code{snapnames.txt}};
+\node[da,below=of rs] {\code{out_<snap>.list}\\\code{halos_<snap>.*}};
+\node[da,below=of ct] {\code{out_<snap>.trees}\\\code{trees/}, \code{scales.txt}};
+\node[da,below=of va] {\code{out_<snap>.vahc}\\\code{out_<snap>.tens}};
+\node[da,below=of fi] {\code{compressed/*.fits.gz}\\+ check log};
 \draw[ar,dashed,black!50] (sim.north) to[bend left=18] node[above,font=\scriptsize]{particles (.pkc subsamples) read again} (va.north);
 \end{tikzpicture}
 \caption{The five stages, each a PBS job started only if the previous one succeeded (\code{afterok}). One bash
@@ -69,9 +70,9 @@ The stages and what each needs are listed in Table~\ref{tab:stages}. The scripts
 \code{docs/rockstar_pkc_reader_plan.md}. This report summarises both and adds the systematic tests and
 resource measurements.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering\footnotesize
-\begin{tabularx}{\textwidth}{@{}l l X X@{}}
+\begin{tabularx}{\textwidth}{@{}l >{\raggedright\arraybackslash}p{5.2cm} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X@{}}
 \toprule
 Stage & Code (version) & Reads & Writes \\
 \midrule
@@ -166,7 +167,7 @@ of $2.44$ km/s, about 10 bytes per particle. Figure~\ref{fig:quant} compares the
 $z=0$ with pkdgrav3's raw (single precision, uncompressed HDF5) output of the same step: the errors are uniform
 within half a step, as expected for rounding.
 
-\begin{figure}[h]\centering
+\begin{figure}[htbp]\centering
 \includegraphics[width=0.75\textwidth]{figures/quantization.pdf}
 \caption{Per-particle difference between \code{.pkc} and the raw HDF5 output ($512^3$, $z=0$, 1\% subsample),
 in units of the quantization step. Dotted: $\pm$ half a step.}
@@ -179,14 +180,14 @@ in units of the quantization step. Dotted: $\pm$ half a step.}
 Table~\ref{tab:bugs} lists the problems found while building and testing the pipeline. The first three affect
 data products that already exist or could not be made with the code in the repository.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering\footnotesize
 \begin{tabularx}{\textwidth}{@{}>{\raggedright}p{3.4cm} X >{\raggedright\arraybackslash}p{3.6cm}@{}}
 \toprule
 Where & Problem and effect & Fix \\
 \midrule
-\code{correlations.density_hessian_field} & Smoothed the caller's Fourier-space density in place. \code{add_value} computes the Hessian at 3 then 5\,$h^{-1}$Mpc, so \textbf{\code{lamH1/2/3_R5Mpch} in every existing \code{.vahc}} came from a field smoothed twice (3 and 5\,$h^{-1}$Mpc Gaussians); \code{.tens} computed after a \code{.vahc} in the same process were affected the same way. On the $128^3$ test the old values have 0.55--0.63 of the correct rms (Fig.~\ref{fig:vahc}); every other column is unchanged. & Work on a copy (as \code{tidal_tensor_field} already did). \\
-\code{correlations.halobyhalo_b1} & Raised ``Please specify number density nbar'' since commit \code{e77922b} (Feb 2026): \code{.vahc} could not be produced with the repository code. & \code{nbar=inf} (no shot-noise subtraction, as in the production code); output byte-identical to production. \\
+\code{correlations.}\newline\code{density_hessian_field} & Smoothed the caller's Fourier-space density in place. \code{add_value} computes the Hessian at 3 then 5\,$h^{-1}$Mpc, so \textbf{\code{lamH1/2/3_R5Mpch} in every existing \code{.vahc}} came from a field smoothed twice (3 and 5\,$h^{-1}$Mpc Gaussians); \code{.tens} computed after a \code{.vahc} in the same process were affected the same way. On the $128^3$ test the old values have 0.55--0.63 of the correct rms (Fig.~\ref{fig:vahc}); every other column is unchanged. & Work on a copy (as \code{tidal_tensor_field} already did). \\
+\code{correlations.}\newline\code{halobyhalo_b1} & Raised ``Please specify number density nbar'' since commit \code{e77922b} (Feb 2026): \code{.vahc} could not be produced with the repository code. & \code{nbar=inf} (no shot-noise subtraction, as in the production code); output byte-identical to production. \\
 \code{postprocess.py} (repository version) & Sorted halos by mass before \code{add_value}, so \code{.vahc} rows did not follow \code{.trees}; production (\code{sorthalos=False}) did not. & Keep file order; add \code{add_tens}; the FITS converter refuses misaligned files. \\
 \code{readers.read_block} & \code{down_to} was dead code after an early return: all particles were read and used; files not closed. & Downsampling restored; files closed. \\
 \code{cic_update.c} (production copy on pegasus) & Particle count passed as \code{int}: overflow above $2^{31}$ particles (production stayed below with \code{down_to=512}). & Repository version uses \code{long}. \\
@@ -201,7 +202,7 @@ Section 7, and \code{docs/rockstar_pkc_reader_plan.md}).}
 \label{tab:bugs}
 \end{table}
 
-\begin{figure}[h]\centering
+\begin{figure}[htbp]\centering
 \includegraphics[width=\textwidth]{figures/vahc_bug.pdf}
 \caption{Density-Hessian eigenvalues at $R=5\,h^{-1}$Mpc for the 4736 halos of the $128^3$/$200\,h^{-1}$Mpc test
 at $z=0$: previous code against the fixed code. The previous values are a strongly smoothed version of the correct
@@ -219,7 +220,7 @@ outputs at $z=3,2,1,0.5,0.25,0$), was written both as \code{.pkc} (default preci
 (same binary and settings, 8 readers and 8 writers, \code{FORCE_RES} $=1.95\,h^{-1}$kpc, \code{MIN_HALO_OUTPUT_SIZE} $=20$)
 was run on the inputs of Table~\ref{tab:routes}, all six outputs in one invocation (temporal halo finding on).
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering\footnotesize
 \begin{tabularx}{\textwidth}{@{}l X@{}}
 \toprule
@@ -243,7 +244,7 @@ more than 50\% is a host/subhalo assignment ``flip''; flips are counted but excl
 
 \subsection{Exactness of the reader}
 With one reader and the fixed seed, \code{pkc1} and \code{gad1} give byte-identical \code{out_0.list},
-\code{halos_<snap>.0.ascii} and \code{halos_<snap>.0.bin} (\EXACT). The native reader therefore hands Rockstar exactly
+\code{halos_<snap>.0.ascii} and \code{halos_<snap>.0.bin} (checked with \code{cmp} in validation jobs 2536453 and 2536496). The native reader therefore hands Rockstar exactly
 the particles, masses and header values that the Gadget route does. With 8 readers the catalogs of \code{pkc} and
 \code{gad} differ, but only as much as two \code{pkc} runs differ from each other (Fig.~\ref{fig:matched}): what
 remains is Rockstar's dependence on the order in which particles reach the writers.
@@ -266,30 +267,46 @@ noise); green: native reader vs the same particles in Gadget format.}
 \label{fig:matched}
 \end{figure}
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering\scriptsize\setlength{\tabcolsep}{3pt}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{@{}l r r r r r r r r r r@{}}
 \toprule
-$\log_{10}M_{\rm vir}$ & $N$ & $N/N_{\rm raw}-1$ [\%] & matched [\%] & flips [\%] & med $\Delta M/M$ & med $|\Delta M/M|$ & med $|\Delta V_{\max}/V_{\max}|$ & centre [kpc/$h$] & $|\Delta R_s/R_s|$ [\%], bias & $|\Delta\lambda/\lambda|$ [\%], bias \\
+\hd{$\log_{10}M_{\rm vir}$}{[\hMsun]} & $N$ & \hd{$N/N_{\rm raw}-1$}{[\%]} & \hd{matched}{[\%]} & \hd{flips}{[\%]} & \hd{med}{$\Delta M/M$} & \hd{med}{$|\Delta M/M|$} & \hd{med}{$|\Delta V_{\max}/V_{\max}|$} & \hd{centre}{[kpc/$h$]} & \hd{$|\Delta R_s/R_s|$}{[\%], bias} & \hd{$|\Delta\lambda/\lambda|$}{[\%], bias} \\
 \midrule
-\input{figures/tab_compression_z0.tex}
+\csname @@input\endcsname figures/tab_compression_z0.tex 
 \bottomrule
-\end{tabular}
+\end{tabular}}
 \caption{Compression effect at $z=0$ (\code{pkc} vs raw), in mass bins of $10^{10}$--$10^{11}$ (123--1230 particles)
 up to $>10^{13}$\,\hMsun; in brackets the same quantity for \code{pkc} vs \code{pkc2} (Rockstar noise) or, for
 $N/N_{\rm raw}-1$, the Poisson error. Medians over matched halos without flips. Generated by the notebook.}
 \label{tab:compression}
 \end{table}
 
-\COMPRESSIONTEXT
+Table~\ref{tab:compression} and Figs.~\ref{fig:mf}--\ref{fig:offsets} give the effect of the \code{.pkc}
+quantization. The halo counts agree with the raw-particle route to within the Poisson error in every mass bin and at
+every output, with no mass bias: the signed median $\Delta M/M$ is zero, because for most halos the same particles are
+bound in both routes. In absolute terms, $M_{\rm vir}$ and $V_{\max}$ change by $4$--$5\times10^{-3}$ (median) for
+$10^{10}$--$10^{11}$\,\hMsun\ (123--1230 particles), $\approx10^{-3}$ at $10^{11}$--$10^{12}$ and
+$\lesssim5\times10^{-4}$ above. Rockstar is deterministic for a given input (\code{pkc} vs \code{pkc2} medians are
+zero or $\sim10^{-4}$), so these differences are entirely due to the quantization, not to noise. Centres move by
+$0.6$--$0.9\,h^{-1}$kpc, i.e.\ by about the rms quantization error of one particle ($0.56\,h^{-1}$kpc) and well
+below the softening ($1.95\,h^{-1}$kpc). The scale radius $R_s$ and spin $\lambda$, which depend on the inner
+particles, are most affected: 5.5\% and 3.8\% median scatter below $10^{11}$\,\hMsun, with small biases ($R_s$
+$+0.4\%$, $\lambda$ $-0.3\%$), falling to $\sim1.7\%$ and $1.1\%$ at $10^{11}$--$10^{12}$ and $<0.4\%$ above
+$10^{12}$\,\hMsun. About 0.5\% of the lowest-mass halos have no counterpart within $10\,h^{-1}$kpc, and 1--5\% of the
+matched pairs are host/subhalo flips (against 0.2--2\% between two Rockstar runs). The differences grow mildly
+with redshift (Fig.~\ref{fig:zdep}) but stay at the same order of magnitude. For quantities other than $R_s$ and
+$\lambda$ of halos below $\sim300$ particles, the compression is negligible compared with Poisson noise in any
+statistic.
 
-\begin{figure}[h]\centering
+\begin{figure}[htbp]\centering
 \includegraphics[width=\textwidth]{figures/redshift_dependence.pdf}
 \caption{Median absolute difference vs redshift in four mass bins. Solid: \code{.pkc} vs raw; dotted: \code{pkc}
 vs \code{pkc2} (values of exactly zero are drawn at $10^{-6}$).}
 \label{fig:zdep}
 \end{figure}
-\begin{figure}[h]\centering
+\begin{figure}[htbp]\centering
 \includegraphics[width=0.8\textwidth]{figures/offsets.pdf}
 \caption{Distribution of centre offsets and bulk-velocity differences of matched halos with
 $M_{\rm vir}\geq10^{11}$\,\hMsun\ at $z=0$.}
@@ -297,10 +314,37 @@ $M_{\rm vir}\geq10^{11}$\,\hMsun\ at $z=0$.}
 \end{figure}
 
 \subsection{Halo finding on a 4\% subsample}
-\SUBSAMPLETEXT
+The \code{pkcsub} route runs Rockstar on the 1\% and 3\% subsamples together (4\% of the particles, particle
+mass $\times25$, so $10^{11}$\,\hMsun\ is $\approx49$ particles). It takes 105\,s and 0.84\,GB instead of
+$\approx800$\,s and 8.3\,GB (Table~\ref{tab:resources}). At $z=0$ (Fig.~\ref{fig:subsample}), 83\% of the
+subsample halos with $10^{11}$--$10^{11.5}$\,\hMsun\ have a counterpart in the full catalog, 92\% at
+$10^{11.5}$--$10^{12}$ and $\geq99.6\%$ above $10^{12}$\,\hMsun. Masses are biased high by 4\% at
+$10^{11}$--$10^{11.5}$ (median $|\Delta M/M|=10\%$), 1\% (5\%) at $10^{11.5}$--$10^{12}$ and $<1\%$ (3\%) above;
+$V_{\max}$ is biased high by 8\%, 3\% and 2\% respectively. Below $\sim100$ subsample particles
+($2\times10^{11}$\,\hMsun) the mass function is incomplete (Fig.~\ref{fig:mf}, red line). The subsample route is
+therefore useful as a quick look at halos above $\sim10^{12}$\,\hMsun\ ($\gtrsim500$ subsample particles), not as
+a replacement for the full catalog.
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\textwidth]{figures/subsample_z0.pdf}
+\caption{Rockstar on the 4\% subsample vs on all particles at $z=0$, matched by centre; as Fig.~\ref{fig:matched}
+(solid: median, dashed: mean absolute difference). Top axis: number of subsample particles.}
+\label{fig:subsample}
+\end{figure}
 
 \subsection{Merger trees}
-\CTREESTEXT
+consistent-trees was run on the six outputs of the \code{pkc} and \code{h5g} routes (job 2536496). At $z=0$
+the hlists contain 181\,621 hosts and 30\,753 subhalos for \code{pkc}, against 181\,707 and 30\,873 for the raw
+particles: $-0.05\%$ and $-0.4\%$, within the Poisson errors (0.2\% and 0.6\%). The host and subhalo mass functions
+agree in every bin within the Poisson error (Fig.~\ref{fig:ctrees}). The wall times (643 and 452\,s for identical
+work) reflect load on the shared \code{/storage} file system rather than the input.
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.45\textwidth]{figures/ctrees_z0.pdf}
+\caption{Host and subhalo mass functions of the consistent-trees hlists at $z=0$ for \code{.pkc} input and raw
+particles, and their ratio with Poisson bands.}
+\label{fig:ctrees}
+\end{figure}
 
 %======================================================================
 \section{Wall time and memory}
@@ -313,35 +357,61 @@ occupied) and the resident set size (RSS, shared pages counted in every process:
 the sampling interval can be missed. The monitor was checked on the login node against two processes allocating
 2\,GB and 1\,GB (measured 3.04\,GB PSS).
 
-\RESOURCETEXT
+Table~\ref{tab:resources} and Fig.~\ref{fig:resources} give the results; all runs used the pawna configurations of
+Section~\ref{sec:running} (\code{SIM_NCPU=64} for the $512^3$ simulation).
+\begin{itemize}
+\item \textbf{Simulation.} 25.1\,GB for $512^3$ on 64 cores (80\,min), 5.9\,GB for $128^3$. Memory is almost
+  constant during the run (Fig.~\ref{fig:resources}); 64 times the particles cost only 4.3 times the memory, so
+  at $128^3$ a fixed overhead dominates. The single-process
+  \code{maxrss} reported by \code{/usr/bin/time} agrees with the PSS sum.
+\item \textbf{Rockstar.} 8.0\,GB with 27 processes (8 readers, writers and the server) for the $512^3$ run of the
+  pipeline and 8.2--8.4\,GB for each full route of the validation; no single process exceeds 0.45\,GB, so the
+  memory is spread over the writers. The total is 1.9 times Rockstar's particle array ($512^3\times32$\,B =
+  4.3\,GB). The input route makes no difference: the native reader, the Gadget files and
+  the raw HDF5 data all need 8.2--8.4\,GB and 800--850\,s, while the Gadget routes need a conversion step on top
+  (388\,s, 10.0\,GB). One reader (\code{pkc1}, \code{gad1}) needs 6.5\,GB.
+\item \textbf{consistent-trees.} 0.8\,GB in the pipeline and 1.4\,GB in the validation job ; 8--11\,min.
+\item \textbf{\code{.vahc} (\code{run_addvalue}).} The most memory-hungry stage: 91.6\,GB at $512^3$ (61\,min),
+  2.3\,GB at $128^3$. The memory is set by the density grid, not by the particles: each process holds the
+  complex grids of the tensor calculation, about $12\times16\times$\code{PP_GRID}$^3$ bytes (25.8\,GB for
+  \code{PP_GRID=512}, measured largest process 25.5\,GB; 0.4\,GB for the $128^3$ run's grid of 128), and
+  \code{PP_NPROC} snapshots run at once (4 at $512^3$, so 70--90\,GB for the first 30\,min, then $\approx40$\,GB
+  for the last two of the six snapshots; Fig.~\ref{fig:resources}). For a $2048^3$ run with the production
+  settings (\code{PP_GRID=768}, \code{PP_DOWN_TO=512}) this predicts $\approx87$\,GB per process, so
+  \code{PP_NPROC} $\leq6$--7 on one 755\,GB node.
+\item \textbf{Fits.} 5.9\,GB at $512^3$, 0.1\,GB at $128^3$; minutes.
+\end{itemize}
+Extrapolating to Sahyadri's $2048^3$ (64 times the $512^3$ particle number), and keeping in mind that only two sizes
+were measured: the simulation needs at most $\sim1.6$\,TB in total if memory scaled with the particle number
+(spread over several nodes); Rockstar needs about twice its particle array, i.e.\ $\sim0.53$\,TB of a node's 755\,GB if that ratio holds,
+which should be checked with a $1024^3$ run; consistent-trees and
+the FITS stage are small; \code{run_addvalue} is bounded by \code{PP_GRID} and \code{PP_NPROC} as above.
 
-\begin{table}[h]
+\begin{table}[htbp]
 \centering\footnotesize
-\begin{minipage}[t]{0.52\textwidth}\centering
+
 \begin{tabular}{@{}l l r r r r@{}}
 \toprule
 Run & Stage & Wall [s] & PSS [GB] & RSS [GB] & proc. \\
 \midrule
-\input{figures/tab_stages.tex}
+\csname @@input\endcsname figures/tab_stages.tex 
 \bottomrule
 \end{tabular}
-\end{minipage}\hfill
-\begin{minipage}[t]{0.45\textwidth}\centering
+\hspace{6mm}
 \begin{tabular}{@{}l r r r r@{}}
 \toprule
 Step ($512^3$ validation) & Wall [s] & PSS [GB] & RSS [GB] & halos $z{=}0$ \\
 \midrule
-\input{figures/tab_routes.tex}
+\csname @@input\endcsname figures/tab_routes.tex 
 \bottomrule
 \end{tabular}
-\end{minipage}
 \caption{Left: pipeline stages for the $128^3$ and $512^3$ runs (both $200\,h^{-1}$Mpc). Right: Rockstar input routes
 and other steps of the $512^3$/$50\,h^{-1}$Mpc validation (6 outputs; \code{pkc1}/\code{gad1}: $z=0$ only).
 PSS and RSS are peaks of the sum over the job's processes; ``proc.'' is the number of processes at the PSS peak.}
 \label{tab:resources}
 \end{table}
 
-\begin{figure}[h]\centering
+\begin{figure}[htbp]\centering
 \includegraphics[width=0.8\textwidth]{figures/stages_resources.pdf}\\
 \includegraphics[width=\textwidth]{figures/memory_timeline.pdf}\\
 \includegraphics[width=0.8\textwidth]{figures/routes_resources.pdf}
@@ -353,8 +423,9 @@ input routes and other validation steps at $512^3$.}
 %======================================================================
 \section{Caveats and open questions}
 \begin{itemize}
-\item Nothing above $512^3$ has been run. Rockstar memory at $2048^3$ (64 times the particles) is extrapolated, not
-  measured; whether one pawna node (755\,GB) suffices must be tested at $1024^3$ first.
+\item Nothing above $512^3$ has been run. Rockstar memory at $2048^3$ (64 times the particles) is extrapolated
+  ($\approx0.53$\,TB from twice the particle array), not measured; whether one pawna node (755\,GB) suffices must
+  be tested at $1024^3$ first.
 \item Rockstar's particle mass constant ($\rho_{\rm crit}=2.77519737\times10^{11}$) differs from the one used by
   \code{pkc_to_gadget} and the PKC reader ($2.77536627\times10^{11}$) by $6\times10^{-5}$; Sahyadri should pick one.
 \item Rockstar treats radiation as curvature; consistent-trees' \code{clean_trees.pl} matches hlists by five
@@ -370,7 +441,7 @@ input routes and other validation steps at $512^3$.}
   files in \code{docs/report/data/}.
 \item \code{docs/report/make_figures.ipynb} makes every figure and the generated tables from those files only
   (\code{build_notebook.py} holds its source).
-\item Validation jobs: \code{scripts/rockstar/pkc_validation/} (\code{run_val512.pbs}, \code{rockstar_val.pbs},
+\item Validation jobs:\newline \code{scripts/rockstar/pkc_validation/} (\code{run_val512.pbs}, \code{rockstar_val.pbs},
   \code{compare_*.py}); pipeline runs: \code{scripts/pkdgrav3_pipeline/} with the configurations given in the text.
 \end{itemize}
 

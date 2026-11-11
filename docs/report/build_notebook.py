@@ -253,10 +253,10 @@ for j, st_ in enumerate(order):
 fig.savefig('figures/memory_timeline.pdf')
 
 rr = R[R.route.isin(['pkc', 'pkc2', 'gad', 'h5g', 'pkcsub', 'pkc1', 'gad1', 'convert', 'ctrees_pkc', 'ctrees_h5g'])]
-fig, ax = plt.subplots(1, 2, figsize=(8, 2.6))
+fig, ax = plt.subplots(1, 2, figsize=(8, 2.6), sharey=True)
 ax[0].barh(rr.route, rr.wall_s, color='C0'); ax[0].set_xlabel('wall time [s] (6 outputs; pkc1/gad1: z = 0 only)')
 ax[1].barh(rr.route, rr.pss_gb, color='C3', label='PSS'); ax[1].barh(rr.route, rr.rss_gb, fill=False, edgecolor='k', lw=0.6, label='RSS sum')
-ax[1].set_xlabel('peak memory [GB]'); ax[1].legend(fontsize=7); ax[1].invert_yaxis(); ax[0].invert_yaxis()
+ax[1].set_xlabel('peak memory [GB]'); ax[1].legend(fontsize=7); ax[0].invert_yaxis(); ax[1].tick_params(labelleft=False)
 fig.savefig('figures/routes_resources.pdf')
 """)
 
