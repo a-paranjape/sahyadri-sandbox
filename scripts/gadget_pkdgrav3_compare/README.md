@@ -118,6 +118,38 @@ change the forces.
 (<= 15 halos) and consistent-trees then fails (`find_parents_and_cleanup`). `CT_MIN_LIST_BYTES` in the config makes
 `job_ctrees.pbs` use a patched copy (here 1000 B: skip only catalogues without halos).
 
+consistent-trees still fails at 32^3/200 Mpc/h (<= 15 halos per output): `gravitational_consistency` builds its
+link tolerances from the halo-to-halo scatter per mass bin and stops with "too few halos at scale factor ... to
+calculate consistency metric". This is a limit of consistent-trees, not of the setup (the 128^3/200 pipeline test with
+5205 halos ran). `compare_potential.py` and `job_compare.pbs` then use Rockstar's `out_<snap>.list` (all halos, no
+host/subhalo flag).
+
+## Results: 32^3, 200 Mpc/h, z = 49 -> 0 (pawna jobs 2536518-2536524, 2026-11-11)
+
+Gadget-4 run 74 s on 16 ranks; pkdgrav3 101 outputs (2020 steps) on 16 threads; Rockstar 13 (Gadget-4) and 8
+(pkdgrav3) halos at z = 0. Comparison (`compare_potential.py`, all 101 outputs; run on the Mac on copies of the
+pawna outputs, results in `data/compare/pkd32_vs_gadget32_r1/` on pawna):
+
+| z | corr | slope | rms(pkd - Gadget) / rms(phi) | FFT(pkd pos) - FFT(Gadget pos), same units | median / 90% \|dx\| (Mpc/h) | zero-point offset (km/s)^2 |
+|---|---|---|---|---|---|---|
+| 12.0 | 0.9997 | 1.001 | 0.026 | 0.082 | 0.016 / 0.029 | +1.4e3 |
+| 2.8 | 0.9997 | 0.998 | 0.023 | 0.103 | 0.10 / 0.17 | +4.7e2 |
+| 0.86 | 0.993 | 0.995 | 0.117 | 0.124 | 0.22 / 0.40 | +1.1e2 |
+| 0 | 0.969 | 0.988 | 0.253 | 0.220 | 0.38 / 0.89 | -2.0e3 |
+
+(rms phi of Gadget-4: 7.5e5 at z = 12, 8.6e5 (km/s)^2 at z = 0; pkdgrav3 self-term removed: -1.9e7 at z = 12,
+-1.4e6 at z = 0.)
+- The zero points agree once pkdgrav3's self-term is removed: the remaining offset is <= 2e3 (km/s)^2, 0.2% of
+  rms phi. The Madelung-like constant seen on the synthetic lattice is not visible here.
+- The two potentials agree to 2-3% rms while the particles are close (z >= 2); later the difference grows with the
+  particle separation (the trajectories diverge: different integrators and softening), and the FFT potential of each
+  code's own positions differs by almost the same amount (22% vs 25% at z = 0). The solvers agree much better than
+  the positions do.
+- Halo profiles at z = 0 (9 Gadget-4 halos with 4e14-1e15 Msun/h): pkdgrav3's potential around the same (Gadget)
+  centres agrees within ~5% from 0.2 to 15 Rvir and is ~30% deeper inside 0.2 Rvir, as expected from its smaller
+  effective softening (Newtonian beyond 1.0 instead of 2.8 eps_Gadget). pkdgrav3's own halos are a different
+  (smaller) set; with 2-9 halos per bin the halo statistics are only indicative at 32^3.
+
 ## Tests so far
 
 - Mac, synthetic 16^3 Gadget-4-style IC (shuffled IDs 1..N): converter + `make_pkdgrav3_par.py` (`IC_FILE`) +
