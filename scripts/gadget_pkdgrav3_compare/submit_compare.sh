@@ -1,10 +1,11 @@
 #!/bin/bash
 # Submit the whole Gadget-4 vs pkdgrav3 comparison as a chain of PBS jobs:
 #   gadget (CLASS, NGenIC ICs, IC conversion, Gadget-4 run)
-#     -> pkdgrav3 from the same ICs: sim -> rockstar -> ctrees      (pkdgrav3_pipeline, compare32.conf)
-#     -> Gadget-4 halos:             rockstar -> ctrees             (pkdgrav3_pipeline, compare32_gadget.conf)
-#   -> compare (after both ctrees jobs)
-# usage: submit_compare.sh <compare32.conf> [--dry-run] [--hold]
+#     -> pkdgrav3 from the same ICs: sim -> rockstar -> ctrees [-> vahc]   (pkdgrav3_pipeline, <name>.conf)
+#     -> Gadget-4 halos:             rockstar -> ctrees [-> vahc]          (pkdgrav3_pipeline, <name>_gadget.conf)
+#   -> compare (after the last stage of both)
+#   stages: CMP_PKD_STAGES / CMP_G4_STAGES in the config (default sim,rockstar,ctrees / rockstar,ctrees)
+# usage: submit_compare.sh <compare32.conf|compare256.conf> [--dry-run] [--hold]
 #   the Gadget-4 config is <dir of conf>/<name>_gadget.conf
 set -eu
 [ $# -ge 1 ] || { sed -n '2,9p' "$0"; exit 1; }
@@ -28,15 +29,16 @@ G=$(run "$QSUB" -N g4_$REAL -q workq -l select=1:ncpus=$G4_NCPU:mpiprocs=$G4_NCP
       "$HERE/job_gadget.pbs")
 echo "gadget $G" | tee -a "$CHAIN"
 D=; [ -n "$DRY" ] && D=--dry-run
-P=$("$PIPE/submit_pipeline.sh" "$CONF" --stages sim,rockstar,ctrees --after "$G" $D 2>&1 | tee -a "$CHAIN")
+PS=${CMP_PKD_STAGES:-sim,rockstar,ctrees}; GS=${CMP_G4_STAGES:-rockstar,ctrees}
+P=$("$PIPE/submit_pipeline.sh" "$CONF" --stages $PS --after "$G" $D 2>&1 | tee -a "$CHAIN")
 echo "$P"
-H=$("$PIPE/submit_pipeline.sh" "$GCONF" --stages rockstar,ctrees --after "$G" $D 2>&1 | tee -a "$CHAIN")
+H=$("$PIPE/submit_pipeline.sh" "$GCONF" --stages $GS --after "$G" $D 2>&1 | tee -a "$CHAIN")
 echo "$H"
 if [ -n "$DRY" ]; then
-  echo "$QSUB -N cmp_$REAL ... -W depend=afterok:<ctrees pkdgrav3>:<ctrees gadget> $HERE/job_compare.pbs"; exit 0
+  echo "$QSUB -N cmp_$REAL ... -W depend=afterok:<${PS##*,} pkdgrav3>:<${GS##*,} gadget> $HERE/job_compare.pbs"; exit 0
 fi
-C1=$(echo "$P" | awk '$1=="ctrees"{print $2}'); C2=$(echo "$H" | awk '$1=="ctrees"{print $2}')
-[ -n "$C1" ] && [ -n "$C2" ] || { echo "could not find the ctrees job ids"; exit 1; }
+C1=$(echo "$P" | awk -v s="${PS##*,}" '$1==s{print $2}'); C2=$(echo "$H" | awk -v s="${GS##*,}" '$1==s{print $2}')
+[ -n "$C1" ] && [ -n "$C2" ] || { echo "could not find the ${PS##*,} / ${GS##*,} job ids"; exit 1; }
 C=$("$QSUB" -N cmp_$REAL -q workq -l select=1:ncpus=$CMP_NCPU:mem=$CMP_MEM -l walltime=$CMP_WALL -j oe \
       -o "$LOGS/pbs.compare.$RUN.out" -W depend=afterok:$C1:$C2 \
       -v "CONF=$CONF,PIPE_ENV=$PIPE/pipeline_env.sh,STAGE=compare" "$HERE/job_compare.pbs")

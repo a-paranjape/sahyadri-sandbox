@@ -21,6 +21,9 @@ Conventions (all potentials in peculiar, physical (km/s)^2):
   no force. particles.csv reports it (offset_median of phi_pkd_corr - phi_gadget); the halo values and snap_*.npz use
   pkdgrav3 potentials aligned by it (phi_pkd_corr - offset_median).
   Particles are matched by ID: Gadget ID - 1 = pkdgrav3 iOrder (gadget4_ic_to_gadget2.py).
+  Velocities, peculiar km/s: Gadget-4 Velocities * sqrt(a) (a_scaling 0.5); pkdgrav3 Velocities * U * a.
+  particles.csv: dr_* = |x_pkd - x_gadget| (Mpc/h), dv_* = |v_pkd - v_gadget| (km/s), v_corr (all components),
+  v_slope (least squares v_pkd = s v_gadget), v_rms_* = sqrt(<|v|^2>).
   Independent reference: periodic FFT Poisson solution of each snapshot's own particles (CIC on --grid^3,
   deconvolved), lap phi = 1.5 Om H0^2 delta / a, mean 0, interpolated (CIC) to the particles.
 Halos: host halos (pid = -1) of each code's out_<snap>.trees with >= --min-np particles within Rvir. For each halo,
@@ -67,10 +70,12 @@ def read_gadget(path):
         g = f['PartType1']
         ids = g['ParticleIDs'][:].astype(np.int64)
         pos = g['Coordinates'][:].astype(np.float64)
+        vel = g['Velocities'][:].astype(np.float32)
         pot = g['Potential'][:].astype(np.float64)
     o = np.empty(len(ids), np.int64)
     o[ids - 1] = np.arange(len(ids))                  # row of ID k+1 -> index k
-    return a, L, wrap(pos[o], L), pot[o] / a
+    # Velocities attribute a_scaling = 0.5: peculiar velocity (km/s) = Velocities * sqrt(a)
+    return a, L, wrap(pos[o], L), pot[o] / a, vel[o] * np.float32(math.sqrt(a))
 
 
 def read_pkd(path, L):
@@ -80,8 +85,10 @@ def read_pkd(path, L):
         g = f['PartType1']
         pos = (g['Coordinates'][:].astype(np.float64) + 0.5) * L      # ordered: row = iOrder
         pot = g['Potential'][:].astype(np.float64)
+        vel = g['Velocities'][:].astype(np.float32)
     U = H0 * L / math.sqrt(8 * math.pi / 3)
-    return a, wrap(pos, L), pot * U**2 / a, U
+    # code velocity -> peculiar km/s: v * U * a (checked against Gadget-4 at z = 4.9, 32^3: slope 1.0015, r 0.998)
+    return a, wrap(pos, L), pot * U**2 / a, U, vel * np.float32(U * a)
 
 
 def pkc_check(prefix, phi_hdf5):
@@ -108,25 +115,30 @@ def fft_potential(pos, n, L, a, Om):
     """Peculiar potential (km/s)^2 at the particles from a CIC density on n^3 (deconvolved twice: assignment and
     interpolation), lap phi = 1.5 Om H0^2 delta / a, k = 0 mode zero."""
     i0, f = cic_weights(pos, n, L)
-    rho = np.zeros((n, n, n))
+    rho = np.zeros(n**3)
     for dx in (0, 1):
         wx = f[:, 0] if dx else 1 - f[:, 0]
         for dy in (0, 1):
             wy = f[:, 1] if dy else 1 - f[:, 1]
             for dz in (0, 1):
                 wz = f[:, 2] if dz else 1 - f[:, 2]
-                np.add.at(rho, ((i0[:, 0] + dx) % n, (i0[:, 1] + dy) % n, (i0[:, 2] + dz) % n), wx * wy * wz)
+                cell = (((i0[:, 0] + dx) % n) * n + (i0[:, 1] + dy) % n) * n + (i0[:, 2] + dz) % n
+                rho += np.bincount(cell, weights=wx * wy * wz, minlength=n**3)
+    rho = rho.reshape(n, n, n)
     delta = rho / rho.mean() - 1
+    del rho
     dk = np.fft.rfftn(delta)
+    del delta
     k1 = 2 * np.pi * np.fft.fftfreq(n, d=L / n)
     kz = 2 * np.pi * np.fft.rfftfreq(n, d=L / n)
-    kx, ky, kzz = np.meshgrid(k1, k1, kz, indexing='ij')
+    kx, ky, kzz = k1[:, None, None], k1[None, :, None], kz[None, None, :]
     k2 = kx**2 + ky**2 + kzz**2
     w = (np.sinc(kx * L / n / (2 * np.pi)) * np.sinc(ky * L / n / (2 * np.pi)) * np.sinc(kzz * L / n / (2 * np.pi)))**2
     with np.errstate(divide='ignore', invalid='ignore'):
-        pk = -1.5 * Om * H0**2 / a * dk / k2 / w**2
-    pk[0, 0, 0] = 0
-    phi = np.fft.irfftn(pk, s=(n, n, n))
+        dk *= -1.5 * Om * H0**2 / a / k2 / w**2
+    dk[0, 0, 0] = 0
+    del k2, w
+    phi = np.fft.irfftn(dk, s=(n, n, n))
     out = np.zeros(len(pos))
     for dx in (0, 1):
         wx = f[:, 0] if dx else 1 - f[:, 0]
@@ -177,8 +189,9 @@ def halo_props(h, pos, phi, tree, L, mp, min_np):
     rv = h['rvir'][host] / 1e3                       # kpc/h -> Mpc/h comoving
     out = dict(id=h['id'][host], mvir=h['mvir'][host], rvir=rv, c=c, n=[], phimin=[], phimean=[], phicore=[],
                members=[])
-    for ci, r in zip(c, rv):
-        m = np.array(tree.query_ball_point(ci, r), dtype=np.int64)
+    allm = tree.query_ball_point(c, rv, workers=-1) if len(rv) else []
+    for m in allm:
+        m = np.array(m, dtype=np.int64)
         out['members'].append(m)
         out['n'].append(len(m))
         if len(m):
@@ -215,9 +228,10 @@ def main():
     for k in ('gadget_dir', 'pkd_dir', 'gadget_halo_dir', 'pkd_halo_dir', 'out_dir'):
         ap.add_argument(k)
     ap.add_argument('--plot-z', default='3,1,0.5,0')
-    ap.add_argument('--grid', type=int, default=0, help='FFT grid (default 4 x the particle grid)')
+    ap.add_argument('--grid', type=int, default=0, help='FFT grid (default 4 x the particle grid, at most 512)')
     ap.add_argument('--min-np', type=int, default=20)
     ap.add_argument('--snaps', default='', help='comma list of output numbers (default: all)')
+    ap.add_argument('--every', type=int, default=1, help='every n-th output (plus the --plot-z ones and the last)')
     A = ap.parse_args()
     os.makedirs(A.out_dir, exist_ok=True)
     gn = [l.strip() for l in open(os.path.join(A.gadget_dir, 'snapnames.txt')) if l.strip()]
@@ -231,15 +245,17 @@ def main():
         with h5py.File(os.path.join(A.gadget_dir, 'snapshot_%s.hdf5' % gn[i]), 'r') as f:
             zs.append(max(0.0, 1 / float(f['Header'].attrs['Time']) - 1))
     plot_snaps = sorted({snaps[int(np.argmin([abs(z - zp) for z in zs]))] for zp in map(float, A.plot_z.split(','))})
+    if A.every > 1:
+        snaps = sorted(set(snaps[::A.every]) | set(plot_snaps) | {snaps[-1]})
 
     prow, hrow = [], []
     for i in snaps:
-        ag, L, xg, phig = read_gadget(os.path.join(A.gadget_dir, 'snapshot_%s.hdf5' % gn[i]))
-        ap_, xp, phip, U = read_pkd(os.path.join(A.pkd_dir, 'snap.%s' % pn[i]), L)
+        ag, L, xg, phig, vg = read_gadget(os.path.join(A.gadget_dir, 'snapshot_%s.hdf5' % gn[i]))
+        ap_, xp, phip, U, vp = read_pkd(os.path.join(A.pkd_dir, 'snap.%s' % pn[i]), L)
         N = len(phig)
         assert len(phip) == N
         npart = round(N ** (1 / 3))
-        grid = A.grid or 4 * npart
+        grid = A.grid or min(4 * npart, 512)
         mcode, eps = Om / N, par['dSoft']
         selfpot = -(105.0 / 64.0) * mcode / eps * U**2 / ap_
         phipc = phip - selfpot
@@ -247,6 +263,18 @@ def main():
         dx = xp - xg
         dx -= L * np.round(dx / L)
         dr = np.sqrt((dx**2).sum(1))
+        del dx
+        dvv = vp - vg
+        dv = np.sqrt((dvv.astype(np.float64)**2).sum(1))
+        vrms_g = float(np.sqrt((vg.astype(np.float64)**2).sum(1).mean()))
+        vrms_p = float(np.sqrt((vp.astype(np.float64)**2).sum(1).mean()))
+        vcorr = float(np.corrcoef(vg.ravel(), vp.ravel())[0, 1])
+        vstat = dict(v_rms_gadget=vrms_g, v_rms_pkd=vrms_p, v_corr=vcorr, dv_rms=float(np.sqrt((dv**2).mean())),
+                     dv_median=float(np.median(dv)), dv_p90=float(np.percentile(dv, 90)),
+                     v_slope=float((vg.astype(np.float64) * vp).sum() / (vg.astype(np.float64)**2).sum()),
+                     dx_rms_comp=float(np.sqrt((dr**2).mean() / 3)), dv_rms_comp=float(np.sqrt((dv**2).mean() / 3)),
+                     dv_mean_x=float(dvv[:, 0].mean()), dv_mean_y=float(dvv[:, 1].mean()), dv_mean_z=float(dvv[:, 2].mean()))
+        del dvv
         d = phipc - phig
         s, c, r, rms = fit(phig, phipc)
         fg = fft_potential(xg, grid, L, ag, Om)
@@ -265,7 +293,7 @@ def main():
                    dr_median=float(np.median(dr)), dr_p90=float(np.percentile(dr, 90)), dr_max=float(dr.max()),
                    fft_grid=grid, gadget_vs_fft_slope=sg, gadget_vs_fft_corr=rg, gadget_vs_fft_rms=rmsg,
                    pkd_vs_fft_slope=sp, pkd_vs_fft_corr=rp, pkd_vs_fft_rms=rmsp, fft_pkd_vs_fft_gadget_rms=rmsf,
-                   pkc_max_err=pkc_err, pkc_step=pkc_step)
+                   pkc_max_err=pkc_err, pkc_step=pkc_step, **vstat)
         prow.append(row)
 
         # halos
@@ -292,13 +320,14 @@ def main():
                                  phimin_pkd_of_gadget_members=float(phipa[mg].min()), pkd_offset=off))
             row.update(n_halos_gadget=len(hg['id']), n_halos_pkd=len(hp['id']), n_halos_matched=nm,
                        halo_catalogue=os.path.basename(fg_))
-        print('out %3d z %7.4f  offset %+.4g (self %+.4g)  slope %.5f corr %.6f rms %.4g  dr_med %.3g  halos %s'
-              % (i, row['z'], row['offset_median'], selfpot, s, r, rms, row['dr_median'],
+        print('out %3d z %7.4f  offset %+.4g (self %+.4g)  slope %.5f corr %.6f rms %.4g  dr_med %.3g  dv_med %.3g  '
+              'halos %s' % (i, row['z'], row['offset_median'], selfpot, s, r, rms, row['dr_median'], row['dv_median'],
                  '%d/%d matched %d' % (len(hg['id']), len(hp['id']), nm) if hg else '-'), flush=True)
         if i in plot_snaps:
             sel = np.random.default_rng(0).choice(N, min(N, 200000), replace=False)
             np.savez_compressed(os.path.join(A.out_dir, 'snap_%03d.npz' % i), z=row['z'], L=L,
                                 phig=phig[sel], phip=phipa[sel], offset=off, fftg=fg[sel], fftp=fp[sel], dr=dr[sel],
+                                dv=dv[sel], vg=vg[sel], vp=vp[sel],
                                 xg=xg[sel].astype(np.float32), selfpot=selfpot)
 
     def write_csv(rows, path):

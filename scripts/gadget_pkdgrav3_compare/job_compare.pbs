@@ -1,9 +1,10 @@
 #!/bin/bash -l
 # Potential comparison after both runs and their halo stages:
 #   1. compare_potential.py: particle by particle and matched halos, every output
-#   2. halo_potential_profile.py: stacked potential profiles around halos at the outputs closest to PROF_Z,
-#      Gadget-4 and pkdgrav3 (HDF5 and .pkc), each with its own consistent-trees halos; pkdgrav3 without its
-#      self-term and aligned by offset_median of particles.csv (the zero-point difference of the two codes)
+#   2. halo_potential_profile.py: stacked potential profiles (comoving Mpc/h, mass bins; stacks only) around halos
+#      at the outputs closest to PROF_Z, Gadget-4 and pkdgrav3 (HDF5 and .pkc), each with its own consistent-trees
+#      halos; pkdgrav3 without its self-term and aligned by offset_median of particles.csv (zero-point difference)
+#   3. compare_halos.py: mass functions, matched halos, VAHC quantities, at the outputs of particles.csv
 # qsub -v CONF=<compare32.conf>,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh,STAGE=compare
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
@@ -44,3 +45,11 @@ print(x['out'], x['offset_median'])")
     { stamp "profiles failed for out $i"; tail "$PLOG"; exit 1; }
   stamp "profiles out $i ($(basename $HG), z target $zt, offset $off): $(grep 'halos per mass bin' "$PLOG" | tail -3 | tr '\n' ' ')"
 done
+
+OUTS=$("$PY" -c "
+import csv
+print(','.join(r['out'] for r in csv.DictReader(open('$CMP_DIR/particles.csv'))))")
+"$PY" "$S/compare_halos.py" "$GH" "$HALO_DIR" "$CMP_DIR/halos" --outs "$OUTS" --box "$LBOX" \
+  > "$CMP_DIR/halos.log" 2>&1 || { stamp "compare_halos.py failed"; tail "$CMP_DIR/halos.log"; exit 1; }
+tail -3 "$CMP_DIR/halos.log"
+stamp "compare done: $CMP_DIR"
