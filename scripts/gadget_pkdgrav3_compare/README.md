@@ -52,7 +52,8 @@ Note the softening: the production rule makes pkdgrav3's kernel Newtonian beyond
 ```bash
 ROOT=/storage/$USER/pkdgrav3_io/potcmp
 S=$ROOT/sahyadri-sandbox/scripts/gadget_pkdgrav3_compare
-bash $S/setup_gadget4_pawna.sh /user/$USER/Projects/code/Gadget-4/gadget4 $ROOT/g4home 32   # login node, minutes
+# login node, a few minutes; run as a child of a login shell (Intel MPI env; `bash -l script args` loses the args)
+bash -lc "bash $S/setup_gadget4_pawna.sh /user/$USER/Projects/code/Gadget-4/gadget4 $ROOT/g4home 32"
 $S/submit_compare.sh $S/compare32.conf --dry-run
 $S/submit_compare.sh $S/compare32.conf
 # results: $ROOT/data/compare/pkd32_vs_gadget32_r1/{particles.csv,halos.csv,summary.json,snap_*.npz}

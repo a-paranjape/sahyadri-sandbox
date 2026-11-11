@@ -1,11 +1,11 @@
-#!/bin/bash -l
+#!/bin/bash
 # Build the two Gadget-4 executables of the Sahyadri workflow for one particle number, in the directory layout that
 # scripts/gadget/run_gadget.sh expects:
 #   <G4HOME>/code/Gadget-4/mesh<2N>-NGenIC/Gadget4   creates the ICs (RestartFlag 6)
 #   <G4HOME>/code/Gadget-4/mesh<2N>/Gadget4          runs from the IC file
 # (run_gadget.sh names the directory after NMESH = 2 * NPART = PMGRID.)
 #
-# usage: setup_gadget4_pawna.sh <gadget4 source (git clone)> <G4HOME> <NPART>
+# usage: bash -lc "bash setup_gadget4_pawna.sh <gadget4 source (git clone)> <G4HOME> <NPART>"   (login environment)
 # The source is copied to <G4HOME>/code/Gadget-4/gadget4 first, so nothing is written into it.
 # Toolchain: the pawna login environment (Intel oneAPI MPI mpicxx around GCC, /apps/{gsl,fftw3,hdf5}), SYSTYPE
 # "pawna" as in the existing Sahyadri builds.
@@ -22,6 +22,10 @@ echo "Gadget-4 source: $(git log -1 --format='%h %ad %s' --date=short 2>/dev/nul
 echo 'SYSTYPE="pawna"' > Makefile.systype
 export LD_LIBRARY_PATH=/apps/gsl/lib:/apps/hdf5/lib:/apps/fftw3/lib:${LD_LIBRARY_PATH:-}
 echo "mpicxx: $(command -v mpicxx)"
+# Gadget-4's Makefile runs `python buildsystem/config.py`; pawna has only python3
+if ! command -v python > /dev/null; then
+  mkdir -p "$D/bin"; ln -sf "$(command -v python3)" "$D/bin/python"; export PATH=$D/bin:$PATH
+fi
 for kind in NGenIC run; do
   if [ $kind = NGenIC ]; then B=$D/mesh$((2*N))-NGenIC; else B=$D/mesh$((2*N)); fi
   mkdir -p "$B"
