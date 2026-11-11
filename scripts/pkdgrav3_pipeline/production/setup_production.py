@@ -24,8 +24,10 @@ Simulation settings:
                (1 - 1/13)/2000), i.e. round(delta a / STEP_DA) steps between outputs; ~2120 in total
   outputs      the scale factors in sahyadri_outputs_a.txt (101, z = 11.98 ... 0; the last is z = 0 exactly)
   potential    stored (dCompPotStep = 100 (km/s)^2) in every snapshot at z <= 0.5
-  checkpoints  every CHECK_INTERVAL steps to r<R>/checkpoints; pkdgrav3 stops cleanly 1 h before the PBS wall
-               time (iWallRunTime); continue with `submit.sh restart`
+  checkpoints  every CHECK_INTERVAL steps to r<R>/checkpoints (newest 2 kept); pkdgrav3 stops cleanly 1-4 h before
+               the PBS wall time (iWallRunTime); continue with `submit.sh restart`
+  I/O          staged (pkdgrav3 tools/staging/run_staged.pbs): snapshots and checkpoints go to the node's local SSD
+               and are copied to NFS while the simulation runs (SIM_STAGING=1 in run.conf)
 
 usage: setup_production.py [--root DIR] [--L 200] [--N 1024] [--cosmo default] [--real 1|1,2|1-5]
                            [--codes DIR] [--pkd-io-root DIR] [--step-da 4.6154e-4] [--check-interval 250] [--force]
@@ -192,6 +194,9 @@ def main():
     k, T, s8_start, s8 = ic_spectrum(c)
     res = resources(N)
     wall_h = int(res['SIM'][2].split(':')[0])
+    # pkdgrav3 stops this long before the PBS wall time: the staging drain must still copy the last checkpoint
+    # (48 B/particle; ~52 GB at 1024^3, ~35 min at the ~25 MB/s of /storage) and snapshot to NFS
+    margin = 60 if N <= 512 else (120 if N <= 1024 else 240)
     now = datetime.datetime.now().isoformat(timespec='seconds')
 
     cdir = os.path.join(a.root, 'sims', sim, cname)
@@ -230,7 +235,9 @@ def main():
             '# pkdgrav3 parameter file of the Sahyadri run %s (seed %d), written by setup_production.py %s' % (name, seed, now),
             'from accuracy import classic_theta_switch, classic_replicas_switch',
             'achOutName      = "snap"',
-            'achIoPath       = "compressed/{name}.{step:05d}{type}"     # snapshots (.pkc) in compressed/',
+            '# snapshots (.pkc) in compressed/, checkpoints in checkpoints/. With SIM_STAGING=1 (run.conf) the job',
+            '# overrides both with the node-local staging directory; the drain copies the files to these directories.',
+            'achIoPath       = "compressed/{name}.{step:05d}{type}"',
             'achCheckpointPath = "checkpoints/{name}.{step:05d}{type}"',
             '',
             '# initial conditions: 2LPT at z = %g with the CLASS P(k) of %s at that redshift' % (zstart, c['file']),
@@ -265,7 +272,7 @@ def main():
             'dRedTo          = [%s]' % ', '.join('%.10g' % z for z in z_out),
             'iOutInterval    = 1000000      # outputs only at the dRedTo boundaries',
             'iCheckInterval  = %d' % a.check_interval,
-            'iWallRunTime    = %d         # minutes: PBS wall time %d h minus 1 h' % (wall_h * 60 - 60, wall_h),
+            'iWallRunTime    = %d         # minutes: PBS wall time %d h minus %d min for the last copies' % (wall_h * 60 - margin, wall_h, margin),
             '',
             '# memory layout: ordered, particle ID = Lagrangian lattice index (no bMemParticleID)',
             'bMemUnordered   = False',
@@ -336,7 +343,9 @@ OUT_Z="%(nout)d outputs, see output_steps.txt"    # informational; the outputs a
 SUBSAMPLES="%(sub)s"
 
 # resources (one pawna node: 192 cores, 755 GB; workq maximum wall time 168 h)
-SIM_NCPU=%(sim_n)d;  SIM_MEM=%(sim_m)s;  SIM_WALL=%(sim_w)s    # iWallRunTime in p.par = SIM_WALL - 1 h
+SIM_NCPU=%(sim_n)d;  SIM_MEM=%(sim_m)s;  SIM_WALL=%(sim_w)s    # iWallRunTime in p.par = SIM_WALL - %(margin)d min
+SIM_STAGING=1           # snapshots and checkpoints written to the node's SSD, copied to NFS during the run
+SIM_KEEPCHK=2           # keep the newest 2 complete checkpoints in checkpoints/ (0 = all)
 RS_NCPU=%(rs_n)d;    RS_MEM=%(rs_m)s;   RS_WALL=%(rs_w)s
 CT_NCPU=%(ct_n)d;    CT_MEM=%(ct_m)s;   CT_WALL=%(ct_w)s
 PP_NCPU=%(pp_n)d;    PP_MEM=%(pp_m)s;   PP_WALL=%(pp_w)s
@@ -365,7 +374,7 @@ FITS_DELETE_ASCII=0     # 1: delete the ASCII catalogs after verified FITS (chec
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
            sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2],
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
-           fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
+           margin=margin, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
            rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'])
         write(os.path.join(sdir, 'run.conf'), conf, a.force)
         sub = '''#!/bin/bash
@@ -409,8 +418,8 @@ then submit with   <sim dir>/submit.sh dry   and   <sim dir>/submit.sh''' % cdir
     if N > 512:
         print('NOTE: N = %d > 512: runs above 512^3 need approval before submission.' % N)
     if N >= 2048:
-        print('NOTE: 2048^3 needs ~750 GB on one node and staged I/O (pkdgrav3 tools/staging/run_staged.pbs); '
-              'job_sim.pbs writes straight to /storage.')
+        print('NOTE: 2048^3 needs ~750 GB on one node (peak RSS 747 GiB measured) and ~8-10 days: raise SIM_WALL '
+              'beyond the 168 h workq limit or plan restarts (submit.sh restart).')
 
 
 if __name__ == '__main__':

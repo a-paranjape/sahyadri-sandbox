@@ -410,11 +410,19 @@ What `p.par` contains:
 | Steps | top-level steps of Δa ≈ 4.6e-4 (= that run's 10 steps per Δa = 0.0046), i.e. 124 steps to the first output, then ~20 per output: 2126 in total | |
 | Outputs | the 101 scale factors of `production/sahyadri_outputs_a.txt` (z = 11.98 … 0, the last exactly z = 0) | |
 | Snapshots | `.pkc` with subsamples 1,3,5,9,10,12,15,20,25 %, in `compressed/`; potential (step 100 (km/s)^2) in every snapshot at z ≤ 0.5 (`dCompPotMaxRedshift = 0.5`: the 37 outputs from a = 0.667) | |
-| Checkpoints | every 250 steps in `checkpoints/`; `iWallRunTime` = PBS wall time − 1 h, so pkdgrav3 writes a checkpoint and stops cleanly before the wall time | |
+| Checkpoints | every 250 steps in `checkpoints/` (newest 2 kept, `SIM_KEEPCHK`); `iWallRunTime` = PBS wall time − 1 h (− 2 h at 1024^3, − 4 h at 2048^3), so pkdgrav3 writes a checkpoint and stops cleanly and the last files can still be copied | |
+| I/O | staged (`SIM_STAGING=1` in `run.conf`): pkdgrav3 writes snapshots and checkpoints to the node's local SSD (`/var/tmp/$USER_stage_<run>`), and pkdgrav3's `pkd_drain.py` copies them to `compressed/` and `checkpoints/` during the run (`tools/staging/run_staged.pbs`) | writing straight to `/storage` (~25 MB/s) stalled the whole simulation 39-87 s per 512^3 snapshot (pawna job 2536502); at 1024^3 that would be ~5-10 min per snapshot and ~30-35 min per checkpoint |
 
 Halo finding uses `FORCE_RES` = the softening and the production Rockstar settings (`MIN_HALO_OUTPUT_SIZE = 30`,
 `MIN_HALO_PARTICLES = 20`, `UNBOUND_THRESHOLD = 0.5`, temporal halo finding); `.vahc` uses all particles
 (`PP_DOWN_TO=0`, density built block by block) on the production grid of 512.
+
+Logs of the sim job (in `r<R>/`): `run.<job>.log` (pkdgrav3), `staged.<job>.log` (staging summary),
+`drain.<job>.log` (every copy); the job log in `logs/` ends with the time pkdgrav3 spent writing. A snapshot is
+counted when all its files are complete (headers, trailers and particle count checked with `pkcreader`); the
+last one is also fully checked with `pkc_check`. If the job ends before the drain has copied everything, the
+data stay on that node's SSD and `staged.<job>.log` prints the recover command (pkdgrav3
+`docs/compressed_output_guide.md` section 3.9); the sim stage then fails.
 
 Restarts: when pkdgrav3 stops at `iWallRunTime` (or on `touch r<R>/STOP`) it also writes a snapshot at that step.
 That snapshot is not a planned output: `job_sim.pbs` builds `snapnames.txt` from `output_steps.txt` and ignores it
@@ -436,5 +444,5 @@ Default resources (in `run.conf`; one pawna node has 192 cores and 755 GB, `work
 1024^3: sim 192 cores / 700 GB / 168 h; Rockstar 64 cores (32 readers, 64 writers) / 400 GB / 96 h; ctrees 16 /
 200 GB / 48 h; vahc 32 / 400 GB / 72 h (8 snapshots at a time); FITS 16 / 200 GB / 24 h. These are estimates
 from the 512^3 measurements (section 8), not measured at 1024^3. Runs above 512^3 need approval before
-submission; 2048^3 needs staged I/O (pkdgrav3 `tools/staging/run_staged.pbs`), which `job_sim.pbs` does not do.
+submission; 2048^3 needs ~750 GB on one node and 8-10 days (more than the 168 h `workq` limit: plan restarts).
 

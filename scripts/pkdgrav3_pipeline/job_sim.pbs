@@ -7,6 +7,7 @@
 # (submit_pipeline.sh --restart latest). Without RESTART the simulation starts again from the ICs.
 # Outputs: if $SIM_DIR/output_steps.txt exists (planned output steps), snapnames.txt lists exactly those steps
 # (a snapshot written when pkdgrav3 stops at iWallRunTime or on a STOP file is not a planned output and is ignored).
+# SIM_STAGING=1: snapshots and checkpoints staged on the node's local SSD and drained to NFS during the run.
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
 mkdir -p "$SIM_DIR" "$PKC_DIR" && cd "$SIM_DIR" || exit 1
@@ -21,40 +22,76 @@ else
   PAR=p.par
 fi
 mkdir -p checkpoints
+CHK=
 if [ -n "${RESTART:-}" ]; then
   CHK=$RESTART
-  [ "$CHK" = latest ] && CHK=$(ls checkpoints/*.chk 2>/dev/null | sort | tail -1)
+  [ "$CHK" = latest ] && CHK=$(ls "$SIM_DIR"/checkpoints/*.chk 2>/dev/null | sort | tail -1)
   [ -n "$CHK" ] && [ -f "$CHK" ] || { stamp "RESTART=$RESTART: no checkpoint found (checkpoints/*.chk)"; exit 1; }
-  # `import PKDGRAV; PKDGRAV.restore(...)`: the `from PKDGRAV import restore` form makes pkdgrav3 run the whole
-  # simulation again from the ICs after the restart (pkdgrav3 docs/compressed_io_plan.md)
-  PAR=restart.${PBS_JOBID%%.*}.par
-  printf 'import PKDGRAV\nPKDGRAV.restore("%s")\n' "$CHK" > "$PAR"
+  CHK=$(readlink -f "$CHK")
   stamp "restart from $CHK"
 fi
 NTH=${PBS_NCPUS:-$SIM_NCPU}
-stamp "pkdgrav3 with $NTH threads, parameter file $PAR"
 J=${PBS_JOBID%%.*}; J=${J:-$$}
-/usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
-rc=$?
+if [ "${SIM_STAGING:-0}" = 1 ]; then
+  # pkdgrav3's staged I/O (tools/staging/run_staged.pbs): snapshots and checkpoints are written to the node's
+  # local SSD and copied to $PKC_DIR and $SIM_DIR/checkpoints by pkd_drain.py while the simulation runs, so
+  # pkdgrav3 does not wait for NFS (~25 MB/s). Logs: run.<job>.log, staged.<job>.log, drain.<job>.log.
+  STAGE_DIR=${SIM_STAGE_DIR:-/var/tmp/${USER}_stage_$(echo "$STEM" | tr / _)_r$REAL}
+  stamp "pkdgrav3 with $NTH threads, staged I/O in $STAGE_DIR on $(hostname), parameter file ${CHK:-$PAR}"
+  df -h /var/tmp | tail -1
+  env RUNDIR="$SIM_DIR" PAR="$( [ -z "$CHK" ] && readlink -f "$PAR")" RESTART="$CHK" DEST="$PKC_DIR" \
+      STAGE="$STAGE_DIR" CHKSTAGE=1 CHKDEST="$SIM_DIR/checkpoints" KEEPCHK="${SIM_KEEPCHK:-2}" NTH="$NTH" \
+      PKD_IO_ROOT="$PKD_IO_ROOT" bash "$PKD_IO_ROOT/pkdgrav3/tools/staging/run_staged.pbs"
+  rc=$?
+  if grep -q "data left in" staged.$J.log; then
+    stamp "drain did not finish: data left on $(hostname):$STAGE_DIR (see staged.$J.log for the recover command)"; rc=3
+  fi
+else
+  if [ -n "$CHK" ]; then
+    # `import PKDGRAV; PKDGRAV.restore(...)`: the `from PKDGRAV import restore` form makes pkdgrav3 run the whole
+    # simulation again from the ICs after the restart (pkdgrav3 docs/compressed_io_plan.md)
+    PAR=restart.$J.par
+    printf 'import PKDGRAV\nPKDGRAV.restore("%s")\n' "$CHK" > "$PAR"
+  fi
+  stamp "pkdgrav3 with $NTH threads, parameter file $PAR (snapshots straight to $PKC_DIR)"
+  /usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
+  rc=$?
+fi
 ln -sf run.$J.log run.log
 grep -E "Elapsed|Maximum resident" time.$J.log
-# Rockstar's snapshot number <snap> = line <snap> of snapnames.txt (zero-padded pkdgrav3 steps of the outputs)
+# time pkdgrav3 spent writing (it waits for each write): snapshots and checkpoints
+for w in Output Checkpoint; do
+  grep -h "$w.*successfully written" run.$J.log | awk -v w=$w '{t+=$(NF-1); n++; if($(NF-1)>m)m=$(NF-1)} END {if(n) printf "%s writes: %d, %.0f s in total, longest %.0f s\n", w, n, t, m}'
+done
+# Rockstar's snapshot number <snap> = line <snap> of snapnames.txt (zero-padded pkdgrav3 steps of the outputs).
+# A snapshot counts when all its files are complete (header/trailer/particle count, pkcreader.PkcSnapshot):
+# the staging drain does not copy pkdgrav3's .done markers.
 if [ -f output_steps.txt ]; then
   NOUT=$(grep -vc '^#' output_steps.txt)
-  awk '!/^#/ {print $1}' output_steps.txt | while read -r s; do [ -f "$PKC_DIR/snap.$s.done" ] && echo "$s"; done > snapnames.txt
-  extra=$(ls "$PKC_DIR"/snap.*.done 2>/dev/null | sed 's#.*/snap\.##; s#\.done$##' | grep -vxF -f snapnames.txt | tr '\n' ' ')
-  [ -n "$extra" ] && stamp "snapshots that are not planned outputs (wall-time/STOP exits), not used: $extra"
+  STEPS=$(awk '!/^#/ {print $1}' output_steps.txt)
 else
   NOUT=$(echo $OUT_Z | wc -w)
-  ls "$PKC_DIR"/snap.*.done 2>/dev/null | sed 's#.*/snap\.##; s#\.done$##' | sort > snapnames.txt
+  STEPS=$(ls "$PKC_DIR" 2>/dev/null | sed -n 's/^snap\.\([0-9]*\)\.s.*\.pkc$/\1/p' | sort -u)
 fi
+"$PY" - "$PP" "$PKC_DIR" $STEPS > snapnames.txt <<'PYEOF'
+import sys, glob
+sys.path.insert(0, sys.argv[1])
+from pkcreader import PkcSnapshot
+d = sys.argv[2]
+for s in sys.argv[3:]:
+    if glob.glob('%s/snap.%s.s*.pkc' % (d, s)):
+        try:
+            PkcSnapshot('%s/snap.%s' % (d, s)); print(s)
+        except Exception as e:
+            print('snapshot %s incomplete: %s' % (s, e), file=sys.stderr)
+PYEOF
+extra=$(ls "$PKC_DIR" 2>/dev/null | sed -n 's/^snap\.\([0-9]*\)\.s.*\.pkc$/\1/p' | sort -u | grep -vxF -f snapnames.txt | tr '\n' ' ')
+[ -n "$extra" ] && stamp "snapshots that are not planned outputs (wall-time/STOP exits), not used: $extra"
 NDONE=$(grep -c . snapnames.txt)
 stamp "pkdgrav3 exit $rc; $NDONE of $NOUT outputs: $(tr '\n' ' ' < snapnames.txt | cut -c1-300)"
-touch pkc_checked.txt   # outputs already checked by an earlier job of this run
-for s in $(cat snapnames.txt); do
-  grep -qx "$s" pkc_checked.txt && continue
-  "$PKD_IO_ROOT/build_snapcomp/pkc_check" "$PKC_DIR/snap.$s" | tail -1 && echo "$s" >> pkc_checked.txt
-done
+# full check (all IDs once, subsamples) of the last output only: reading every snapshot from NFS would take hours
+LASTS=$(tail -1 snapnames.txt)
+[ -n "$LASTS" ] && "$PKD_IO_ROOT/build_snapcomp/pkc_check" --threads "$NTH" "$PKC_DIR/snap.$LASTS" | tail -2
 du -sh "$PKC_DIR"
 if [ $rc -eq 0 ] && [ "$NDONE" -lt "$NOUT" ]; then
   stamp "pkdgrav3 stopped before the last output (iWallRunTime or STOP): continue with submit.sh restart"
