@@ -78,6 +78,46 @@ python3 $S/plot_compare.py $ROOT/data/compare/pkd32_vs_gadget32_r1        # wher
   nearest centre (< 0.5 Rvir, |log10 M ratio| < 0.3). `phi*_pkd_of_gadget_members` is pkdgrav3's potential of
   the Gadget halo's member particles (same IDs).
 
+## Stacked potential profiles around halos (`halo_potential_profile.py`)
+
+Mean potential against distance from the halo centre, in halo-mass bins, with its scatter:
+
+```bash
+P=$S/halo_potential_profile.py
+$P gadget <snapshot_100.hdf5> <halos/.../out_100.trees> g.npz --mbins 1e13,1e14,4e14,1e15 --rbins 0.1,15,20
+$P pkd    <snap.02020>        <halos/.../out_100.trees> p.npz --mbins ... --par p.par --offset <offset_median>
+$P pkc    <snap.02020>        <halos/.../out_100.trees> c.npz --mbins ... --par p.par --pkc-subsamples 1,3
+python3 $S/plot_potential_profile.py prof.png g.npz:Gadget-4 p.npz:pkdgrav3
+```
+
+- Per mass bin and shell: `halo_mean`, `halo_std` (mean and standard deviation over halos of each halo's shell
+  mean), `halo_sem`, `stack_mean`, `stack_std` (all particles of the bin's halos together), counts, and every
+  halo's own profile (`halo_shell_mean_<b>`). Radii in r/Rvir (`--r-units rvir`, default) or comoving Mpc/h.
+- Hosts only by default (`--all-halos` for subhaloes); `--max-halos` (default 2000 per bin, random) bounds the work.
+- Scaling: particles are read in chunks (HDF5 slices or `.pkc` blocks) by parallel processes; each chunk is paired
+  with a KD-tree of the bin's halo centres (`cKDTree.sparse_distance_matrix`, periodic), and only per-halo,
+  per-shell sums (count, sum phi, sum phi^2) are kept, so memory does not grow with the particle number. For
+  2048^3, `--pkc-subsamples 1,3` (4 % of the particles) is unbiased for the mean and reads 1/25 of the data.
+- `job_compare.pbs` runs it at the outputs closest to `PROF_Z` for Gadget-4 and pkdgrav3 (HDF5 and `.pkc`),
+  each code with its own consistent-trees halos, pkdgrav3 without self-term and aligned by `offset_median`.
+- Tests (Mac, 32^3 z = 0, Gadget halos): one halo's profile equal to a brute-force calculation (difference 0);
+  HDF5 and `.pkc` give the same shell counts up to particles on shell edges (positions differ by <= half the
+  1.95 kpc/h step) and potentials within one step; each run < 0.5 s.
+
+## Gadget-4: `EVALPOTENTIAL` is needed
+
+The first run (2026-11-11, kept in `data_run1_zeropot/`) used exactly the production Config and every Gadget
+snapshot had `Potential = 0`: `OUTPUT_POTENTIAL` only allocates and writes the field, `EVALPOTENTIAL` computes it
+(src/gravity/gravity.cc). The production Sahyadri Config (snapshot_ics_000 header) has no `EVALPOTENTIAL`, so the
+production Gadget snapshots most likely carry a zero potential too. `Config.sh.template` now adds it; it does not
+change the forces.
+
+## consistent-trees in small boxes
+
+`gen_merger_cfg.pl` skips catalogues smaller than 20000 bytes ("too few halos"); at 32^3 every catalogue is smaller
+(<= 15 halos) and consistent-trees then fails (`find_parents_and_cleanup`). `CT_MIN_LIST_BYTES` in the config makes
+`job_ctrees.pbs` use a patched copy (here 1000 B: skip only catalogues without halos).
+
 ## Tests so far
 
 - Mac, synthetic 16^3 Gadget-4-style IC (shuffled IDs 1..N): converter + `make_pkdgrav3_par.py` (`IC_FILE`) +
