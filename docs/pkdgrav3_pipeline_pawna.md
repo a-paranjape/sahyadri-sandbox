@@ -442,8 +442,8 @@ to within the scatter of the few large-scale modes (ratios 1.01, 0.78, 1.11 for 
 and is 4-9% high at k = 0.13-0.8 h/Mpc, where early non-linear growth is expected (Δ² ≈ 0.03 at k = 0.65).
 
 Default resources (in `run.conf`; one pawna node has 192 cores and 755 GB, `workq` allows 168 h):
-1024^3: sim 192 cores / 700 GB / 168 h; Rockstar 64 cores (32 readers, 64 writers) / 400 GB / 96 h; ctrees 16 /
-200 GB / 48 h; vahc 32 / 400 GB / 72 h (8 snapshots at a time); FITS 16 / 200 GB / 24 h. These are estimates
+1024^3: sim 192 cores / 700 GB / 168 h; Rockstar 64 cores (32 readers, 64 writers) / 400 GB / 96 h; ctrees 2 /
+32 GB / 48 h (serial: one process plus a forked writer, so it shares a node; 2048^3: 2 / 128 GB / 168 h); vahc 32 / 400 GB / 72 h (8 snapshots at a time); FITS 16 / 200 GB / 24 h. These are estimates
 from the 512^3 measurements (section 8), not measured at 1024^3. Runs above 512^3 need approval before
 submission; 2048^3 needs ~750 GB on one node and 8-10 days (more than the 168 h `workq` limit: plan restarts).
 

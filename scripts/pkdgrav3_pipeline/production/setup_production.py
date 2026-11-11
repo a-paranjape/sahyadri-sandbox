@@ -132,12 +132,15 @@ def resources(N):
     """Default PBS resources by size (edit run.conf to change). Measured: 512^3 sim 25 GB / 80 min on 64 cores for 60
     steps; Rockstar ~2x its particle array (32 B/particle); .vahc PP_NPROC x 26 GB at grid 512."""
     if N <= 256:
-        return dict(SIM=(64, '120gb', '24:00:00'), RS=(16, '64gb', '12:00:00'), CT=(8, '32gb', '12:00:00'),
+        return dict(SIM=(64, '120gb', '24:00:00'), RS=(16, '64gb', '12:00:00'), CT=(2, '16gb', '12:00:00'),
                     PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=16, PP_NPROC=4)
     if N <= 512:
-        return dict(SIM=(96, '200gb', '72:00:00'), RS=(32, '128gb', '24:00:00'), CT=(16, '64gb', '24:00:00'),
+        return dict(SIM=(96, '200gb', '72:00:00'), RS=(32, '128gb', '24:00:00'), CT=(2, '32gb', '24:00:00'),
                     PP=(32, '300gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=32, PP_NPROC=8)
-    return dict(SIM=(192, '700gb', '168:00:00'), RS=(64, '400gb', '96:00:00'), CT=(16, '200gb', '48:00:00'),
+    # consistent-trees is serial (one process plus a forked writer): 2 cores, so it can share a node.
+    # Memory 0.8 GB at 512^3 (6 snapshots), grows with the halos per snapshot: ~8 GB at 1024^3, ~60 GB at 2048^3.
+    ct = (2, '32gb', '48:00:00') if N <= 1024 else (2, '128gb', '168:00:00')
+    return dict(SIM=(192, '700gb', '168:00:00'), RS=(64, '400gb', '96:00:00'), CT=ct,
                 PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=64, PP_NPROC=8)
 
 
