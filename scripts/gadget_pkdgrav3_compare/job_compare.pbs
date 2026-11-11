@@ -28,16 +28,19 @@ r = list(csv.DictReader(open('$CMP_DIR/particles.csv')))
 x = min(r, key=lambda x: abs(float(x['z']) - $zt))
 print(x['out'], x['offset_median'])")
   g=$(sed -n "$((i+1))p" "$GADGET_DIR/snapnames.txt"); p=$(sed -n "$((i+1))p" "$SIM_DIR/snapnames.txt")
-  if [ ! -f "$GH/out_$i.trees" ] || [ ! -f "$HALO_DIR/out_$i.trees" ]; then
-    stamp "out $i (z target $zt): no out_$i.trees for both codes, skipped"; continue
+  # consistent-trees catalogue, else Rockstar's (consistent-trees needs more halos than a 32^3 box has)
+  HG=$GH/out_$i.trees; HP=$HALO_DIR/out_$i.trees
+  [ -f "$HG" ] && [ -f "$HP" ] || { HG=$GH/out_$i.list; HP=$HALO_DIR/out_$i.list; }
+  if [ ! -f "$HG" ] || [ ! -f "$HP" ]; then
+    stamp "out $i (z target $zt): no halo catalogue for both codes, skipped"; continue
   fi
   O=(--mbins "$PROF_MBINS" --rbins "$PROF_RBINS" --workers "$OMP_NUM_THREADS" ${PROF_ARGS:-})
-  { "$PY" "$S/halo_potential_profile.py" gadget "$GADGET_DIR/snapshot_$g.hdf5" "$GH/out_$i.trees" \
+  { "$PY" "$S/halo_potential_profile.py" gadget "$GADGET_DIR/snapshot_$g.hdf5" "$HG" \
       "$CMP_DIR/profiles/gadget_out$i.npz" "${O[@]}" &&
-    "$PY" "$S/halo_potential_profile.py" pkd "$SIM_DIR/snap.$p" "$HALO_DIR/out_$i.trees" \
+    "$PY" "$S/halo_potential_profile.py" pkd "$SIM_DIR/snap.$p" "$HP" \
       "$CMP_DIR/profiles/pkd_out$i.npz" "${O[@]}" --par "$SIM_DIR/p.par" --offset "$off" &&
-    "$PY" "$S/halo_potential_profile.py" pkc "$SIM_DIR/snap.$p" "$HALO_DIR/out_$i.trees" \
+    "$PY" "$S/halo_potential_profile.py" pkc "$SIM_DIR/snap.$p" "$HP" \
       "$CMP_DIR/profiles/pkc_out$i.npz" "${O[@]}" --par "$SIM_DIR/p.par" --offset "$off"; } >> "$PLOG" 2>&1 ||
     { stamp "profiles failed for out $i"; tail "$PLOG"; exit 1; }
-  stamp "profiles out $i (z target $zt, offset $off): $(grep 'halos per mass bin' "$PLOG" | tail -3 | tr '\n' ' ')"
+  stamp "profiles out $i ($(basename $HG), z target $zt, offset $off): $(grep 'halos per mass bin' "$PLOG" | tail -3 | tr '\n' ' ')"
 done

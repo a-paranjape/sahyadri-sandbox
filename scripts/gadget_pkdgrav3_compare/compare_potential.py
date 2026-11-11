@@ -5,7 +5,8 @@ particle and halo by halo, at every common output.
 usage: compare_potential.py <gadget_dir> <pkd_dir> <gadget_halo_dir> <pkd_halo_dir> <out_dir> [--plot-z 3,1,0.5,0]
   gadget_dir   snapshot_<nnn>.hdf5 (with Potential), snapnames.txt         (job_gadget.pbs)
   pkd_dir      snap.<step> (HDF5) + snap.<step>.s*.pkc, snapnames.txt, p.par (pkdgrav3_pipeline job_sim.pbs, ALSO_HDF5=1)
-  *_halo_dir   out_<snap>.trees (consistent-trees hlists; job_ctrees.pbs)
+  *_halo_dir   out_<snap>.trees (consistent-trees hlists; job_ctrees.pbs); where there is none, Rockstar's
+               out_<snap>.list (all halos, no host/subhalo flag) is used instead
 Output in out_dir: particles.csv (one row per output), halos.csv (one row per matched halo and output),
 summary.json, snap_<nnn>.npz (particle and halo arrays of the outputs closest to --plot-z, for plot_compare.py).
 
@@ -151,8 +152,22 @@ def read_hlist(path):
     names = [re.sub(r'\(\d+\)$', '', h) for h in head]
     d = np.loadtxt(path, comments='#', ndmin=2)
     if d.size == 0:
-        return {k: np.zeros(0) for k in names}
-    return {k: d[:, i] for i, k in enumerate(names)}
+        h = {k: np.zeros(0) for k in names}
+    else:
+        h = {k: d[:, i] for i, k in enumerate(names)}
+    if 'x' not in h:   # Rockstar out_<snap>.list (no consistent-trees): ID Mvir Rvir X Y Z ..., no pid column
+        low = {k.lower(): v for k, v in h.items()}
+        h = dict(id=low['id'], mvir=low['mvir'], rvir=low['rvir'], x=low['x'], y=low['y'], z=low['z'],
+                 pid=np.full(len(low['id']), -1.0))
+    return h
+
+
+def halo_file(d, i):
+    """consistent-trees catalogue out_<i>.trees, else Rockstar's out_<i>.list (e.g. too few halos for ctrees)."""
+    for n in ('out_%d.trees' % i, 'out_%d.list' % i):
+        if os.path.exists(os.path.join(d, n)):
+            return os.path.join(d, n)
+    return None
 
 
 def halo_props(h, pos, phi, tree, L, mp, min_np):
@@ -255,10 +270,9 @@ def main():
 
         # halos
         hg = hp = None
-        fg_ = os.path.join(A.gadget_halo_dir, 'out_%d.trees' % i)
-        fp_ = os.path.join(A.pkd_halo_dir, 'out_%d.trees' % i)
+        fg_, fp_ = halo_file(A.gadget_halo_dir, i), halo_file(A.pkd_halo_dir, i)
         nm = 0
-        if os.path.exists(fg_) and os.path.exists(fp_):
+        if fg_ and fp_:
             tg, tp = cKDTree(xg, boxsize=L), cKDTree(xp, boxsize=L)
             hg = halo_props(read_hlist(fg_), xg, phig, tg, L, None, A.min_np)
             hp = halo_props(read_hlist(fp_), xp, phipa, tp, L, None, A.min_np)
@@ -276,7 +290,8 @@ def main():
                                  phicore_gadget=hg['phicore'][ig], phicore_pkd=hp['phicore'][ip],
                                  phimean_pkd_of_gadget_members=float(phipa[mg].mean()),
                                  phimin_pkd_of_gadget_members=float(phipa[mg].min()), pkd_offset=off))
-            row.update(n_halos_gadget=len(hg['id']), n_halos_pkd=len(hp['id']), n_halos_matched=nm)
+            row.update(n_halos_gadget=len(hg['id']), n_halos_pkd=len(hp['id']), n_halos_matched=nm,
+                       halo_catalogue=os.path.basename(fg_))
         print('out %3d z %7.4f  offset %+.4g (self %+.4g)  slope %.5f corr %.6f rms %.4g  dr_med %.3g  halos %s'
               % (i, row['z'], row['offset_median'], selfpot, s, r, rms, row['dr_median'],
                  '%d/%d matched %d' % (len(hg['id']), len(hp['id']), nm) if hg else '-'), flush=True)

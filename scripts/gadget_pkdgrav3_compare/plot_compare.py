@@ -18,7 +18,12 @@ os.makedirs(out, exist_ok=True)
 def load(path):
     with open(path) as f:
         rows = list(csv.DictReader(f))
-    return {k: np.array([float(r[k]) if r[k] not in ('', 'None') else np.nan for r in rows]) for k in rows[0]}
+    def num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return np.nan
+    return {k: np.array([num(r[k]) for r in rows]) for k in rows[0]}
 
 
 P = load(os.path.join(d, 'particles.csv'))
