@@ -1,0 +1,14 @@
+#!/bin/bash -l
+# Potential comparison (compare_potential.py) after both runs and their halo stages.
+# qsub -v CONF=<compare32.conf>,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh,STAGE=compare
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+mkdir -p "$CMP_DIR" || exit 1
+export PYTHONPATH=$PKD_IO_ROOT/pkdgrav3/tools/pkcreader${PYTHONPATH:+:$PYTHONPATH}
+export OMP_NUM_THREADS=${PBS_NCPUS:-$CMP_NCPU}
+"$PY" "$SANDBOX/scripts/gadget_pkdgrav3_compare/compare_potential.py" "$GADGET_DIR" "$SIM_DIR" \
+  "$SCRATCH/halos/$GADGET_STEM/r$REAL" "$HALO_DIR" "$CMP_DIR" ${CMP_ARGS:-} > "$CMP_DIR/compare.log" 2>&1
+rc=$?
+tail -5 "$CMP_DIR/compare.log"
+stamp "compare_potential.py exit $rc: $CMP_DIR"
+exit $rc

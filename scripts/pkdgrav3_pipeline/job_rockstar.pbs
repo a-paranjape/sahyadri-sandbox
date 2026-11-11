@@ -1,5 +1,6 @@
 #!/bin/bash -l
-# Stage 2: Rockstar on all outputs, reading the .pkc snapshots directly (FILE_FORMAT = "PKC").
+# Stage 2: Rockstar on all outputs, reading the .pkc snapshots directly (FILE_FORMAT = "PKC"), or Gadget-4 HDF5
+# snapshots snapshot_<snap>.hdf5 in $SIM_DIR when the config sets SIM_CODE=gadget4 (FILE_FORMAT = "AREPO").
 # Server and client run in this one job on one node. Output: $HALO_DIR/out_<snap>.list, halos_<snap>.*,
 # rockstar.cfg (the full configuration Rockstar used), auto-rockstar.cfg.
 # Restart: rerun the job; it starts from scratch unless RS_RESTART=1 (then Rockstar's restart.cfg is used).
@@ -14,11 +15,20 @@ if [ "${RS_RESTART:-0}" = 1 ] && [ -f restart.cfg ]; then
   CFG=$HALO_DIR/restart.cfg; stamp "restarting from $CFG"
 else
   rm -f auto-rockstar.cfg
+  if [ "${SIM_CODE:-pkdgrav3}" = gadget4 ]; then
+    # Gadget-4 HDF5 snapshots, settings of config/halos/rockstar_template.cfg (Sahyadri production)
+    FMT='FILE_FORMAT = "AREPO"
+AREPO_LENGTH_CONVERSION = 1
+AREPO_MASS_CONVERSION = 1e+10'
+    FN="snapshot_<snap>.hdf5"; [ "$RS_NUM_BLOCKS" -gt 1 ] && FN="snapshot_<snap>.<block>.hdf5"
+  else
+    FMT='FILE_FORMAT = "PKC"'; FN="snap.<snap>.<block>"
+  fi
   cat > "$CFG" <<EOF
 # written by job_rockstar.pbs from $CONF
-FILE_FORMAT = "PKC"
+$FMT
 INBASE = "$SIM_DIR"
-FILENAME = "snap.<snap>.<block>"
+FILENAME = "$FN"
 SNAPSHOT_NAMES = "$SIM_DIR/snapnames.txt"
 NUM_SNAPS = $NS
 STARTING_SNAP = 0

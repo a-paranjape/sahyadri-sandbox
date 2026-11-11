@@ -1,0 +1,73 @@
+#!/bin/bash -l
+# Gadget-4 run of the comparison, the Sahyadri way (scripts/submit_CiPod.sh + scripts/gadget/run_gadget.sh):
+#   1. CLASS P(k) at Z_START (config/transfer/class_template_As.ini, scripts/assist/modify_class_output.py)
+#   2. NGenIC (2LPT) ICs, RestartFlag 6 -> $GADGET_DIR/ics/snapshot_ics_000.hdf5
+#   3. the same ICs for pkdgrav3 -> $IC_FILE (gadget4_ic_to_gadget2.py)
+#   4. Gadget-4 from the IC file -> $GADGET_DIR/snapshot_<nnn>.hdf5 (with Potential)
+#   5. snapnames.txt (for Rockstar) and gadget_out_z.txt (redshifts of the snapshots, pkdgrav3's dRedTo)
+# qsub -v CONF=<compare32_gadget.conf>,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh,STAGE=gadget
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+[ "$SIM_CODE" = gadget4 ] || { stamp "use compare32_gadget.conf (SIM_CODE=gadget4)"; exit 2; }
+G=$SANDBOX/scripts/gadget_pkdgrav3_compare
+export LD_LIBRARY_PATH=/apps/gsl/lib:/apps/hdf5/lib:/apps/fftw3/lib:${LD_LIBRARY_PATH:-}
+NCPU=${PBS_NCPUS:-$G4_NCPU}
+NMESH=$((2 * NPART))
+for b in mesh$NMESH-NGenIC mesh$NMESH; do
+  [ -x "$G4HOME/code/Gadget-4/$b/Gadget4" ] || { stamp "missing $G4HOME/code/Gadget-4/$b/Gadget4 (setup_gadget4_pawna.sh)"; exit 1; }
+done
+mkdir -p "$GADGET_DIR/ics" "$SCRATCH/transfer" || exit 1
+stamp "mpirun: $(command -v mpirun); $NCPU ranks; FORCE_RES $FORCE_RES"
+
+# 1. CLASS (same edits as submit_CiPod.sh)
+STUB=$(basename "$GADGET_STEM")
+T=$SCRATCH/transfer
+INI=$T/class_$STUB.ini
+cp "$SANDBOX/config/transfer/class_template_As.ini" "$INI"
+H0=$(awk -v h=$HUBBLE 'BEGIN{printf "%.8g", 100*h}')
+sed -i -e "s#^H0.*#H0 = $H0#; s#^Omega_b.*#Omega_b = $OMEGA_B#; s#^Omega_m.*#Omega_m = $OMEGA_M#" \
+       -e "s#^Omega_k.*#Omega_k = $OMEGA_K#; s#^A_s.*#A_s = $AS#; s#^n_s.*#n_s = $NS#; s#^z_pk.*#z_pk = $Z_START#" "$INI"
+( cd "$T" && "$CLASS_EXEC" "$INI" > class_$STUB.log 2>&1 && mv class_output_pk.dat class_${STUB}_pk.dat &&
+  "$PY" "$SANDBOX/scripts/assist/modify_class_output.py" class_${STUB}_pk.dat >> class_$STUB.log ) ||
+  { stamp "CLASS failed"; tail "$T/class_$STUB.log"; exit 1; }
+export CLASS_PK=$T/class_${STUB}_pk.txt
+stamp "CLASS P(k) at z = $Z_START: $CLASS_PK ($(wc -l < "$CLASS_PK") k values)"
+
+# 2. ICs with NGenIC
+cd "$GADGET_DIR/ics" || exit 1
+python3 "$G/make_gadget4_param.py" ics param_ics.txt || exit 1
+t0=$(date +%s)
+bash "$SANDBOX/scripts/gadget/run_gadget.sh" "$PWD/param_ics.txt" "$NPART" "$NCPU" 1 6 "$G4HOME" > gadget_ics.log 2>&1
+[ -s snapshot_ics_000.hdf5 ] || { stamp "no snapshot_ics_000.hdf5"; tail -30 gadget_ics.log; exit 1; }
+stamp "ICs in $(( $(date +%s) - t0 )) s: $(grep -m1 'Dplus' gadget_ics.log)"
+
+# 3. the same ICs for pkdgrav3
+"$PY" "$G/gadget4_ic_to_gadget2.py" snapshot_ics_000.hdf5 "$IC_FILE" || exit 1
+
+# 4. Gadget-4 run
+cd "$GADGET_DIR" || exit 1
+python3 "$G/make_gadget4_param.py" run param_run.txt || exit 1
+t0=$(date +%s)
+/usr/bin/time -v bash "$SANDBOX/scripts/gadget/run_gadget.sh" "$PWD/param_run.txt" "$NPART" "$NCPU" 0 0 "$G4HOME" \
+  > gadget_run.log 2> gadget_run.time
+rc=$?
+grep -E "Elapsed|Maximum resident" gadget_run.time
+stamp "Gadget-4 exit $rc in $(( $(date +%s) - t0 )) s"
+
+# 5. snapshot list and times
+ls snapshot_[0-9][0-9][0-9].hdf5 2>/dev/null | sed 's/^snapshot_//; s/\.hdf5$//' | sort > snapnames.txt
+"$PY" - <<'EOF' || exit 1
+import h5py
+names = [l.strip() for l in open('snapnames.txt') if l.strip()]
+z = []
+for n in names:
+    with h5py.File('snapshot_%s.hdf5' % n, 'r') as f:
+        a = float(f['Header'].attrs['Time'])
+    z.append(max(0.0, 1.0 / a - 1.0) if a < 1 - 1e-12 else 0.0)
+open('gadget_out_z.txt', 'w').write(' '.join('%.15g' % v for v in z) + '\n')
+print('%d snapshots, z = %.6g ... %.6g' % (len(z), z[0], z[-1]))
+EOF
+NOUT=$(( $(grep -c . "$OUTPUTS_TXT") + 1 ))
+n=$(grep -c . snapnames.txt)
+stamp "$n snapshots (expected $NOUT); $(du -sh "$GADGET_DIR" | cut -f1)"
+[ $rc -eq 0 ] && [ "$n" -eq "$NOUT" ] || exit 1
