@@ -1,0 +1,206 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{graphicx,booktabs,amsmath,amssymb,siunitx,xcolor,float}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\usepackage{caption,array,xurl}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\captionsetup{font=small}
+\newcommand{\pkd}{\textsc{pkdgrav3}}
+\newcommand{\gad}{\textsc{Gadget-4}}
+\newcommand{\fp}[1]{\nolinkurl{#1}}
+\newcommand{\kms}{(km\,s$^{-1}$)$^2$}
+\newcommand{\Mpch}{$h^{-1}$\,Mpc}
+\newcommand{\Msunh}{$h^{-1}$\,M$_\odot$}
+
+\title{Gravitational potential, particles and halos:\\ \gad{} versus \pkd{} from identical initial conditions\\
+\large $32^3$ and $256^3$ particles in $200$\,\Mpch, Sahyadri default settings on pawna}
+\author{Sahyadri sandbox, branch \fp{gadget-pkdgrav3-potential}}
+\date{11 November 2026}
+
+\begin{document}
+\maketitle
+
+\input{summary.tex}
+
+\tableofcontents
+
+%======================================================================================================
+\section{Set-up}
+\label{sec:setup}
+
+Both codes evolve the \emph{same} particle load. \gad{}'s NGenIC (2LPT, CLASS $P(k)$ at $z=49$, the Sahyadri
+production recipe of \fp{scripts/submit_CiPod.sh}) writes the initial conditions; the same file, converted to
+\textsc{Gadget-2} format, is read by \pkd{} (\fp{achInFile}), so the two runs differ only in the $N$-body solver,
+the time stepping and the softening. Every setting is the Sahyadri default of
+\fp{config/submit/sahyadri/sub_default.conf} unless stated (Table~\ref{tab:setup}).
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}L{0.17\textwidth}L{0.8\textwidth}@{}}
+\toprule
+box, particles & $L = 200$\,\Mpch; $N = 32^3$ (test) and $256^3$ \\
+cosmology & $\Omega_m = 0.3137721$, $\Omega_b = 0.0493017$ (\gad{} parameter only; both runs are dark matter only),\\
+ & $\Omega_\Lambda = 0.6862279$, $h = 0.6736$, $n_s = 0.9649$, $A_s = 2.098903\times10^{-9}$, seed 12345678 \\
+initial conditions & \gad{} NGenIC 2LPT at $z = 49$ (CLASS spectrum, no renormalisation) \\
+outputs & Sahyadri's 100 output times (\fp{config/sims/outputs100.txt}, $z = 12 \to 0.0093$) plus $a = 1$: 101 \\
+\gad{} & commit 1e171a4, production Config $+$ \texttt{EVALPOTENTIAL}; TreePM, PMGRID $= 2N^{1/3}$,\\
+ & \texttt{ErrTolForceAcc} 0.002, $\theta_{\max} = 0.75$; softening $\epsilon_G = L/(30 N^{1/3})$ (Plummer-equivalent) \\
+\pkd{} & \fp{shadaba/pkdgrav3} \texttt{main} (binary built from 5766bb28; later commits are documentation);\\
+ & production \fp{sahyadri2048.par} settings: $\epsilon_P = 1/(60 N^{1/3})$ box units, 20 steps between outputs,\\
+ & output at the redshifts \gad{} actually wrote; \fp{dCompPotStep = 1} (potential in the \texttt{.pkc} files) \\
+softening & $256^3$: $\epsilon_G = 26.0$\,$h^{-1}$kpc, $\epsilon_P = 13.0$\,$h^{-1}$kpc ($32^3$: 208 and 104\,$h^{-1}$kpc);\\
+ & \pkd{}'s force is Newtonian beyond $2\epsilon_P = \epsilon_G$, \gad{}'s (spline) beyond $2.8\,\epsilon_G$ \\
+halos & Rockstar (production template: 30 particles output, 20 minimum, unbound threshold 0.5; \gad{} HDF5 via\\
+ & \texttt{FILE\_FORMAT = "AREPO"}, \pkd{} via the native \texttt{.pkc} reader), consistent-trees, VAHC (grid $512^3$) \\
+\bottomrule
+\end{tabular}
+\caption{Simulation and pipeline settings.}
+\label{tab:setup}
+\end{table}
+
+\paragraph{Pipeline.} One command submits everything as a PBS chain
+(\fp{scripts/gadget_pkdgrav3_compare/submit_compare.sh} \texttt{compare256.conf}):
+\gad{} job (CLASS $\to$ NGenIC $\to$ IC conversion $\to$ run) $\to$ \pkd{} \texttt{sim} $\to$ Rockstar $\to$
+consistent-trees $\to$ VAHC for each code (the Sahyadri \pkd{} pipeline, \fp{scripts/pkdgrav3_pipeline}) $\to$
+comparison job (\fp{job_compare.pbs}). At $32^3$ consistent-trees cannot run (at most 15 halos per snapshot; it
+needs enough halos to estimate its consistency tolerances), so the $32^3$ halo results use the Rockstar catalogues.
+
+%======================================================================================================
+\section{Where things are}
+\label{sec:paths}
+
+\subsection*{Data on pawna}
+Work directory \fp{/storage/shadab/pkdgrav3_io/potcmp/} (below: \fp{data/} = \fp{/storage/shadab/pkdgrav3_io/potcmp/data/}).
+\begin{center}\small
+\begin{tabular}{@{}L{0.24\textwidth}L{0.73\textwidth}@{}}
+\toprule
+what & path \\
+\midrule
+\gad{} $256^3$ run & \fp{data/sims/potcmp/gadget256/r1/}: \fp{snapshot_000..100.hdf5} (with Potential), \fp{param_run.txt}, \fp{gadget_run.log}, \fp{snapnames.txt}, \fp{gadget_out_z.txt} \\
+initial conditions $256^3$ & \fp{data/sims/potcmp/gadget256/r1/ics/}: \fp{snapshot_ics_000.hdf5} (\gad{}), \fp{ics_gadget2.dat} (\pkd{} input), \fp{param_ics.txt}; CLASS: \fp{data/transfer/class_gadget256*} \\
+\pkd{} $256^3$ run & \fp{data/sims/potcmp/pkd256/r1/}: \fp{p.par}, \fp{snap.<step>} (HDF5), \fp{snap.<step>.s<pct>.0.pkc}, \fp{snapnames.txt}, \fp{run.log} \\
+halos $256^3$ & \fp{data/halos/potcmp/gadget256/r1/}, \fp{data/halos/potcmp/pkd256/r1/}: \fp{out_<snap>.list} (Rockstar), \fp{out_<snap>.trees} (consistent-trees hlists), \fp{out_<snap>.vahc}, \fp{trees/}, \fp{hlists/}; \fp{../scales.txt} \\
+comparison $256^3$ & \fp{data/compare/pkd256_vs_gadget256_r1/}: \fp{particles.csv}, \fp{halos.csv}, \fp{summary.json}, \fp{snap_*.npz}, \fp{profiles/{gadget,pkd,pkc}_out<i>.npz} (stacks), \fp{halos/} (\fp{halo_mf.csv}, \fp{halo_match.csv}, \fp{halo_match_out<i>.npz}), logs \\
+$32^3$ (same layout) & \fp{data/sims/potcmp/{gadget32,pkd32}/r1/}, \fp{data/halos/potcmp/{gadget32,pkd32}/r1/}, \fp{data/compare/pkd32_vs_gadget32_r1/} (stacks in \fp{profiles/}; the earlier $r/R_{\rm vir}$ profiles in \fp{profiles_rvir_old/}) \\
+first $32^3$ run (no \texttt{EVALPOTENTIAL}) & \fp{/storage/shadab/pkdgrav3_io/potcmp/data_run1_zeropot/} (Potential $=0$; kept as evidence) \\
+job logs & \fp{data/logs/<stage>.potcmp_{gadget,pkd}256_r1.<job>.log}, chains \fp{data/logs/chain.*.txt} \\
+\gad{} builds & \fp{/storage/shadab/pkdgrav3_io/potcmp/g4home/code/Gadget-4/{mesh512,mesh512-NGenIC,mesh64,mesh64-NGenIC}/Gadget4} \\
+\pkd{} binary & \fp{/storage/shadab/pkdgrav3_io/build/pkdgrav3} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{Scripts and report (repository \fp{a-paranjape/sahyadri-sandbox}, branch \fp{gadget-pkdgrav3-potential})}
+\begin{center}\small
+\begin{tabular}{@{}L{0.36\textwidth}L{0.61\textwidth}@{}}
+\toprule
+\fp{scripts/gadget_pkdgrav3_compare/} & \\
+\midrule
+\fp{compare32.conf}, \fp{compare256.conf}, \fp{*_gadget.conf} & run configurations (one per resolution; the \fp{_gadget} file switches to the \gad{} side) \\
+\fp{submit_compare.sh} & submits the whole chain \\
+\fp{job_gadget.pbs}, \fp{setup_gadget4_pawna.sh}, \fp{Config.sh.template}, \fp{make_gadget4_param.py} & \gad{} build, ICs and run, Sahyadri recipe \\
+\fp{gadget4_ic_to_gadget2.py} & the \gad{} ICs for \pkd{} (IDs $\to$ iOrder, mass so that \pkd{}'s total is $\Omega_m$) \\
+\fp{job_compare.pbs} & comparison job: the three scripts below \\
+\fp{compare_potential.py} & particle by particle: potential, positions, velocities; FFT Poisson reference \\
+\fp{halo_potential_profile.py} & stacked potential around halos in mass bins (Section~\ref{sec:stack}) \\
+\fp{compare_halos.py} & mass functions, matched halos, VAHC quantities \\
+\midrule
+\fp{reports/gadget_pkdgrav3_potential/} & this report: \fp{report.tex}, \fp{stack_potential.ipynb} (stacked potential figures), \fp{make_figures.py} (other figures), \fp{figs/}, \fp{data/} (copies of the small comparison outputs: \fp{particles.csv}, \fp{profiles/}, \fp{halos/*.csv}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%======================================================================================================
+\section{Methods}
+\label{sec:methods}
+
+\paragraph{Units and zero point of the potential.} All potentials are peculiar and physical, in \kms.
+\gad{}: $\phi = \texttt{Potential}/a$ (attribute \texttt{a\_scaling} $=-1$; the self-interaction is excluded and the
+periodic potential has volume mean zero). \pkd{}: $\phi = \texttt{Potential}\,U^2/a$ with
+$U = 100\,L/\sqrt{8\pi/3}$\,km\,s$^{-1}$ ($G = 1$, $\rho_{\rm crit} = 3/8\pi$, $L = 1$); \pkd{} includes each
+particle's softened self-interaction $-\tfrac{105}{64}\,m/\epsilon_P$, a constant for equal masses, which is
+removed. The two codes can still differ by a constant per snapshot (zero point of the periodic sum, e.g.\ the
+Madelung-like term of a particle's own images). It changes no force, so it is measured as the median of
+$\phi_{\rm pkd} - \phi_{\rm Gadget}$ over all particles and removed (``aligned''). The \texttt{.pkc} potential is
+\pkd{}'s, quantised to a step of 1\,\kms{} (maximum error 0.5, checked at every output).
+
+\paragraph{Velocities.} Peculiar, km\,s$^{-1}$: \gad{} $\texttt{Velocities}\,\sqrt{a}$, \pkd{} $\texttt{Velocities}\,U a$
+(at $z=12$ the two rms velocities agree to 0.4\%).
+
+\paragraph{Particles} are matched by ID (\gad{} ID $-\,1$ = \pkd{} iOrder). For every 5th output (every output at
+$32^3$) \fp{compare_potential.py} reports the correlation and rms difference of $\phi$, $|\Delta\vec x|$ and
+$|\Delta \vec v|$ percentiles, and, as an independent reference, the potential from an FFT Poisson solution of
+each snapshot's own particles (CIC on $\min(4N^{1/3}, 512)^3$, deconvolved). The rms difference
+between the FFT potentials of the two codes' particle positions isolates the part of $\Delta\phi$ that comes from
+the particles being in different places rather than from the force solver.
+
+\paragraph{Stacked potential profiles.}
+\label{sec:stack}
+\fp{halo_potential_profile.py} computes, for host halos ($\texttt{pid} = -1$) in bins of $M_{\rm vir}$, the mean
+$\langle\phi\rangle(r)$ and standard deviation $\sigma_\phi(r)$ of the potential of all (halo, particle) pairs in
+logarithmic shells of comoving distance $r$ from $0.02$ to $50$\,\Mpch{} (36 bins), and the jackknife error of the
+mean over $3^3$ sub-cubes of halo centres. Each code uses its own halos and its own particles. Only stacks are
+accumulated: per chunk of particles, a periodic KD-tree of the chunk is paired with trees of halo centres, and every
+pair adds $(1, \phi, \phi^2, r)$ to a (sub-cube, mass bin, shell) array, so memory does not depend on the number of
+halos or particles. To keep the cost per halo constant out to large radii the outer shells are diluted: shell $i$
+uses the nested random subsample $u < 8^{-\ell_i}$ of the particles, with the smallest $\ell_i$ for which the
+expected number of particles inside the shell's outer radius is $\le 4096$. Each shell uses one level, so its mean
+and scatter are unbiased (checked against a brute-force calculation: identical without dilution, within
+$1\sigma_{\rm jk}$ with it). The pair counts also give the halo--matter cross-correlation $1+\xi_{hm}(r)$. At
+$2048^3$ the outermost level uses $8^{-6}$ of the particles, and the cost is
+$\sim n_{\rm halo}\times$ levels $\times 4096$ pairs plus one pass through the snapshot.
+The figures are made by the notebook \fp{stack_potential.ipynb}.
+
+\paragraph{Halo catalogues.} \fp{compare_halos.py} compares host-halo mass ($M_{\rm vir}$, $M_{200b}$) and
+$V_{\max}$ functions, and matches host halos one to one (mutual nearest centres within $0.5\,R_{\rm vir}$ of the
+\gad{} halo and $|\log_{10} M_{\rm pkd}/M_{\rm Gadget}| < 0.5$). For matched halos it reports, per mass bin, the
+median and 16--84\% range of the ratios of $M_{\rm vir}$, $M_{200b}$, $V_{\max}$, concentration $R_{\rm vir}/r_s$,
+spin, shape and virial ratio, the centre offset and bulk-velocity difference, and the differences of the VAHC
+halo bias $b_1$ and tidal eigenvalues.
+
+%======================================================================================================
+\section{Results at $32^3$}
+\label{sec:r32}
+
+\input{results32.tex}
+
+%======================================================================================================
+\section{Results at $256^3$}
+\label{sec:r256}
+
+\input{results256.tex}
+
+%======================================================================================================
+\section{Problems found on the way}
+\label{sec:issues}
+\begin{enumerate}
+\item \textbf{\gad{} writes Potential $=0$ without \texttt{EVALPOTENTIAL}.} The first $32^3$ run, with the exact
+production Config (\texttt{OUTPUT\_POTENTIAL} only), has zero potential everywhere
+(\fp{data_run1_zeropot/}). The production Sahyadri Config lacks \texttt{EVALPOTENTIAL}, so the production
+\gad{} snapshots most likely have no potential (not checked directly). Adding the flag left the ICs and output
+times byte-identical.
+\item \textbf{consistent-trees needs many halos per snapshot}: it fails at $32^3$ (``too few halos at scale factor
+0.768278 to calculate consistency metric'') even after relaxing \fp{gen_merger_cfg.pl}'s 20000-byte catalogue
+threshold. At $256^3$ the production threshold is used.
+\item \textbf{\pkd{} has no physical units when it reads an IC file} (\fp{units.cxx}): box size in the output
+headers and \texttt{.pkc} potential units are wrong unless \fp{dKpcUnit} and \fp{dMsolUnit} are given; the
+pipeline's parameter generator now writes them. A Gadget-2 input file's IDs become iOrder directly, so they must be
+$0\ldots N-1$; \pkd{}'s HDF5 \texttt{Header/Time} is code time, not $a$. Recorded in the \pkd{} fork,
+\fp{docs/compressed_io_plan.md} section 7.
+\end{enumerate}
+
+%======================================================================================================
+\section{Reproducing}
+\begin{verbatim}
+# on pawna, in a clone of sahyadri-sandbox (branch gadget-pkdgrav3-potential)
+cd scripts/gadget_pkdgrav3_compare
+bash -lc "bash setup_gadget4_pawna.sh <gadget4 source> <G4HOME> 256"   # Gadget-4 builds (once)
+bash submit_compare.sh compare256.conf                                 # 9 PBS jobs
+# figures (Mac or anywhere with matplotlib), from reports/gadget_pkdgrav3_potential:
+rsync pawna:<data>/compare/pkd256_vs_gadget256_r1/{particles.csv,profiles,halos} data/pkd256_vs_gadget256_r1/
+jupyter nbconvert --to notebook --execute stack_potential.ipynb
+python make_figures.py 32=data/pkd32_vs_gadget32_r1 256=<copy with snap_*.npz>
+latexmk -pdf report.tex
+\end{verbatim}
+
+\end{document}
