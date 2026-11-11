@@ -7,7 +7,7 @@
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
 cd "$HALO_DIR" || exit 1
-TMP=/var/tmp/${USER}_fits_${PBS_JOBID%%.*}; mkdir -p "$TMP"; trap 'rm -rf "$TMP"' EXIT
+TMP=/var/tmp/${USER}_fits_${PBS_JOBID%%.*}; mkdir -p "$TMP"; trap 'rm -rf "$TMP"; memmon_report' EXIT
 LAST=$(tail -1 "$SIM_DIR/snapnames.txt")
 DEL=; [ "$FITS_DELETE_ASCII" = 1 ] && DEL=--delete-ascii
 WHAT=all; [ -d trees ] || WHAT=halos
