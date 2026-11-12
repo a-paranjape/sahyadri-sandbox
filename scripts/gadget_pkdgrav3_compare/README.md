@@ -99,6 +99,15 @@ $P pkc    <snap.02020>        <halos/.../out_100.trees> pkc_out100.npz "${O[@]}"
   use nested subsamples u < 8^-l, u = hash(particle ID), so the work per halo is ~ levels x `--target` (16384) pairs
   and the same particles are used in both codes. 256^3 with ~17 000 halos: 3-13 s on 8 cores.
 - Tests: brute force (identical without dilution, within 1.4 jackknife errors with it); HDF5 = `.pkc`.
+- Binning: `--rbins rmin,rmax,n` (log) or `--rbins lin:rmin,rmax,dr` (e.g. `lin:0,50,0.2`, 250 shells).
+- Weighting: `--weight particle` (default; every (halo, particle) pair, i.e. mass-weighted) or `--weight volume`
+  (grid points). Volume weighting first puts the potential on an `--vgrid N`^3 grid of cell centres (default
+  2 N_part^(1/3)) by a weighted local linear fit to the `--vknn` (16) nearest particles; inverse-distance weighting
+  was biased by up to 8% on a clustered test, the linear fit by <= 1.8%. `--vcache grid.npy` keeps the grid (512^3:
+  0.5 GB, 6 min on 8 cores) so the log and linear stacks reuse it. The grid step reads all particles into one
+  KD-tree, so beyond 512^3 particles it needs a slab-by-slab version (not written). Use `--target 8192` for volume
+  stacks. Shells inside one grid cell only see the interpolation and are masked in the notebook.
+- All report stacks (both binnings, both weightings): `reports/gadget_pkdgrav3_potential/run_stacks_local.sh`.
 - Figures: `reports/gadget_pkdgrav3_potential/stack_potential.ipynb`.
 
 ## Gadget-4: `EVALPOTENTIAL` is needed

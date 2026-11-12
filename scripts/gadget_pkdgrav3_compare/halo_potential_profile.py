@@ -12,7 +12,14 @@ usage:
     halos     consistent-trees hlist (out_<snap>.trees) or Rockstar out_<snap>.list
   options:
     --mbins 3e12,1e13,3e13,1e14,1e15  halo mass bin edges (Msun/h; column --mass-col, default mvir)
-    --rbins 0.02,50,36                log bins in comoving r (Mpc/h): rmin, rmax, number
+    --rbins 0.02,50,36                log bins in comoving r (Mpc/h): rmin, rmax, number;
+            lin:0,50,0.2              or linear bins: rmin, rmax, width
+    --weight particle|volume          particle-weighted stack (default: every (halo, particle) pair), or
+                                      volume-weighted: the same stack over the points of a regular grid that
+                                      carry the code's potential interpolated from its particles (below)
+    --vgrid N                         volume weighting: N^3 grid points (default 2 x particle grid)
+    --vknn 16                         volume weighting: local linear fit to the k nearest particles' potentials
+    --vcache file.npy                 volume weighting: gridded potential cache (written if absent, reused if present)
     --all-halos                       include subhaloes (default: hosts only, pid = -1)
     --max-halos 20000                 at most this many halos per mass bin (random, seed 0); 0 = all
     --target 16384                    dilution: particles expected inside a level's outer radius (below)
@@ -38,6 +45,15 @@ at every level, so the dilution noise largely cancels in a code-to-code differen
 level, so its mean and scatter are unbiased; the number of pairs per halo is ~ target x (number of levels) instead
 of nbar 4/3 pi r_max^3. At 2048^3 / 200 Mpc/h, 50 Mpc/h holds 5.6e8 particles; with target 16384 the outer level
 uses 1/8^5 of them. Cost ~ n_halo x levels x target x (local overdensity), plus reading the snapshot once.
+
+Volume weighting. The particle-weighted mean is a mass-weighted average over the shell: dense parts (filaments,
+neighbouring halos) count more than voids. The volume-weighted mean averages over space instead. phi is put on an
+N^3 grid of cell centres by a weighted local linear fit to the k nearest particles' potentials (the code's own
+potential, not a grid Poisson solution; phi is smooth on the interparticle scale; a plain inverse-distance average is
+biased toward the denser side of the neighbourhood, i.e. too deep near structures), and the grid points are stacked
+exactly like particles (same trees, dilution by grid index, jackknife). The interpolation reads all particles into
+one KD-tree: fine to 512^3 particles; beyond that it must be done slab by slab (not implemented). delta_hm is then
+the deviation of the grid-point count from the shell volume (a check: ~0).
 
 Output (npz), mass bin b, shell i:
   r_edges, r_mid (geometric), r_mean[b,i] (pair-weighted), m_edges, n_halos[b], m_mean[b], level[i], frac[i]
@@ -138,6 +154,68 @@ def pkd_selfpot(kind, L, a, ntot, par):
 G = {}
 
 
+def parse_rbins(spec):
+    """'rmin,rmax,n' (log) or 'lin:rmin,rmax,dr' -> (edges, mids, kind)"""
+    if spec.startswith('lin:'):
+        a, b, dr = (float(v) for v in spec[4:].split(','))
+        e = np.arange(a, b + 0.5 * dr, dr)
+        return e, 0.5 * (e[1:] + e[:-1]), 'lin'
+    a, b, n = spec.split(',')
+    e = np.geomspace(float(a), float(b), int(n) + 1)
+    return e, np.sqrt(e[1:] * e[:-1]), 'log'
+
+
+def local_linear(dx, f, d, h):
+    """phi at the origin from neighbours at offsets dx (n, k, 3) with values f (n, k): weighted least-squares fit
+    f = a + g . dx (weights 1/d), returns a. A plain inverse-distance average is biased where the neighbours lie on one
+    side (dense side = deeper potential); the linear term removes that to first order. Falls back to the inverse-
+    distance average where the fit is ill-conditioned."""
+    w = 1.0 / np.maximum(d, 1e-3 * h)
+    X = np.concatenate([np.ones(f.shape + (1,)), dx / h], axis=2)          # (n, k, 4), scaled for conditioning
+    A = np.einsum('nk,nki,nkj->nij', w, X, X)
+    b = np.einsum('nk,nki,nk->ni', w, X, f)
+    idw = (w * f).sum(1) / w.sum(1)
+    out = idw.copy()
+    ok = np.linalg.cond(A) < 1e8
+    if ok.any():
+        out[ok] = np.linalg.solve(A[ok], b[ok][..., None])[:, 0, 0]
+    return out
+
+
+def build_vgrid(uts, L, ng, k, workers):
+    """phi on the ng^3 cell centres from the k nearest particles, local linear fit (float32)"""
+    xs, ps = [], []
+    for u in uts:
+        x, p, _ = load_unit(u)
+        xs.append(x); ps.append(p)
+    x, phi = np.concatenate(xs), np.concatenate(ps)
+    del xs, ps
+    tree = cKDTree(x, boxsize=L)
+    h = L / ng
+    out = np.empty((ng, ng, ng), np.float32)
+    c = (np.arange(ng) + 0.5) * h
+    yy, zz = np.meshgrid(c, c, indexing='ij')
+    for i in range(ng):
+        pts = np.column_stack([np.full(ng * ng, c[i]), yy.ravel(), zz.ravel()])
+        d, j = tree.query(pts, k=k, workers=workers)
+        dx = x[j] - pts[:, None, :]
+        dx -= L * np.round(dx / L)                                          # periodic offsets
+        out[i] = local_linear(dx, phi[j], d, h).reshape(ng, ng)
+    return out
+
+
+def load_grid(u):
+    """grid points of layers i0..i1-1: positions (cell centres), phi from the cache, flat index as ID"""
+    _, _, i0, i1 = u
+    v = np.load(G['vcache'], mmap_mode='r')
+    ng = v.shape[0]
+    h = G['units']['L'] / ng
+    ii, jj, kk = np.meshgrid(np.arange(i0, i1), np.arange(ng), np.arange(ng), indexing='ij')
+    x = (np.column_stack([ii.ravel(), jj.ravel(), kk.ravel()]) + 0.5) * h
+    ids = (ii.ravel().astype(np.int64) * ng + jj.ravel()) * ng + kk.ravel()
+    return x, np.asarray(v[i0:i1], dtype=np.float64).ravel(), ids
+
+
 def uhash(ids, seed):
     """uniform [0, 1) from integer particle IDs (splitmix64): the same particle gets the same u in every code"""
     with np.errstate(over='ignore'):
@@ -148,7 +226,7 @@ def uhash(ids, seed):
     return (x >> np.uint64(11)).astype(np.float64) / float(2**53)
 
 
-def init(kind, units, bins, edges, levels, nreg, subtract, seed):
+def init(kind, units, bins, edges, levels, nreg, subtract, seed, vcache=None):
     L = units['L']
     groups = []
     for b in bins:
@@ -157,7 +235,7 @@ def init(kind, units, bins, edges, levels, nreg, subtract, seed):
             gl.append((s, cKDTree(b['c'][s:s + HALO_GROUP], boxsize=L)))
         groups.append(gl)
     G.update(kind=kind, units=units, bins=bins, edges=edges, levels=levels, nreg=nreg, subtract=subtract,
-             seed=seed, groups=groups)
+             seed=seed, groups=groups, vcache=vcache)
 
 
 def load_unit(u):
@@ -189,7 +267,7 @@ def load_unit(u):
 
 def work(u):
     """-> per mass bin an array (4, nreg * nr): pair count, sum phi, sum phi^2, sum r"""
-    x, phi, ids = load_unit(u)
+    x, phi, ids = load_grid(u) if u[1] == 'grid' else load_unit(u)
     L, edges, levels, nreg = G['units']['L'], G['edges'], G['levels'], G['nreg']
     nr = len(edges) - 1
     ur = uhash(ids, G['seed'])
@@ -252,6 +330,10 @@ def main():
     ap.add_argument('--pkc-subsamples', default='')
     ap.add_argument('--chunk', type=int, default=1048576)
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--weight', default='particle', choices=('particle', 'volume'))
+    ap.add_argument('--vgrid', type=int, default=0)
+    ap.add_argument('--vknn', type=int, default=16)
+    ap.add_argument('--vcache', default='')
     ap.add_argument('--workers', type=int, default=os.cpu_count())
     A = ap.parse_args()
     t0 = time.time()
@@ -270,13 +352,27 @@ def main():
         sel = src._select([float(p) for p in A.pkc_subsamples.split(',')] if A.pkc_subsamples else None)
         uts = [(f.path, i) for f in sel for i in range(len(f.counts))]
         nused = int(sum(f.header['n_particles'] for f in sel))
-    uts = [(i,) + tuple(u) for i, u in enumerate(uts)]
+    uts = [(i,) + tuple(u) for i, u in enumerate(uts)]   # (index, file, start, end) or (index, path, block)
 
-    rmin, rmax, nr = A.rbins.split(',')
-    nr = int(nr)
-    edges = np.geomspace(float(rmin), float(rmax), nr + 1)
+    edges, rmid, bkind = parse_rbins(A.rbins)
+    nr = len(edges) - 1
     if edges[-1] >= L / 2:
         sys.exit('rmax %.3g >= L/2 = %.3g' % (edges[-1], L / 2))
+    vcache = None
+    if A.weight == 'volume':
+        ng = A.vgrid or 2 * round(ntot ** (1 / 3))
+        vcache = A.vcache or os.path.splitext(A.out)[0] + '.vgrid%d.npy' % ng
+        ok = os.path.exists(vcache) and np.load(vcache, mmap_mode='r').shape == (ng, ng, ng)
+        if not ok:
+            t1 = time.time()
+            init(A.kind, units, [], edges, {}, 1, subtract, A.seed)
+            np.save(vcache, build_vgrid(uts, L, ng, A.vknn, A.workers))
+            print('gridded potential %d^3 (k = %d) -> %s in %.0f s' % (ng, A.vknn, vcache, time.time() - t1), flush=True)
+        else:
+            print('gridded potential from %s' % vcache)
+        step = max(1, A.chunk // (ng * ng))
+        uts = [(0, 'grid', i, min(ng, i + step)) for i in range(0, ng, step)]
+        nused = ng**3
     nbar = nused / L**3
     lev = np.maximum(0, np.ceil(np.log(nbar * 4 / 3 * np.pi * edges[1:]**3 / A.target) / np.log(8))).astype(int)
     lev = np.maximum.accumulate(lev)
@@ -311,7 +407,7 @@ def main():
     acc = [np.zeros((4, nreg * nr)) for _ in bins]
     done = 0
     with ProcessPoolExecutor(max_workers=max(1, A.workers), initializer=init,
-                             initargs=(A.kind, units, bins, edges, levels, nreg, subtract, A.seed)) as ex:
+                             initargs=(A.kind, units, bins, edges, levels, nreg, subtract, A.seed, vcache)) as ex:
         for res, n in ex.map(work, uts, chunksize=1):
             for b in range(nb):
                 acc[b] += res[b]
@@ -319,7 +415,7 @@ def main():
     assert done == nused, (done, nused)
 
     shell_vol = 4 / 3 * np.pi * (edges[1:]**3 - edges[:-1]**3)
-    out = dict(r_edges=edges, r_mid=np.sqrt(edges[1:] * edges[:-1]), m_edges=medges, r_units='Mpc/h comoving',
+    out = dict(r_edges=edges, r_mid=rmid, binning=bkind, weight=A.weight, m_edges=medges, r_units='Mpc/h comoving',
                a=a, z=1 / a - 1, box=L, kind=A.kind, snapshot=A.snapshot, halos=A.halos, selfpot=selfpot,
                offset=A.offset, n_halos=np.array([len(b['c']) for b in bins]), particle_fraction=nused / ntot,
                nbar=nbar, level=lev, frac=frac, target=A.target, jk=J,
