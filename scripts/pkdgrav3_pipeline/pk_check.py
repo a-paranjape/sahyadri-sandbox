@@ -6,8 +6,11 @@ k_mean <= KLIN (PK_KLIN, default 0.1 h/Mpc, at least the two lowest bins):
   absolute  R = <(P_mm - 1/nbar) / P_ref>_modes with P_ref = P_CLASS(z_start) [D(z)/D(z_start)]^2 x halofit/linear
             (CLASS at z): cosmic variance of the realisation, sigma = sqrt(2 / N_modes); FAIL if |R - 1| >
             4 sigma + PK_ABS_TOL (0.02): catches normalisation, unit or growth errors, not the realisation's scatter
-  growth    G = <[P(z) / P(z_first)] / [P_ref(z) / P_ref(z_first)]>_modes: the same modes at both times, so the
-            realisation's scatter cancels; FAIL if |G - 1| > PK_GROWTH_TOL (0.03)
+  growth    G = <[P(z) / P(z_first)] / [P_ref(z) / P_ref(z_first)]>_modes over the bins that are still linear at z,
+            Delta^2_lin(k, z) = k^3 P_lin / 2 pi^2 <= PK_DELTA2_LIN (0.05): the same modes at both times, so the
+            realisation's scatter cancels; FAIL if |G - 1| > PK_GROWTH_TOL (0.03). Snapshots without such a bin (late
+            times in small boxes; at k ~ 0.09 h/Mpc, z = 0 the few modes of a 100 Mpc/h box grow ~10 % below linear
+            theory through mode coupling, measured) are reported, not checked
   CLASS     the ratio to CLASS linear and halofit at z itself (CLASS includes radiation): reported, not checked
   IC table  CLASS at z_start against the table the ICs were made from: FAIL if it differs by more than 2 %
   bias      large-scale b1 per halo mass bin: reported (warning if not positive where a bin has >= 100 halos)
@@ -47,6 +50,7 @@ def check(E, P, outs, report):
     klin = float(E.get('PK_KLIN', '0.1') or 0.1)
     abs_tol = float(E.get('PK_ABS_TOL', '0.02') or 0.02)
     g_tol = float(E.get('PK_GROWTH_TOL', '0.03') or 0.03)
+    d2lin = float(E.get('PK_DELTA2_LIN', '0.05') or 0.05)
     ic = cm.get('ic_check')
     if ic is None:
         report.warn(name, 'no IC table to compare CLASS at z_start with')
@@ -87,7 +91,11 @@ def check(E, P, outs, report):
             row['G'] = 1.0
         else:
             s0, Pm0, ref0, sel0 = first
-            s2 = sel & sel0
+            plin = interp_col(lin, col, k)
+            s2 = sel & sel0 & (k**3 * plin / (2 * np.pi**2) <= d2lin)
+            row['n_growth_modes'] = int(np.sum(n[s2]))
+            if not s2.any():
+                row['G_note'] = 'no bin with Delta^2_lin <= %g' % d2lin
             if s2.any():
                 G = float(np.sum(n[s2] * (Pm[s2] / Pm0[s2]) / (ref[s2] / ref0[s2])) / np.sum(n[s2]))
                 row['G'] = G
@@ -100,11 +108,14 @@ def check(E, P, outs, report):
                     snap, hb.get('b1'), hb['n'], hb['np_lo'], hb['np_hi']))
         rows.append(row)
     c['info']['klin'] = klin
+    c['info']['delta2_lin'] = d2lin
+    c['info']['growth_checked'] = sum(1 for r in rows if r.get('n_growth_modes'))
     c['info']['ic_check'] = ic
-    c['info']['snapshots'] = [{k: r[k] for k in ('snap', 'z', 'R', 'sigma', 'G', 'class_lin', 'b1', 'nh') if k in r} for r in rows]
+    c['info']['snapshots'] = [{k: r[k] for k in ('snap', 'z', 'R', 'sigma', 'G', 'n_growth_modes', 'class_lin', 'b1', 'nh')
+                               if k in r} for r in rows]
     if rows:
         c['info']['R_range'] = [min(r['R'] for r in rows), max(r['R'] for r in rows)]
-        gs = [r['G'] for r in rows if 'G' in r]
+        gs = [r['G'] for r in rows if r.get('n_growth_modes') or r is rows[0]]
         c['info']['G_range'] = [min(gs), max(gs)]
     return rows
 

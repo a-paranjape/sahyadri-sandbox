@@ -211,7 +211,6 @@ def main():
     # ------------------------------------------------------------ fits
     c = R.check('fits')
     fe = sorted([e for e in ev if e.get('ev') == 'fits_done'], key=lambda e: jobnum(e['job']))
-    ve = [e for e in ev if e.get('ev') == 'vahc_done']
     if not fe:
         R.fail('fits', 'no fits_done event')
     else:
@@ -219,8 +218,18 @@ def main():
         if int(last.get('rc', 1)) != 0 or int(last.get('nfail', 1) or 0) != 0:
             R.fail('fits', 'last fits stage (job %s): rc %s, %s check failures (%s)' % (
                 last['job'], last.get('rc'), last.get('nfail'), last.get('check_log')))
-        if ve and jobnum(max(ve, key=lambda e: jobnum(e['job']))['job']) > jobnum(last['job']):   # PBS ids increase
-            R.fail('fits', 'vahc ran again (job %s) after the last fits stage (job %s)' % (ve[-1]['job'], last['job']))
+        # a value-added catalogue newer than its FITS table (same file server's times; a vahc rerun that only added
+        # .pk files changes nothing here)
+        comp_ = os.path.join(P['halo'], 'compressed')
+        newer = []
+        for s in tree_snaps:
+            ft = os.path.join(comp_, 'out_%d_vahc.fits.gz' % s)
+            for kind in ('vahc', 'tens', 'vpot'):
+                f = os.path.join(P['halo'], 'out_%d.%s' % (s, kind))
+                if os.path.isfile(f) and os.path.isfile(ft) and os.path.getmtime(f) > os.path.getmtime(ft):
+                    newer.append('out_%d.%s' % (s, kind))
+        if newer:
+            R.fail('fits', '%d catalogues newer than their FITS tables (vahc ran again after fits?): %s' % (len(newer), ', '.join(newer[:5])))
         c['info']['job'] = last['job']
         c['info']['npass'] = last.get('npass')
     comp = os.path.join(P['halo'], 'compressed')
