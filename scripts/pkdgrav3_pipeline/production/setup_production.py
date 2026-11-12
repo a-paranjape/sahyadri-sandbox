@@ -31,7 +31,10 @@ Simulation settings:
   I/O          staged (pkdgrav3 tools/staging/run_staged.pbs): snapshots and checkpoints go to the node's local SSD
                and are copied to NFS while the simulation runs (SIM_STAGING=1 in run.conf)
 
-usage: setup_production.py [--root DIR] [--archive DIR|''] [--keep-full-z "0 0.5 1 2 3 5 7"] [--keep-pct 1] [--L 200] [--N 1024] [--cosmo default] [--real 1|1,2|1-5]
+  --schedule [P]  also register every realisation with the run manager (tools/sahyadri_manager, must be running)
+                  and put its simulation in the manager's queue with priority P (default 0; lower runs first); the
+                  manager submits them within max_sim_running / max_sim_queued
+usage: setup_production.py [--schedule [P]] [--root DIR] [--archive DIR|''] [--keep-full-z "0 0.5 1 2 3 5 7"] [--keep-pct 1] [--L 200] [--N 1024] [--cosmo default] [--real 1|1,2|1-5]
                            [--codes DIR] [--pkd-io-root DIR] [--step-da 4.6154e-4] [--check-interval 250] [--force]
 Run with the pipeline's Python (numpy, scipy), e.g. /storage/shadab/pipeline_test/codes/venv/bin/python.
 """
@@ -169,6 +172,18 @@ def write(path, text, force, mode=0o644):
     os.chmod(path, mode)
 
 
+def schedule_run(conf, name, priority):
+    """Register `conf` with the running run manager and queue its simulation (through the manager's socket)."""
+    sys.path.insert(0, os.path.join(SANDBOX, 'tools', 'sahyadri_manager'))
+    import manager
+    if not os.path.exists(manager.SOCK):
+        sys.exit('the run manager is not running (%s): start tools/sahyadri_manager/start_manager.sh, then '
+                 'manager.py add <run.conf> and manager.py schedule %s' % (manager.SOCK, name))
+    for action in (dict(action='add_run', conf=conf, paused=False), dict(action='schedule', run=name, priority=priority)):
+        if manager.call(action) != 0:
+            sys.exit('manager refused %s for %s' % (action['action'], conf))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--root', default='/user/%s/sahyadri_scratch' % os.environ.get('USER', 'shadab'),
@@ -192,6 +207,8 @@ def main():
     ap.add_argument('--pot-step', type=float, default=100.0, help='potential step [(km/s)^2]')
     ap.add_argument('--check-interval', type=int, default=250, help='steps between checkpoints')
     ap.add_argument('--force', action='store_true', help='overwrite existing configuration files')
+    ap.add_argument('--schedule', nargs='?', const=0, type=int, default=None, metavar='PRIORITY',
+                    help='register with the run manager and queue the simulations (priority, default 0)')
     a = ap.parse_args()
     sys.path.insert(0, PIPE)
     import retention
@@ -457,6 +474,8 @@ Guide: %(sandbox)s/docs/pkdgrav3_pipeline_pawna.md, section "Production runs"
         write(os.path.join(hdir, 'README.txt'), '%s halos: Rockstar input rockstar_input.cfg; simulation and pipeline '
               'configuration in %s (run.conf, p.par)\n' % (name, sdir), True)
         print('  r%d (seed %d): %s\n        halos: %s' % (r, seed, sdir, hdir))
+        if a.schedule is not None:
+            schedule_run(os.path.join(sdir, 'run.conf'), name, a.schedule)
     print('''
 Nothing was submitted. Check (and edit if needed) for each realisation:
   r<R>/run.conf  r<R>/p.par  halos/.../r<R>/rockstar_input.cfg   (and %s/cosmology.txt)
