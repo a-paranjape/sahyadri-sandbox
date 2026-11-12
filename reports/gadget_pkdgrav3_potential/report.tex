@@ -14,7 +14,7 @@
 
 \title{Gravitational potential, particles and halos:\\ \gad{} versus \pkd{} from identical initial conditions\\
 \large $32^3$ and $256^3$ particles in $200$\,\Mpch, Sahyadri default settings on pawna}
-\author{Sahyadri sandbox, branch \fp{gadget-pkdgrav3-potential}}
+\author{Sahyadri sandbox, branch \fp{rockstar-pkc-reader}, tag \fp{potcmp-256-report}}
 \date{12 November 2026}
 
 \begin{document}
@@ -90,7 +90,7 @@ job logs & \fp{data/logs/<stage>.potcmp_{gadget,pkd}256_r1.<job>.log}, chains \f
 \end{tabular}
 \end{center}
 
-\subsection*{Scripts and report (repository \fp{a-paranjape/sahyadri-sandbox}, branch \fp{gadget-pkdgrav3-potential})}
+\subsection*{Scripts and report (repository \fp{a-paranjape/sahyadri-sandbox}, branch \fp{rockstar-pkc-reader}; tag \fp{potcmp-256-report})}
 \begin{center}\small
 \begin{tabular}{@{}L{0.36\textwidth}L{0.61\textwidth}@{}}
 \toprule
@@ -245,7 +245,7 @@ shared node made the VAHC rerun take $\sim$3.5\,h for 94 snapshots with 4 proces
 %======================================================================================================
 \section{Reproducing}
 \begin{verbatim}
-# on pawna, in a clone of sahyadri-sandbox (branch gadget-pkdgrav3-potential)
+# on pawna, in a clone of sahyadri-sandbox (branch rockstar-pkc-reader)
 cd scripts/gadget_pkdgrav3_compare
 bash -lc "bash setup_gadget4_pawna.sh <gadget4 source> <G4HOME> 256"   # Gadget-4 (once)
 bash submit_compare.sh compare256.conf                                 # 9 PBS jobs
