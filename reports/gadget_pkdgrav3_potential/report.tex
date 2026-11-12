@@ -156,6 +156,20 @@ stored, so code differences can be given a \emph{paired} jackknife error: leave 
 and take the scatter of the difference. That removes the large-scale variance the two runs share, which dominates
 the error of each stack on its own. The figures are made by the notebook \fp{stack_potential.ipynb}.
 
+\paragraph{Volume-weighted stacks and linear bins.} Counting every (halo, particle) pair makes the stack a
+\emph{mass-weighted} average over the shell: dense parts (filaments, neighbouring halos) count more than voids. The
+\emph{volume-weighted} mean and variance average over space instead (\texttt{-{}-weight volume}). Each code's potential
+is put on an $N_g^3$ grid of cell centres ($512^3$, spacing 0.39\,\Mpch, at $256^3$) by a weighted local linear
+fit $\phi \approx a + \vec g\cdot\Delta\vec x$ to the 16 nearest particles. The grid points are then stacked exactly
+like particles: same trees, jackknife, and dilution by grid index, so both codes use the same points. A plain
+inverse-distance average is biased toward the denser side of the neighbourhood, i.e.\ too deep near structures: on a
+synthetic clustered test it biased the stacked mean by up to 8\%, against $\le 1.8\%$ (median 0.4\%) for the linear
+fit. The interpolation reads all particles into one KD-tree; beyond $512^3$ particles it has to be done slab by slab
+(not yet implemented). Every stack is made with two binnings: 36 logarithmic bins from 0.02 to 50\,\Mpch, and 250
+linear bins of 0.2\,\Mpch{} from 0 to 50\,\Mpch. Shells with fewer than 50 pairs or grid points are masked, and so are volume-weighted shells inside one grid
+cell, where the stack only sees the interpolation. Script:
+\fp{run_stacks_local.sh} (run on the Mac from copies of the four snapshots).
+
 \paragraph{Halo catalogues.} \fp{compare_halos.py} compares host-halo mass ($M_{\rm vir}$, $M_{200b}$) and
 $V_{\max}$ functions, and matches host halos one to one (mutual nearest centres within $0.5\,R_{\rm vir}$ of the
 \gad{} halo and $|\log_{10} M_{\rm pkd}/M_{\rm Gadget}| < 0.5$). For matched halos it reports, per mass bin, the

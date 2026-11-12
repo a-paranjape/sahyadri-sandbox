@@ -199,3 +199,90 @@ error.}
 paired jackknife error.}
 \label{fig:xi256}
 \end{figure}
+
+\subsection{Volume-weighted stacks and linear bins}
+
+Figures~\ref{fig:w256}--\ref{fig:wlin256b} show the particle-weighted stacks (solid) and the volume-weighted stacks
+(dashed, $512^3$ grid points) for both codes in the same mass bins. Table~\ref{tab:w256} lists them at $z=0$ at
+selected radii of the 0.2\,\Mpch{} linear bins. Volume-weighted shells inside one grid cell
+($r<0.39$\,\Mpch) are masked.
+
+\begin{itemize}
+\item \textbf{Volume versus particle weighting.} The volume-weighted mean is much shallower at every radius, and the
+gap grows outward. At $z=0$ in the lowest bin it is $-3.1\times10^5$\,\kms{} at 2\,\Mpch{} (particle-weighted:
+$-1.1\times10^6$) and $-3\times10^4$ at 45\,\Mpch{} ($-5.7\times10^5$). Space far from a halo is mostly voids, where
+$\phi > 0$. The volume mean therefore tends to the box mean ($\phi$ averages to zero over the box), while particles
+keep sampling the wells of neighbouring structure. The volume-weighted scatter is also smaller, $(5.5$--$7)\times10^5$
+against $(7$--$13)\times10^5$\,\kms, and it is almost flat in $r$. The bump of the particle-weighted stack at
+1--3\,\Mpch{} (neighbouring larger halos) is absent from the volume-weighted one, which rises smoothly.
+\item \textbf{\pkd{} $-$ \gad{}, volume-weighted.} For every mass bin with at least 10 halos, at all four redshifts
+and at all radii from 0.4 to 50\,\Mpch, the difference is within 2 paired errors, and $|\Delta\langle\phi\rangle_V|
+\le 0.016\,\sigma_\phi$. The largest coherent offset is in the lowest bin at $z=0$: \pkd{} is shallower by
+1.2--1.8 errors ($0.007\,\sigma_\phi$, about $4\times10^3$\,\kms) at all radii, which looks like a residual
+zero-point offset rather than a radial feature.
+\item \textbf{\pkd{} $-$ \gad{}, particle-weighted, linear bins.} The first shell (0--0.2\,\Mpch) holds the inner
+halo, and \pkd{} is deeper there by 3--8 paired errors ($0.02$--$0.07\,\sigma_\phi$), as in the log bins. Beyond
+it most radii are within 2 errors. A few shells at 10--45\,\Mpch{} reach 3--5 errors, but they stay
+$\le 0.022\,\sigma_\phi$. The volume-weighted stacks do not show these excursions. They come from particles in
+neighbouring halos and filaments, whose positions differ between the codes (median $\Delta x = 0.12$\,\Mpch).
+\end{itemize}
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{l rrrrrrrr}
+\toprule
+$r$ [\Mpch] & 0.1 & 0.5 & 1.1 & 2.1 & 5.1 & 10.1 & 20.1 & 45.1 \\
+\midrule
+\multicolumn{9}{l}{$2\times10^{12}$--$10^{13}$\,\Msunh{} (13\,375 halos)} \\
+$\langle\phi\rangle_P$ [$10^5$\,\kms] & $-4.9$ & $-5.5$ & $-9.4$ & $-11.4$ & $-9.3$ & $-8.3$ & $-7.0$ & $-5.7$ \\
+$\langle\phi\rangle_V$ [$10^5$\,\kms] & -- & $-3.5$ & $-3.3$ & $-3.1$ & $-2.6$ & $-2.0$ & $-1.3$ & $-0.34$ \\
+$\Delta_P$/err & $-4.0$ & 1.0 & 0.5 & 0.2 & $-0.2$ & $-0.5$ & 0.9 & $-2.9$ \\
+$\Delta_V$/err & -- & 1.8 & 1.4 & 1.6 & 1.7 & 1.8 & 1.8 & 1.2 \\
+\midrule
+\multicolumn{9}{l}{$10^{13}$--$5\times10^{13}$\,\Msunh{} (3\,181 halos)} \\
+$\langle\phi\rangle_P$ & $-9.8$ & $-7.4$ & $-9.0$ & $-11.4$ & $-10.9$ & $-9.1$ & $-7.4$ & $-5.8$ \\
+$\langle\phi\rangle_V$ & -- & $-6.2$ & $-5.2$ & $-4.6$ & $-3.6$ & $-2.8$ & $-1.7$ & $-0.47$ \\
+$\Delta_P$/err & $-7.8$ & $-0.8$ & 0.4 & $-0.3$ & 0.3 & $-2.4$ & $-4.9$ & $-3.2$ \\
+$\Delta_V$/err & -- & $-0.4$ & $-0.8$ & $-0.9$ & $-0.8$ & $-1.1$ & $-0.3$ & $-0.6$ \\
+\midrule
+\multicolumn{9}{l}{$5\times10^{13}$--$2\times10^{14}$\,\Msunh{} (525 halos)} \\
+$\langle\phi\rangle_P$ & $-21.7$ & $-15.4$ & $-12.4$ & $-13.3$ & $-11.9$ & $-10.3$ & $-8.4$ & $-6.0$ \\
+$\langle\phi\rangle_V$ & -- & $-13.5$ & $-10.1$ & $-8.0$ & $-5.9$ & $-4.4$ & $-2.7$ & $-0.67$ \\
+$\Delta_P$/err & $-7.0$ & 0.5 & $-1.0$ & 0.2 & $-1.0$ & $-1.0$ & 0.9 & 0.0 \\
+$\Delta_V$/err & -- & $-0.8$ & $-0.1$ & $-0.4$ & 0.0 & 0.1 & 0.4 & 0.8 \\
+\midrule
+\multicolumn{9}{l}{$>2\times10^{14}$\,\Msunh{} (78 halos)} \\
+$\langle\phi\rangle_P$ & $-46.5$ & $-34.6$ & $-26.6$ & $-21.1$ & $-16.1$ & $-13.4$ & $-10.1$ & $-6.1$ \\
+$\langle\phi\rangle_V$ & -- & $-30.6$ & $-22.2$ & $-16.3$ & $-10.6$ & $-7.6$ & $-4.5$ & $-1.2$ \\
+$\Delta_P$/err & $-2.8$ & $-0.5$ & 1.8 & 0.9 & $-0.4$ & 0.3 & $-0.2$ & $-1.7$ \\
+$\Delta_V$/err & -- & $-0.6$ & 0.1 & 0.2 & $-0.1$ & 0.0 & 0.9 & 0.4 \\
+\bottomrule
+\end{tabular}
+\caption{$256^3$, $z=0$, linear 0.2\,\Mpch{} bins (shell centres): \gad{} particle-weighted ($P$) and
+volume-weighted ($V$) mean potential, and \pkd{} $-$ \gad{} over its paired jackknife error. The full table for all
+redshifts is printed in \fp{stack_potential.ipynb}.}
+\label{tab:w256}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/stack_w_256_out100.pdf}
+\caption{$256^3$, $z=0$, log bins: particle-weighted (solid) and volume-weighted (dashed) stacks for \gad{} and
+\pkd{}. Bands: $\pm\sigma_\phi$ of \gad{} for each weighting (the narrower band, starting at 0.4\,\Mpch, is volume-weighted). Bottom: \pkd{} $-$ \gad{}
+with the paired jackknife error.}
+\label{fig:w256}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/stack_lin_w_256_out100.pdf}
+\caption{As Fig.~\ref{fig:w256} in 250 linear bins of 0.2\,\Mpch{} from 0 to 50\,\Mpch.}
+\label{fig:wlin256}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/stack_lin_w_256_out046.pdf}
+\caption{As Fig.~\ref{fig:wlin256} at $z=1$.}
+\label{fig:wlin256b}
+\end{figure}

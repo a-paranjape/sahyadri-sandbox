@@ -15,7 +15,10 @@ higher $V_{\max}$ and 4--9\% deeper $\phi_{\min}$. This is consistent with \pkd{
 under the production settings. For the same particles, the mean potentials of matched halos agree to 0.5\%.
 \item \textbf{Stacked potential.} Around halos the stacked mean potential agrees to 1--2\% ($\le0.02\,\sigma_\phi$)
 from 0.2 to 50\,\Mpch{} at $z = 3$, 1, 0.5 and 0. Inside 0.1\,\Mpch{} \pkd{} is 3--6\% deeper.
+The volume-weighted mean (potential on a $512^3$ grid) is much shallower than the particle-weighted one and tends to
+zero far from the halos. Its code difference is within 2 paired errors ($\le0.016\,\sigma_\phi$) at every radius
+from 0.4 to 50\,\Mpch, in both 36 log bins and 250 linear bins of 0.2\,\Mpch.
 \end{itemize}
 The stacking tool keeps only per-mass-bin sums and dilutes the outer shells by particle ID. A stack of a $256^3$
-snapshot with $\sim17\,000$ halos takes $\sim10$\,s.
+snapshot with $\sim17\,000$ halos takes $\sim10$\,s; gridding the potential for the volume weighting takes 6\,min.
 \end{abstract}
