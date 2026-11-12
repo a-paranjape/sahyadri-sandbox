@@ -172,7 +172,9 @@ class Run:
             self.plan = retention.plan(self.E)
             self.err = None
         except ValueError as e:
-            self.plan, self.err = None, str(e)
+            # after "move to trash"/purge the run's output_steps.txt is gone with its directory: not an error then
+            self.plan = None
+            self.err = None if (self.ms.get('trash') or self.ms.get('purged')) else str(e)
 
     def save(self):
         atomic_json(self.msfile, self.ms)
@@ -853,6 +855,10 @@ class Manager:
         except OSError:
             pass
         run.ms['trash'] = None
+        try:                       # the retention plan reads output_steps.txt, which is back now
+            run.plan, run.err = retention.plan(run.E), None
+        except ValueError as e:
+            run.plan, run.err = None, str(e)
         run.note('trash undone: data back in place')
         return 'restored'
 
