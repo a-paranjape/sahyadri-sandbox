@@ -189,3 +189,7 @@ PP_OVERWRITE=1` (`compare256.conf`; pawna jobs 2536704/2536705 pkdgrav3, 2536706
 - `compare256_vpotfill.conf`, `compare256_gadget_vpotfill.conf`: fill-in without `--overwrite` (12 h) in case a
   run stops at walltime; not needed this time. Walltime cannot be changed with `qalter` on pawna.
 - `vpot_sums.so` must be rebuilt (`cc -O3 -fopenmp -shared -fPIC`) where the source is newer than the library.
+- FITS: the first run (2536705/2536707) failed on `trees/tree_0_0_0.fits.gz` (read-back float sums over 2e6-row
+  chunks vs the whole column; fixed 27a09dc) and froze `locations.fits.gz` with FitsRow = -1 (restart-safe since
+  3155b80). After reruns 2536787/2536788 and 2536792/2536793: 661 PASS / 0 FAIL per code, all 94 `_vahc.fits.gz`
+  with `HAS_VPOT = True` and `phi_rs` ... `phi_R5Mpch`.
