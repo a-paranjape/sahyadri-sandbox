@@ -33,7 +33,7 @@ event() {
     "$(_json_str "$(hostname -s)")" "$(_json_str "$ev")")
   for kv in "$@"; do
     k=${kv%%=*}; v=${kv#*=}
-    if [[ $v =~ ^-?[0-9]{1,15}$ ]]; then line="$line, $(_json_str "$k"): $v"; else line="$line, $(_json_str "$k"): $(_json_str "$v")"; fi
+    if [[ $v =~ ^-?(0|[1-9][0-9]{0,14})$ ]]; then line="$line, $(_json_str "$k"): $v"; else line="$line, $(_json_str "$k"): $(_json_str "$v")"; fi
   done
   printf '%s}\n' "$line" >> "$EVFILE" 2>/dev/null
   return 0

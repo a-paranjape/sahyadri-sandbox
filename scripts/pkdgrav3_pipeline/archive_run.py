@@ -85,8 +85,10 @@ def main():
     if not V.get('ok'):
         sys.exit('%s: verification failed; not archiving' % vf)
     files = retention.kept_files(E, pl)
+    # verify.json's mtime: set by the same file server as the kept files' (job clocks on the nodes differ)
+    vt = os.path.getmtime(vf)
     late = [rel for cat, _s, src, rel in files
-            if cat not in ('log', 'events', 'meta') and os.path.getmtime(src) > V['t']]
+            if cat not in ('log', 'events', 'meta') and os.path.getmtime(src) > vt]
     if late:
         sys.exit('%d kept files changed after verify (%s): run verify again' % (len(late), ', '.join(late[:5])))
     adir = os.path.join(E['ARCHIVE'], P['rel']['state'])

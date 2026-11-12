@@ -93,6 +93,13 @@ def atomic_json(path, obj):
     os.replace(tmp, path)
 
 
+def jobnum(j):
+    try:
+        return int(str(j).split('.')[0])
+    except ValueError:
+        return -1
+
+
 def short(job):
     return str(job).split('.')[0]
 
@@ -154,10 +161,17 @@ class Run:
             cut = data.rfind(b'\n') + 1      # only complete lines
             for line in data[:cut].splitlines():
                 try:
-                    self.ev.append(json.loads(line))
-                    new += 1
-                except ValueError:
-                    pass
+                    e = json.loads(line)
+                except ValueError:   # numbers with leading zeros (step 00124) from jobs before pipeline_env fix
+                    try:
+                        e = json.loads(re.sub(rb'(:\s*)(-?0\d+)(\s*[,}])', rb'\1"\2"\3', line))
+                    except ValueError:
+                        continue
+                for k in ('step',):
+                    if k in e:
+                        e[k] = str(e[k])
+                self.ev.append(e)
+                new += 1
             self.offsets[f] = off + cut
         if new:
             self.ev.sort(key=lambda e: e.get('t', 0))
@@ -200,7 +214,7 @@ class Run:
     def derive(self, qjobs, qtime):
         D = dict(name=self.name, conf=self.conf, n_out=len(self.outs), err=self.err)
         J = self.jobs(qjobs, qtime)
-        D['jobs'] = sorted(J.values(), key=lambda j: j.get('submitted', j.get('start', 0)) or 0)
+        D['jobs'] = sorted(J.values(), key=lambda j: jobnum(j['job']))
         ready = set()
         for e in self.ev:
             if e['ev'] == 'snap_ready' and e.get('step') in self.step_index:
@@ -219,8 +233,8 @@ class Run:
         D['last'] = last
         D['active'] = [j for j in D['jobs'] if j['status'] in ('submitted', 'queued', 'held', 'running', 'exiting')]
 
-        def ok_after(evname, t0=0):
-            es = [e for e in self.ev if e['ev'] == evname and e['t'] >= t0]
+        def ok_after(evname):   # the event of the newest job
+            es = sorted((e for e in self.ev if e['ev'] == evname), key=lambda e: jobnum(e['job']))
             return es[-1] if es else None
         D['verify'] = ok_after('verify_done')
         D['archive'] = ok_after('archive_done')
@@ -476,8 +490,8 @@ class Manager:
             return 0
         v = D['verify']
         if lv and lv['status'] == 'done' and v and int(v.get('ok', 0)) == 1 and E.get('ARCHIVE'):
-            la = D['last'].get('archive')   # one archive job per passed verify
-            if la is None or (la.get('submitted') or la.get('start') or 0) < (lv.get('end') or 0):
+            la = D['last'].get('archive')   # one archive job per passed verify (PBS ids increase; node clocks differ)
+            if la is None or jobnum(la['job']) < jobnum(lv['job']):
                 run.submit('archive', [], dict(after_verify=lv['job']))
         return 0
 
@@ -578,7 +592,10 @@ class Manager:
         if D['active']:
             return False, 'jobs of this run are queued or running: %s' % ', '.join(j['job'] for j in D['active'])
         v, a = D['verify'], D['archive']
-        if not (v and int(v.get('ok', 0)) and a and int(a.get('ok', 0)) and a['t'] > v['t']):
+        vf, mf = os.path.join(P['state'], 'verify.json'), os.path.join(P['state'], 'MANIFEST.json')
+        # order by file times (one file server), not by event times (node clocks differ by minutes)
+        if not (v and int(v.get('ok', 0)) and a and int(a.get('ok', 0)) and os.path.isfile(vf) and os.path.isfile(mf)
+                and os.path.getmtime(mf) > os.path.getmtime(vf)):
             return False, 'needs a passed verify followed by a passed archive'
         if not E.get('ARCHIVE'):
             return False, 'ARCHIVE not set'

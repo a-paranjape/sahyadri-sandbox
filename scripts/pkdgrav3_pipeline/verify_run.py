@@ -208,7 +208,7 @@ def main():
             R.warn('halos', 'halo count %d -> %d between snapshots %d and %d' % (nh[a], nh[b], a, b))
     # ------------------------------------------------------------ fits
     c = R.check('fits')
-    fe = [e for e in ev if e.get('ev') == 'fits_done']
+    fe = sorted([e for e in ev if e.get('ev') == 'fits_done'], key=lambda e: jobnum(e['job']))
     ve = [e for e in ev if e.get('ev') == 'vahc_done']
     if not fe:
         R.fail('fits', 'no fits_done event')
@@ -217,7 +217,7 @@ def main():
         if int(last.get('rc', 1)) != 0 or int(last.get('nfail', 1) or 0) != 0:
             R.fail('fits', 'last fits stage (job %s): rc %s, %s check failures (%s)' % (
                 last['job'], last.get('rc'), last.get('nfail'), last.get('check_log')))
-        if ve and ve[-1]['t'] > last['t']:
+        if ve and jobnum(max(ve, key=lambda e: jobnum(e['job']))['job']) > jobnum(last['job']):   # PBS ids increase
             R.fail('fits', 'vahc ran again (job %s) after the last fits stage (job %s)' % (ve[-1]['job'], last['job']))
         c['info']['job'] = last['job']
         c['info']['npass'] = last.get('npass')
@@ -249,6 +249,13 @@ def main():
     print('verify %s in %.0f s -> %s' % ('PASSED' if R.ok() else 'FAILED', time.time() - t0,
                                          os.path.join(P['state'], 'verify.json')))
     sys.exit(0 if R.ok() else 1)
+
+
+def jobnum(j):
+    try:
+        return int(str(j).split('.')[0])
+    except ValueError:
+        return -1
 
 
 def compress(xs):
