@@ -442,13 +442,18 @@ class Manager:
         self.qjobs, self.qtime = jobs, now()
 
     def refresh_disk(self):
-        d = {}
+        d, seen = {}, {}           # one entry per file system and kind (several scratch roots may share one)
         for run in self.runs.values():
             for k in ('SCRATCH', 'ARCHIVE'):
                 p = run.E.get(k)
                 if p and p not in d and os.path.isdir(p):
+                    key = (os.stat(p).st_dev, k)
+                    if key in seen:
+                        if p not in seen[key]['paths']:
+                            seen[key]['paths'].append(p)
+                        continue
                     u = shutil.disk_usage(p)
-                    d[p] = dict(total=u.total, used=u.used, free=u.free, kind=k)
+                    d[p] = seen[key] = dict(total=u.total, used=u.used, free=u.free, kind=k, paths=[p])
             tot = 0
             for top in (run.P['sim'], run.P['halo']):
                 for dp, _ds, fs in os.walk(top):
