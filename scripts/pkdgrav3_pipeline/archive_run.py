@@ -188,7 +188,19 @@ def main():
                 for n in _fs:
                     os.chmod(os.path.join(d, n), fm)
                 os.chmod(d, dm)
-        print('read-only: files %o, directories %o (%s)' % (fm, dm, ', '.join(own)))
+        # the directories above the run (created with the user's umask, often 0700) must let others through:
+        # add read and search (r-x) for the classes the run's own directories grant, keep the owner's write
+        rx = dm & 0o555
+        for top in own:
+            d = os.path.dirname(top)
+            while True:
+                st = os.stat(d)
+                if st.st_uid == os.getuid() and (st.st_mode & rx) != rx:
+                    os.chmod(d, (st.st_mode & 0o7777) | rx)
+                if os.path.realpath(d) == os.path.realpath(E['ARCHIVE']) or d in ('/', ''):
+                    break
+                d = os.path.dirname(d)
+        print('read-only: files %o, directories %o (%s); parent directories readable' % (fm, dm, ', '.join(own)))
     os.remove(partial)
     return 0
 
