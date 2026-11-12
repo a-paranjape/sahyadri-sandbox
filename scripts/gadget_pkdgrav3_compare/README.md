@@ -173,3 +173,19 @@ Full write-up with figures, data and script paths: `reports/gadget_pkdgrav3_pote
 mostly from particle positions (median separation 0.12 Mpc/h); mass functions within 2-3 % above 1e12 Msun/h;
 pkdgrav3 halos 20-25 % more concentrated at 1e12-1e13 (softening); stacked potential within 1-2 % from 0.2 to
 50 Mpc/h, 3-6 % deeper in pkdgrav3 inside 0.1 Mpc/h.
+
+## VAHC rerun with `vahc_fast` and `.vpot` (2026-11-12)
+
+After merging `rockstar-pkc-reader`, VAHC and FITS were rerun at 256^3 for both codes with `PP_FAST=1 PP_POT=1
+PP_OVERWRITE=1` (`compare256.conf`; pawna jobs 2536704/2536705 pkdgrav3, 2536706/2536707 Gadget-4). The old
+`.vahc/.tens/.vpot` are kept in `$HALO_DIR/vahc_prev/`. 32^3 cannot be rerun: it has no `out_*.trees`.
+- Gadget-4 `.vpot`: `scripts/post-process/vpot_hdf5.py` (used by `run_addvalue.py --fast --pot` when the HDF5
+  snapshot has `PartType1/Potential`): phi = Potential / a, self term 0, the same `vpot_sums.c` routines as the
+  `.pkc` path, density from `ps.density_field` so `.vahc` is unchanged. Header `code = Gadget-4`.
+- `job_fits.pbs` passes `--pkc` only when the `.pkc` files exist; `job_vahc.pbs` `PP_OVERWRITE=1` backs up and
+  overwrites.
+- Mac check at z = 0: new `.vahc` bit-identical to the old for both codes; Gadget sphere sums = KD-tree brute
+  force; matched hosts: pkdgrav3 deeper by a median 5.6 % (rs), 2.2 % (Rvir), 1.3 % (2-5 Mpc/h).
+- `compare256_vpotfill.conf`, `compare256_gadget_vpotfill.conf`: fill-in without `--overwrite` (12 h) in case a
+  run stops at walltime; not needed this time. Walltime cannot be changed with `qalter` on pawna.
+- `vpot_sums.so` must be rebuilt (`cc -O3 -fopenmp -shared -fPIC`) where the source is newer than the library.
