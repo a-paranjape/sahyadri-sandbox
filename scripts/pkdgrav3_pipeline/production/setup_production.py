@@ -34,7 +34,7 @@ Simulation settings:
   --schedule [P]  also register every realisation with the run manager (tools/sahyadri_manager, must be running)
                   and put its simulation in the manager's queue with priority P (default 0; lower runs first); the
                   manager submits them within max_sim_running / max_sim_queued
-usage: setup_production.py [--schedule [P]] [--root DIR] [--archive DIR|''] [--keep-full-z "0 0.5 1 2 3 5 7"] [--keep-pct 1] [--L 200] [--N 1024] [--cosmo default] [--real 1|1,2|1-5]
+usage: setup_production.py [--schedule [P]] [--root DIR] [--archive DIR|''] [--keep-full-z "0 0.5 1 2 3 5 7"] [--keep-pct 1] [--L 200] [--N 1024] [--cosmo default|a,b|var_*|all] [--real 1|1,2|1-5]
                            [--codes DIR] [--pkd-io-root DIR] [--step-da 4.6154e-4] [--check-interval 250] [--force]
 Run with the pipeline's Python (numpy, scipy), e.g. /storage/shadab/pipeline_test/codes/venv/bin/python.
 """
@@ -194,7 +194,8 @@ def main():
     ap.add_argument('--keep-pct', type=float, default=1, help='percent of the particles kept of the other snapshots')
     ap.add_argument('--L', type=float, default=200.0, help='box size [Mpc/h]')
     ap.add_argument('--N', type=int, default=1024, help='particles per side')
-    ap.add_argument('--cosmo', default='default', help='cosmologies/<name>.cosmo')
+    ap.add_argument('--cosmo', default='default',
+                    help="cosmologies/<name>.cosmo; several: comma separated and/or shell patterns ('var_*'), or 'all'")
     ap.add_argument('--real', default='1', help='realisations, e.g. 1 or 1,2 or 1-5 (seeds: config/sims/seeds.txt)')
     ap.add_argument('--codes', default='/storage/shadab/pipeline_test/codes',
                     help='Rockstar, consistent-trees, venv (setup_pawna.sh)')
@@ -216,7 +217,27 @@ def main():
         retention.kept_subsamples(dict(SUBSAMPLES=SUBSAMPLES, KEEP_SUBSAMPLE_PCT=str(a.keep_pct)))
     except ValueError as e:
         sys.exit(str(e))
+    names = cosmo_names(a.cosmo)
+    print('cosmologies: %s; realisations %s' % (', '.join(names), a.real))
+    for cn in names:
+        setup_cosmo(a, cn)
 
+
+def cosmo_names(spec):
+    """'default', 'a,b', 'var_*', 'all' -> cosmology names (cosmologies/<name>.cosmo), in the order given."""
+    import fnmatch
+    have = sorted(f[:-6] for f in os.listdir(os.path.join(HERE, 'cosmologies')) if f.endswith('.cosmo'))
+    out = []
+    for part in [p.strip() for p in spec.split(',') if p.strip()]:
+        hit = have if part == 'all' else ([part] if part in have else fnmatch.filter(have, part))
+        if not hit:
+            sys.exit('no cosmology %s (available: %s)' % (part, ', '.join(have)))
+        out += [h for h in hit if h not in out]
+    return out
+
+
+def setup_cosmo(a, cosmo):
+    a.cosmo = cosmo
     c = read_cosmo(a.cosmo)
     L, N = a.L, a.N
     sim = 'Sahyadri_L%sN%d' % (fmt_l(L), N)
