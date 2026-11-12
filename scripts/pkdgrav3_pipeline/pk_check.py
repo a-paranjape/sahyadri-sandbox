@@ -3,7 +3,7 @@
 
 For every output, from out_<snap>.pk (pk_measure.py) and <halo dir>/pk/class_* (class_pk.py), on the linear bins
 k_mean <= KLIN (PK_KLIN, default 0.1 h/Mpc, at least the two lowest bins):
-  absolute  R = <(P_mm - 1/nbar) / P_ref>_modes with P_ref = P_CLASS(z_start) [D(z)/D(z_start)]^2 x halofit/linear
+  absolute  R = <P_mm / P_ref>_modes (raw P_mm: see below) with P_ref = P_CLASS(z_start) [D(z)/D(z_start)]^2 x halofit/linear
             (CLASS at z): cosmic variance of the realisation, sigma = sqrt(2 / N_modes); FAIL if |R - 1| >
             4 sigma + PK_ABS_TOL (0.02): catches normalisation, unit or growth errors, not the realisation's scatter
   growth    G = <[P(z) / P(z_first)] / [P_ref(z) / P_ref(z_first)]>_modes over the bins that are still linear at z,
@@ -68,7 +68,10 @@ def check(E, P, outs, report):
             continue
         m, d = pk_measure.read(f)
         k, n = d['k_mean'], d['Nmodes']
-        Pm = d['Pmm'] - d['Pmm_shot']
+        # raw P(k), no shot-noise subtraction: the particles start on a lattice, so on these (linear) scales their
+        # discreteness noise is far below the Poisson 1/nbar (subtracting it removed ~7 % of the z = 12 power at
+        # k = 0.063 h/Mpc in a 64^3, 100 Mpc/h test and faked 7 % excess growth); 1/nbar stays in the .pk files
+        Pm = d['Pmm']
         col = 2 + snap                      # class tables: k, z_start, outputs...
         boost = interp_col(nl, col, k) / interp_col(lin, col, k)
         ref = interp_col(lin, 1, k) * (Ds[snap] / D0)**2 * boost
@@ -151,15 +154,18 @@ def plot(rows, cm_path, png, title):
         Pm = np.array(r['Pm'])
         ok = (k < r['kNy']) & (Pm > 0)
         ax[0].loglog(k[ok], Pm[ok], '-', color=colr, lw=2, label='z = %.2f' % r['z'])
+        shot = r['shot']
         ax[0].loglog(lin[:, 0], lin[:, 2 + r['snap']], '--', color=colr, lw=1)
         ax[0].loglog(nl[:, 0], nl[:, 2 + r['snap']], ':', color=colr, lw=1)
         ref = np.array(r['ref'])
         ax[1].semilogx(k[ok], Pm[ok] / ref[ok], '-', color=colr, lw=2, label='z = %.2f' % r['z'])
+    ax[0].axhline(shot, color=MUTED, lw=0.8, ls='-.', zorder=0)
+    ax[0].text(ax[0].get_xlim()[0] * 1.3 if ax[0].get_xlim()[0] > 0 else 1e-3, shot * 1.15, '1/nbar', color=MUTED, fontsize=8)
     k0 = np.array(pick[-1]['k'])
     ax[0].axvline(pick[-1]['kNy'] / 2, color=GRID, lw=1, zorder=0)
     ax[0].set_xlabel('k  [h/Mpc]')
     ax[0].set_ylabel('P(k)  [(Mpc/h)$^3$]')
-    ax[0].set_title('matter P(k): measured (solid), CLASS linear (dashed), halofit (dotted)', fontsize=9, color=MUTED)
+    ax[0].set_title('matter P(k), no shot noise subtracted (solid); CLASS linear (dashed), halofit (dotted)', fontsize=9, color=MUTED)
     ax[0].legend(frameon=False, fontsize=8, loc='lower left')
     ax[0].set_ylim(max(1e-2, min(np.array(r['Pm'])[np.array(r['Pm']) > 0].min() for r in pick) / 3), None)
     ax[1].axhline(1, color=MUTED, lw=1)
