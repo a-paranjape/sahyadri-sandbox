@@ -137,7 +137,17 @@ class Run:
             self.save()
 
     def load(self):
-        self.E = retention.load_conf(self.conf)
+        # the manager keeps a copy of every run.conf: a purged run's own copy is gone with its scratch directory
+        saved = os.path.join(HOME, 'confs', self.conf.strip('/').replace('/', '__'))
+        if os.path.isfile(self.conf):
+            os.makedirs(os.path.dirname(saved), exist_ok=True)
+            shutil.copyfile(self.conf, saved)
+            self.E = retention.load_conf(self.conf)
+        elif os.path.isfile(saved):
+            self.E = retention.load_conf(saved)
+            self.E['CONF'] = self.conf
+        else:
+            raise FileNotFoundError('%s (and no saved copy)' % self.conf)
         self.P = retention.paths(self.E)
         self.name = '%s/r%s' % (self.E['STEM'], self.E['REAL'])
         self.outs = retention.planned_outputs(self.E, self.P)
