@@ -16,12 +16,15 @@ job_gadget.pbs                                       submit_pipeline.sh compare3
 
 | File | What |
 |---|---|
-| `compare32.conf`, `compare32_gadget.conf` | the run (one config, two views: `SIM_CODE=gadget4` switches `STEM` to the Gadget run) |
+| `compare32.conf`, `compare32_gadget.conf` | the 32^3 run (one config, two views: `SIM_CODE=gadget4` switches `STEM` to the Gadget run) |
+| `compare256.conf`, `compare256_gadget.conf` | the 256^3 run, with VAHC for both codes (`CMP_PKD_STAGES`, `CMP_G4_STAGES`) |
 | `Config.sh.template`, `setup_gadget4_pawna.sh` | Gadget-4 builds `mesh<2N>-NGenIC` and `mesh<2N>` with the production compile options |
 | `make_gadget4_param.py` | Gadget-4 parameter files from `config/sims/run.param.template` (edits of `submit_CiPod.sh`) |
 | `gadget4_ic_to_gadget2.py` | Gadget-4 HDF5 ICs -> Gadget-2 binary that pkdgrav3 reads (sorted, IDs 0..N-1, mass for pkdgrav3's G) |
 | `job_gadget.pbs` | CLASS, ICs, conversion, Gadget-4 run, snapshot list and redshifts |
-| `job_compare.pbs`, `compare_potential.py` | the comparison (numbers only: CSV, JSON, NPZ) |
+| `job_compare.pbs`, `compare_potential.py` | the comparison (numbers only: CSV, JSON, NPZ): potential, positions, velocities |
+| `halo_potential_profile.py` | stacked potential around halos in mass bins (stacks only), r in comoving Mpc/h |
+| `compare_halos.py` | mass and Vmax functions, matched halos, VAHC quantities |
 | `plot_compare.py` | figures from the comparison output (needs matplotlib; run anywhere) |
 | `submit_compare.sh` | submits everything as one PBS chain |
 
@@ -80,29 +83,23 @@ python3 $S/plot_compare.py $ROOT/data/compare/pkd32_vs_gadget32_r1        # wher
 
 ## Stacked potential profiles around halos (`halo_potential_profile.py`)
 
-Mean potential against distance from the halo centre, in halo-mass bins, with its scatter:
+Mean potential and its scatter in shells of comoving distance (Mpc/h) from host-halo centres, per halo-mass bin:
 
 ```bash
-P=$S/halo_potential_profile.py
-$P gadget <snapshot_100.hdf5> <halos/.../out_100.trees> g.npz --mbins 1e13,1e14,4e14,1e15 --rbins 0.1,15,20
-$P pkd    <snap.02020>        <halos/.../out_100.trees> p.npz --mbins ... --par p.par --offset <offset_median>
-$P pkc    <snap.02020>        <halos/.../out_100.trees> c.npz --mbins ... --par p.par --pkc-subsamples 1,3
-python3 $S/plot_potential_profile.py prof.png g.npz:Gadget-4 p.npz:pkdgrav3
+P=$S/halo_potential_profile.py; O=(--mbins 2e12,1e13,5e13,2e14,1e16 --rbins 0.02,50,36)
+$P gadget <snapshot_100.hdf5> <halos/.../out_100.trees> gadget_out100.npz "${O[@]}"
+$P pkd    <snap.02020>        <halos/.../out_100.trees> pkd_out100.npz "${O[@]}" --par p.par --offset <offset_median>
+$P pkc    <snap.02020>        <halos/.../out_100.trees> pkc_out100.npz "${O[@]}" --par p.par --offset <offset_median>
 ```
 
-- Per mass bin and shell: `halo_mean`, `halo_std` (mean and standard deviation over halos of each halo's shell
-  mean), `halo_sem`, `stack_mean`, `stack_std` (all particles of the bin's halos together), counts, and every
-  halo's own profile (`halo_shell_mean_<b>`). Radii in r/Rvir (`--r-units rvir`, default) or comoving Mpc/h.
-- Hosts only by default (`--all-halos` for subhaloes); `--max-halos` (default 2000 per bin, random) bounds the work.
-- Scaling: particles are read in chunks (HDF5 slices or `.pkc` blocks) by parallel processes; each chunk is paired
-  with a KD-tree of the bin's halo centres (`cKDTree.sparse_distance_matrix`, periodic), and only per-halo,
-  per-shell sums (count, sum phi, sum phi^2) are kept, so memory does not grow with the particle number. For
-  2048^3, `--pkc-subsamples 1,3` (4 % of the particles) is unbiased for the mean and reads 1/25 of the data.
-- `job_compare.pbs` runs it at the outputs closest to `PROF_Z` for Gadget-4 and pkdgrav3 (HDF5 and `.pkc`),
-  each code with its own consistent-trees halos, pkdgrav3 without self-term and aligned by `offset_median`.
-- Tests (Mac, 32^3 z = 0, Gadget halos): one halo's profile equal to a brute-force calculation (difference 0);
-  HDF5 and `.pkc` give the same shell counts up to particles on shell edges (positions differ by <= half the
-  1.95 kpc/h step) and potentials within one step; each run < 0.5 s.
+- Only stacks are kept (no per-halo profiles): per mass bin and shell `stack_mean`, `stack_std` (scatter over all
+  (halo, particle) pairs), `stack_err` (jackknife over 3^3 sub-cubes of halo centres), `delta_hm` (1 + xi_hm - 1),
+  `npair`, `r_mean`, and the per-sub-cube sums `jk_n`, `jk_s`, `jk_s2`, `jk_nh` (paired code-to-code errors).
+- Scaling: particles are read in chunks by parallel processes and paired with KD-trees of halo centres; outer shells
+  use nested subsamples u < 8^-l, u = hash(particle ID), so the work per halo is ~ levels x `--target` (16384) pairs
+  and the same particles are used in both codes. 256^3 with ~17 000 halos: 3-13 s on 8 cores.
+- Tests: brute force (identical without dilution, within 1.4 jackknife errors with it); HDF5 = `.pkc`.
+- Figures: `reports/gadget_pkdgrav3_potential/stack_potential.ipynb`.
 
 ## Gadget-4: `EVALPOTENTIAL` is needed
 
@@ -157,3 +154,13 @@ pawna outputs, results in `data/compare/pkd32_vs_gadget32_r1/` on pawna):
   uses G = 4.30172e-9), HDF5 rows are the IC particles in ID order, `.pkc` positions = HDF5 within half a step,
   `.pkc` potential = HDF5 x U^2/a within float32 precision, header box 200 Mpc/h (with the unit fix).
 - FFT Poisson routine: plane-wave Zel'dovich test on 64^3, slope 1.0003, correlation 1 - 5e-8.
+
+## Results: 256^3 and the report (2026-11-12)
+
+Full write-up with figures, data and script paths: `reports/gadget_pkdgrav3_potential/report.pdf` (LaTeX source,
+`stack_potential.ipynb`, `make_figures.py`, small data copies in `data/`). Data on pawna:
+`/storage/shadab/pkdgrav3_io/potcmp/data/{sims,halos}/potcmp/{gadget256,pkd256}/r1`,
+`.../data/compare/pkd256_vs_gadget256_r1`. In short (256^3, z = 0): potential rms difference 22 % (2 % at z = 3),
+mostly from particle positions (median separation 0.12 Mpc/h); mass functions within 2-3 % above 1e12 Msun/h;
+pkdgrav3 halos 20-25 % more concentrated at 1e12-1e13 (softening); stacked potential within 1-2 % from 0.2 to
+50 Mpc/h, 3-6 % deeper in pkdgrav3 inside 0.1 Mpc/h.

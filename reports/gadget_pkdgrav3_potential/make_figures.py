@@ -171,6 +171,44 @@ def halo_match(run, d, out):
     fig.tight_layout(); fig.savefig(os.path.join(out, 'halo_match_%s.pdf' % run)); plt.close(fig)
 
 
+def halo_potential(run, d, out):
+    p = os.path.join(d, 'halos.csv')
+    if not os.path.exists(p):
+        return
+    import pandas as pd
+    H = pd.read_csv(p)
+    zs = np.unique(H['z'])
+    pick = sorted({zs[np.argmin(abs(zs - zp))] for zp in (3, 1, 0.5, 0)})
+    qs = [('phimin', r'$\phi_{\min}$'), ('phimean', r'$\langle\phi\rangle_{<R_{\rm vir}}$'),
+          ('phicore', r'$\langle\phi\rangle$ of the 10% most bound'), ('lagr', 'pkdgrav3 $\\langle\\phi\\rangle$ of the Gadget members')]
+    me = np.logspace(11.5, 15.5, 17)
+    x = np.sqrt(me[1:] * me[:-1])
+    fig, ax = plt.subplots(1, 4, figsize=(18, 4), sharey=True)
+    for z, col in zip(pick, plt.cm.viridis(np.linspace(0, 0.85, len(pick)))):
+        h = H[H['z'] == z]
+        mg = h['mvir_gadget'].values
+        for j, (q, lab) in enumerate(qs):
+            if q == 'lagr':
+                y = h['phimean_pkd_of_gadget_members'].values / h['phimean_gadget'].values
+            else:
+                y = h[q + '_pkd'].values / h[q + '_gadget'].values
+            idx = np.digitize(mg, me) - 1
+            med, lo_, hi_ = (np.full(len(x), np.nan) for _ in range(3))
+            for b in range(len(x)):
+                v = y[(idx == b) & np.isfinite(y)]
+                if len(v) >= 5:
+                    med[b], lo_[b], hi_[b] = np.percentile(v, [50, 16, 84])
+            ax[j].plot(x, med, color=col, label='z = %.2f' % z)
+            ax[j].fill_between(x, lo_, hi_, color=col, alpha=0.15, lw=0)
+            ax[j].set_title(lab, fontsize=10)
+    for a in ax:
+        a.set_xscale('log'); a.axhline(1, color='k', lw=0.5); a.set_xlabel(r'$M_{\rm vir}$ Gadget-4  [M$_\odot$/h]')
+        a.set_xlim(me[0], me[-1])
+    ax[0].set_ylabel('pkdgrav3 / Gadget-4'); ax[0].set_ylim(0.8, 1.3); ax[0].legend(fontsize=8)
+    fig.suptitle('%s$^3$: potential of matched host halos (each code its own halo and particles; median, 16-84%%)' % run)
+    fig.tight_layout(); fig.savefig(os.path.join(out, 'halo_potential_%s.pdf' % run)); plt.close(fig)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('runs', nargs='+')
@@ -186,6 +224,7 @@ def main():
         snap_scatter(run, v['d'], A.figs)
         halo_mf(run, v['d'], A.figs)
         halo_match(run, v['d'], A.figs)
+        halo_potential(run, v['d'], A.figs)
     print('figures in', A.figs)
 
 

@@ -15,7 +15,7 @@ usage:
     --rbins 0.02,50,36                log bins in comoving r (Mpc/h): rmin, rmax, number
     --all-halos                       include subhaloes (default: hosts only, pid = -1)
     --max-halos 20000                 at most this many halos per mass bin (random, seed 0); 0 = all
-    --target 4096                     dilution: particles expected inside a level's outer radius (below)
+    --target 16384                    dilution: particles expected inside a level's outer radius (below)
     --jk 3                            jackknife: jk^3 sub-cubes of the box (by halo centre) for the error
     --par p.par                       pkdgrav3 parameter file (dSoft) to remove pkdgrav3's softened self-potential
     --offset X                        subtract X (km/s)^2 from every potential (e.g. offset_median, particles.csv)
@@ -32,10 +32,12 @@ mass bin through periodic KD-trees (cKDTree.sparse_distance_matrix of a halo gro
 (halo, particle) pair adds 1, phi, phi^2 and r to its (jackknife region, mass bin, shell) - a few small arrays.
 Radial dilution keeps the work per halo constant out to large radii: shell i is assigned level l_i, the smallest
 l >= 0 with nbar 4/3 pi r_out,i^3 / 8^l <= --target (nbar = particles read / L^3), and only the particles of the
-nested random subsample u < 8^-l (u uniform, independent of phi) are paired at that level. Each shell uses one
+nested subsample u < 8^-l are paired at that level, u = hash(particle ID) uniform in [0, 1) and independent of phi.
+Because u depends only on the ID (Gadget-4 ID - 1 = pkdgrav3 iOrder), runs from the same ICs use the same particles
+at every level, so the dilution noise largely cancels in a code-to-code difference. Each shell uses one
 level, so its mean and scatter are unbiased; the number of pairs per halo is ~ target x (number of levels) instead
-of nbar 4/3 pi r_max^3. At 2048^3 / 200 Mpc/h, 50 Mpc/h holds 5.6e8 particles; with target 4096 the outer level
-uses 1/8^6 of them. Cost ~ n_halo x levels x target x (local overdensity), plus reading the snapshot once.
+of nbar 4/3 pi r_max^3. At 2048^3 / 200 Mpc/h, 50 Mpc/h holds 5.6e8 particles; with target 16384 the outer level
+uses 1/8^5 of them. Cost ~ n_halo x levels x target x (local overdensity), plus reading the snapshot once.
 
 Output (npz), mass bin b, shell i:
   r_edges, r_mid (geometric), r_mean[b,i] (pair-weighted), m_edges, n_halos[b], m_mean[b], level[i], frac[i]
@@ -136,6 +138,16 @@ def pkd_selfpot(kind, L, a, ntot, par):
 G = {}
 
 
+def uhash(ids, seed):
+    """uniform [0, 1) from integer particle IDs (splitmix64): the same particle gets the same u in every code"""
+    with np.errstate(over='ignore'):
+        x = ids.astype(np.uint64) + np.uint64(0x9E3779B97F4A7C15) * np.uint64(seed + 1)
+        x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        x = x ^ (x >> np.uint64(31))
+    return (x >> np.uint64(11)).astype(np.float64) / float(2**53)
+
+
 def init(kind, units, bins, edges, levels, nreg, subtract, seed):
     L = units['L']
     groups = []
@@ -156,6 +168,8 @@ def load_unit(u):
             g = h['PartType1']
             x = g['Coordinates'][s:e].astype(np.float64)
             p = g['Potential'][s:e].astype(np.float64)
+            # common particle label: Gadget-4 ID - 1 = pkdgrav3 iOrder (pkdgrav3 HDF5 rows are in iOrder)
+            ids = g['ParticleIDs'][s:e].astype(np.int64) - 1 if kind == 'gadget' else np.arange(s, e, dtype=np.int64)
         if kind == 'pkd':
             x = (x + 0.5) * L
         p *= G['units']['scale']
@@ -167,18 +181,18 @@ def load_unit(u):
         h = f.header
         x = (X + 0.5) / h['q'] * h['box_size']
         p = P.astype(np.float64) * h['pot_step']
+        ids = np.asarray(ids, dtype=np.int64)
     x = np.mod(x, L)
     x[x >= L] = 0.0
-    return x, p - G['subtract']
+    return x, p - G['subtract'], ids
 
 
 def work(u):
     """-> per mass bin an array (4, nreg * nr): pair count, sum phi, sum phi^2, sum r"""
-    x, phi = load_unit(u)
+    x, phi, ids = load_unit(u)
     L, edges, levels, nreg = G['units']['L'], G['edges'], G['levels'], G['nreg']
     nr = len(edges) - 1
-    rng = np.random.default_rng([G['seed'], u[0]])
-    ur = rng.random(len(phi))
+    ur = uhash(ids, G['seed'])
     out = [np.zeros((4, nreg * nr)) for _ in G['bins']]
     for lev, (k0, k1) in levels.items():          # shells k0..k1-1 use subsample u < 8^-lev
         sel = np.where(ur < 8.0**-lev)[0] if lev else np.arange(len(phi))
@@ -231,7 +245,7 @@ def main():
     ap.add_argument('--rbins', default='0.02,50,36')
     ap.add_argument('--all-halos', action='store_true')
     ap.add_argument('--max-halos', type=int, default=20000)
-    ap.add_argument('--target', type=float, default=4096)
+    ap.add_argument('--target', type=float, default=16384)
     ap.add_argument('--jk', type=int, default=3)
     ap.add_argument('--par', default='')
     ap.add_argument('--offset', type=float, default=0.0)
@@ -256,7 +270,7 @@ def main():
         sel = src._select([float(p) for p in A.pkc_subsamples.split(',')] if A.pkc_subsamples else None)
         uts = [(f.path, i) for f in sel for i in range(len(f.counts))]
         nused = int(sum(f.header['n_particles'] for f in sel))
-    uts = [(i,) + tuple(u) for i, u in enumerate(uts)]           # unit index seeds its dilution random numbers
+    uts = [(i,) + tuple(u) for i, u in enumerate(uts)]
 
     rmin, rmax, nr = A.rbins.split(',')
     nr = int(nr)

@@ -15,7 +15,7 @@
 \title{Gravitational potential, particles and halos:\\ \gad{} versus \pkd{} from identical initial conditions\\
 \large $32^3$ and $256^3$ particles in $200$\,\Mpch, Sahyadri default settings on pawna}
 \author{Sahyadri sandbox, branch \fp{gadget-pkdgrav3-potential}}
-\date{11 November 2026}
+\date{12 November 2026}
 
 \begin{document}
 \maketitle
@@ -80,7 +80,7 @@ what & path \\
 initial conditions $256^3$ & \fp{data/sims/potcmp/gadget256/r1/ics/}: \fp{snapshot_ics_000.hdf5} (\gad{}), \fp{ics_gadget2.dat} (\pkd{} input), \fp{param_ics.txt}; CLASS: \fp{data/transfer/class_gadget256*} \\
 \pkd{} $256^3$ run & \fp{data/sims/potcmp/pkd256/r1/}: \fp{p.par}, \fp{snap.<step>} (HDF5), \fp{snap.<step>.s<pct>.0.pkc}, \fp{snapnames.txt}, \fp{run.log} \\
 halos $256^3$ & \fp{data/halos/potcmp/gadget256/r1/}, \fp{data/halos/potcmp/pkd256/r1/}: \fp{out_<snap>.list} (Rockstar), \fp{out_<snap>.trees} (consistent-trees hlists), \fp{out_<snap>.vahc}, \fp{trees/}, \fp{hlists/}; \fp{../scales.txt} \\
-comparison $256^3$ & \fp{data/compare/pkd256_vs_gadget256_r1/}: \fp{particles.csv}, \fp{halos.csv}, \fp{summary.json}, \fp{snap_*.npz}, \fp{profiles/{gadget,pkd,pkc}_out<i>.npz} (stacks), \fp{halos/} (\fp{halo_mf.csv}, \fp{halo_match.csv}, \fp{halo_match_out<i>.npz}), logs \\
+comparison $256^3$ & \fp{data/compare/pkd256_vs_gadget256_r1/}: \fp{particles.csv}, \fp{halos.csv} (potentials of matched halos), \fp{summary.json}, \fp{snap_*.npz} (200\,000-particle subsamples), \fp{profiles/{gadget,pkd,pkc}_out<i>.npz} (stacks, ID-hash dilution; the job's first version with per-chunk random dilution in \fp{profiles_jobrun_target4096/}), \fp{halos/} (\fp{halo_mf.csv}, \fp{halo_match.csv}, \fp{halo_match_out<i>.npz}), \fp{compare.log} \\
 $32^3$ (same layout) & \fp{data/sims/potcmp/{gadget32,pkd32}/r1/}, \fp{data/halos/potcmp/{gadget32,pkd32}/r1/}, \fp{data/compare/pkd32_vs_gadget32_r1/} (stacks in \fp{profiles/}; the earlier $r/R_{\rm vir}$ profiles in \fp{profiles_rvir_old/}) \\
 first $32^3$ run (no \texttt{EVALPOTENTIAL}) & \fp{/storage/shadab/pkdgrav3_io/potcmp/data_run1_zeropot/} (Potential $=0$; kept as evidence) \\
 job logs & \fp{data/logs/<stage>.potcmp_{gadget,pkd}256_r1.<job>.log}, chains \fp{data/logs/chain.*.txt} \\
@@ -143,13 +143,18 @@ mean over $3^3$ sub-cubes of halo centres. Each code uses its own halos and its 
 accumulated: per chunk of particles, a periodic KD-tree of the chunk is paired with trees of halo centres, and every
 pair adds $(1, \phi, \phi^2, r)$ to a (sub-cube, mass bin, shell) array, so memory does not depend on the number of
 halos or particles. To keep the cost per halo constant out to large radii the outer shells are diluted: shell $i$
-uses the nested random subsample $u < 8^{-\ell_i}$ of the particles, with the smallest $\ell_i$ for which the
-expected number of particles inside the shell's outer radius is $\le 4096$. Each shell uses one level, so its mean
-and scatter are unbiased (checked against a brute-force calculation: identical without dilution, within
-$1\sigma_{\rm jk}$ with it). The pair counts also give the halo--matter cross-correlation $1+\xi_{hm}(r)$. At
-$2048^3$ the outermost level uses $8^{-6}$ of the particles, and the cost is
-$\sim n_{\rm halo}\times$ levels $\times 4096$ pairs plus one pass through the snapshot.
-The figures are made by the notebook \fp{stack_potential.ipynb}.
+uses the nested subsample $u < 8^{-\ell_i}$ of the particles, with the smallest $\ell_i$ for which the expected
+number of particles inside the shell's outer radius is $\le 16384$. Here $u$ is a hash of the particle ID
+(\gad{} ID $-1$ = \pkd{} iOrder), uniform in $[0,1)$ and independent of $\phi$, so both codes use the same particles at
+every level and the subsampling noise cancels in their difference. (A first version drew $u$ at random per chunk; its
+outer-shell noise, $\sim2\times10^4$\,\kms, showed up as a spurious 3\% code difference at 45\,\Mpch{} and as a
+difference between \pkd{}'s HDF5 and \texttt{.pkc} stacks.) Each shell uses one level, so its mean and scatter are
+unbiased (checked against a brute-force calculation: identical without dilution, within $1.4\sigma_{\rm jk}$ with it). The pair counts also give the halo--matter cross-correlation $1+\xi_{hm}(r)$. At
+$2048^3$ the outermost level uses $8^{-5}$ of the particles, and the cost is
+$\sim n_{\rm halo}\times$ levels $\times 16384$ pairs plus one pass through the snapshot. The per-sub-cube sums are
+stored, so code differences can be given a \emph{paired} jackknife error: leave the same sub-cube out of both codes
+and take the scatter of the difference. That removes the large-scale variance the two runs share, which dominates
+the error of each stack on its own. The figures are made by the notebook \fp{stack_potential.ipynb}.
 
 \paragraph{Halo catalogues.} \fp{compare_halos.py} compares host-halo mass ($M_{\rm vir}$, $M_{200b}$) and
 $V_{\max}$ functions, and matches host halos one to one (mutual nearest centres within $0.5\,R_{\rm vir}$ of the
@@ -182,6 +187,13 @@ times byte-identical.
 \item \textbf{consistent-trees needs many halos per snapshot}: it fails at $32^3$ (``too few halos at scale factor
 0.768278 to calculate consistency metric'') even after relaxing \fp{gen_merger_cfg.pl}'s 20000-byte catalogue
 threshold. At $256^3$ the production threshold is used.
+\item \textbf{VAHC is the slowest stage at $256^3$}: 20--40\,min per snapshot and process at grid $512^3$ (FFT
+smoothing at many scales and per-halo loops), $\sim$23\,GB per process. With 4 processes, 94 snapshots did not fit in
+10\,h; the jobs were rerun with 8 processes and 30\,h (restartable: finished snapshots are skipped). At $2048^3$
+with 100 outputs this stage needs planning.
+\item \textbf{Column names}: consistent-trees hlists call the columns \texttt{Mvir}, \texttt{Rvir}; Rockstar lists
+\texttt{ID}, \texttt{X}, \ldots. The comparison scripts read both (fixed during the $256^3$ run; the first two
+comparison jobs stopped on this).
 \item \textbf{\pkd{} has no physical units when it reads an IC file} (\fp{units.cxx}): box size in the output
 headers and \texttt{.pkc} potential units are wrong unless \fp{dKpcUnit} and \fp{dMsolUnit} are given; the
 pipeline's parameter generator now writes them. A Gadget-2 input file's IDs become iOrder directly, so they must be

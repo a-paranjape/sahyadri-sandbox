@@ -1,11 +1,21 @@
 \begin{abstract}
-\noindent Gadget-4 and pkdgrav3 are run from identical initial conditions (Gadget-4 NGenIC, Sahyadri default
-settings, 200\,\Mpch) at $32^3$ and $256^3$ particles, and compared particle by particle (potential, position,
-velocity), halo by halo (Rockstar, consistent-trees, VAHC) and through the stacked potential around halos in mass
-bins out to 50\,\Mpch. At $32^3$ the potentials agree to 2--3\% rms until $z\approx3$ and to 25\% at $z=0$, most of
-which comes from the particles ending up in different places (median separation 0.38\,\Mpch{} at $z=0$); the zero
-points agree to $2\times10^3$\,\kms{} once pkdgrav3's self-term is removed; the stacked potential around the most
-massive halos agrees within errors beyond $\sim1$\,\Mpch{} and is deeper in pkdgrav3 at small radii (softening).
-\textbf{Status (11 Nov 2026, 19:50): the $256^3$ runs are in progress on pawna; Section~\ref{sec:r256} will be filled
-in when they finish.}
+\noindent \gad{} and \pkd{} were run from identical initial conditions (\gad{} NGenIC, Sahyadri default settings,
+200\,\Mpch) with $32^3$ and $256^3$ particles. Each run went through the full Sahyadri halo pipeline (Rockstar,
+consistent-trees, VAHC), and the two codes are compared particle by particle (potential, position, velocity), halo by
+halo, and through the stacked potential around halos in mass bins out to 50\,\Mpch. At $256^3$:
+\begin{itemize}
+\item \textbf{Particles.} At $z=12$ the potentials agree to $6\times10^{-3}$ rms (correlation $1-6\times10^{-6}$). The
+difference grows to 2\% at $z=3$ and 22\% at $z=0$, and 75--90\% of it comes from the particles ending up in
+different places: at $z=0$ the median separation is 0.12\,\Mpch{} and the median velocity difference 70\,km\,s$^{-1}$,
+dominated by halo particles. Once \pkd{}'s softened self-potential is removed, the zero points agree to
+$\le1.2\times10^3$\,\kms.
+\item \textbf{Halos.} Mass functions agree within 2--3\% above $10^{12}$\,\Msunh. Matched halos have the same masses,
+spins and VAHC bias, but \pkd{} halos are 20--25\% more concentrated at $10^{12}$--$10^{13}$\,\Msunh, with 2--5\%
+higher $V_{\max}$ and 4--9\% deeper $\phi_{\min}$. This is consistent with \pkd{}'s smaller effective softening
+under the production settings. For the same particles, the mean potentials of matched halos agree to 0.5\%.
+\item \textbf{Stacked potential.} Around halos the stacked mean potential agrees to 1--2\% ($\le0.02\,\sigma_\phi$)
+from 0.2 to 50\,\Mpch{} at $z = 3$, 1, 0.5 and 0. Inside 0.1\,\Mpch{} \pkd{} is 3--6\% deeper.
+\end{itemize}
+The stacking tool keeps only per-mass-bin sums and dilutes the outer shells by particle ID. A stack of a $256^3$
+snapshot with $\sim17\,000$ halos takes $\sim10$\,s.
 \end{abstract}
