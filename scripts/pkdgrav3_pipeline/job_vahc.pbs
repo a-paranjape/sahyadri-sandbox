@@ -11,6 +11,12 @@ TENS=; [ "$PP_TENS" = 1 ] && TENS=--tens
 # PP_POT=1: also .vpot where the .pkc store the potential (needs PP_FAST=1)
 [ "${PP_FAST:-1}" = 1 ] && TENS="$TENS --fast"
 [ "${PP_POT:-0}" = 1 ] && TENS="$TENS --pot"
+# PP_PK=1 (default): matter and halo-mass-bin P(k) of every output from the same grid (pk_measure.py), and CLASS
+# P(k) at every output redshift (class_pk.py, once) for the checks in stage verify
+if [ "${PP_PK:-1}" = 1 ]; then
+  "$PY" "$PIPE/class_pk.py" "$CONF" || { stamp "class_pk.py failed"; exit 1; }
+  TENS="$TENS --pk"; [ -n "${PK_MBINS:-}" ] && TENS="$TENS --pk-mbins $PK_MBINS"
+fi
 # PP_OVERWRITE=1: recompute every snapshot; the existing .vahc/.tens/.vpot are first copied to $HALO_DIR/vahc_prev/
 # (only if that directory does not exist yet, so a restarted job never replaces the copies with its own outputs)
 if [ "${PP_OVERWRITE:-0}" = 1 ]; then
@@ -25,5 +31,5 @@ fi
 rc=${PIPESTATUS[0]}
 grep -E "Elapsed|Maximum resident" "$LOGS/vahc_time.${PBS_JOBID%%.*}.log"
 stamp "run_addvalue exit $rc; $(ls "$HALO_DIR"/out_*.vahc 2>/dev/null | wc -l) .vahc, $(ls "$HALO_DIR"/out_*.tens 2>/dev/null | wc -l) .tens"
-event vahc_done rc="$rc" nvahc="$(ls "$HALO_DIR"/out_*.vahc 2>/dev/null | wc -l)" ntens="$(ls "$HALO_DIR"/out_*.tens 2>/dev/null | wc -l)" nvpot="$(ls "$HALO_DIR"/out_*.vpot 2>/dev/null | wc -l)"
+event vahc_done rc="$rc" npk="$(ls "$HALO_DIR"/out_*.pk 2>/dev/null | wc -l)" nvahc="$(ls "$HALO_DIR"/out_*.vahc 2>/dev/null | wc -l)" ntens="$(ls "$HALO_DIR"/out_*.tens 2>/dev/null | wc -l)" nvpot="$(ls "$HALO_DIR"/out_*.vpot 2>/dev/null | wc -l)"
 exit $rc

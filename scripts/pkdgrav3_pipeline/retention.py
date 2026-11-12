@@ -169,6 +169,11 @@ def kept_files(E, pl=None):
             add('trees_fits', None, f)
     for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), 'xcorr', '*'))):
         add('xcorr', None, f)
+    for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), 'out_*.pk'))):   # P(k) per output (pk_measure.py)
+        m = re.match(r'out_(\d+)\.pk$', os.path.basename(f))
+        add('pk', int(m.group(1)) if m else None, f)
+    for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), 'pk', '*'))):     # CLASS spectra, summary plot
+        add('pk', None, f)
     for n in META_SIM:
         add('meta', None, os.path.join(P['sim'], n))
     for f in sorted(glob.glob(os.path.join(glob.escape(P['sim']), '*.log'))):

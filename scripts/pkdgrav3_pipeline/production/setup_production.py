@@ -449,6 +449,11 @@ PP_TENS=1
 PP_FAST=1               # 1: vahc_fast.py (identical .vahc/.tens to AddValue, ~12x faster); 0: original AddValue
 PP_POT=0                # 1 (needs PP_FAST): out_<snap>.vpot, mean particle potential around halos (snapshots with potential)
 PP_NPROC=%(ppn)d             # snapshots in parallel
+PP_PK=1                 # matter + halo-mass-bin P(k) and bias of every output from the same grid (out_<snap>.pk),
+                        # CLASS P(k) at every output (halos/.../pk/), checked against each other in stage verify
+PK_MBINS=100,300,1000,3000,10000   # halo mass bin edges in particles (host halos, Mvir); last bin open
+PK_KLIN=0.1             # k [h/Mpc] of the linear-scale checks and the large-scale bias
+PK_ABS_TOL=0.02; PK_GROWTH_TOL=0.03   # verify: |P/P_ref - 1| <= 4 sigma + PK_ABS_TOL; growth ratio within PK_GROWTH_TOL
 
 # FITS
 FITS_NPROC=16

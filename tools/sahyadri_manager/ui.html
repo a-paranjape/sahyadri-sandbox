@@ -166,6 +166,7 @@ function renderRun(r, idx){
     <div class="stages">${st}${clean}</div>
     ${D('a','Jobs now', active)}
     ${D('v','Checks (verify)', ver)}
+    ${r.verify && r.verify.pk ? D('p','Power spectrum', pkPanel(r.verify.pk)) : ''}
     ${D('k','Retention and archive', `<div class="small">${keepTxt}</div><div class="small muted">${h(r.scratch)} → ${h(r.archive_root)}</div><div style="margin-top:6px">${arch}</div>`)}
     ${D('c','Delete scratch data', cleanup)}
     ${D('e','Events', `<table>${evs}</table>`)}
@@ -190,6 +191,16 @@ async function submitSim(name){
   const j = await act({run:name, action:'submit_sim'});
   if(j && !j.ok && String(j.result).startsWith('not submitted: scratch') &&
      confirm(j.result+'\n\nSubmit anyway?')) act({run:name, action:'submit_sim', force:true});
+}
+function pkPanel(pk){
+  const f=x=>x==null?'—':(+x).toFixed(3);
+  const L=pk.last||{};
+  const b1=(L.b1||[]).map((b,i)=>b==null?null:`bin ${i}: ${(+b).toFixed(2)} (${(L.nh||[])[i]} halos)`).filter(Boolean).join(' · ');
+  return `<div class="small">k ≤ ${h(pk.klin)} h/Mpc · measured / reference over all outputs: <b>${f(pk.R_range&&pk.R_range[0])}–${f(pk.R_range&&pk.R_range[1])}</b>
+    · growth since the first output / linear theory: <b>${f(pk.G_range&&pk.G_range[0])}–${f(pk.G_range&&pk.G_range[1])}</b>
+    · CLASS z<sub>start</sub> vs IC table: ${pk.ic_check?((100*pk.ic_check.max_abs_dev).toFixed(2)+'% max'):'—'}</div>
+    <div class="small muted">large-scale bias at z = ${L.z!=null?(+L.z).toFixed(2):'—'}: ${h(b1)||'—'}</div>
+    ${pk.plot?`<img alt="P(k) summary" src="/api/file?path=${encodeURIComponent(pk.plot)}&t=${Date.now()>>16}" style="width:100%;max-width:1200px;margin-top:8px;border:1px solid var(--line);border-radius:6px;background:#fff">`:''}`;
 }
 function trash(name){
   if(!confirm('Move the scratch data of '+name+' to the trash?\n\nThe manager first re-checks that every kept file is in the archive and unchanged. The move can be undone until you purge.')) return;

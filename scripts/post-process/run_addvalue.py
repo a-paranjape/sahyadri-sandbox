@@ -38,8 +38,12 @@ def snaps_of(args):
     from utilities import Paths
     P = Paths()
     import numpy as np
-    sc = np.loadtxt(P.halo_path + args.stem + '/scales.txt', ndmin=2)
+    own = P.halo_path + args.stem + '/r%d/scales.txt' % args.real     # this run's copy (job_ctrees.pbs)
+    sc = np.loadtxt(own if os.path.isfile(own) else P.halo_path + args.stem + '/scales.txt', ndmin=2)
     have = [int(s) for s in sc[:, 0]]
+    if getattr(args, 'pk', False):     # P(k) of every output, also those without halo catalogues
+        names = P.sim_path + args.stem + '/r%d/snapnames.txt' % args.real
+        have = sorted(set(have) | set(range(sum(1 for l in open(names) if l.strip()))))
     if args.snaps == 'all':
         return have
     out = []
@@ -102,11 +106,13 @@ def do_snap(snap, args):
     t0 = time.time()
     hr = HaloReader(sim_stem=args.stem, real=args.real, snap=snap, verbose=False)
     base = hr.halo_path + hr.halocat_stem
-    want = [k for k, on in (('vahc', args.vahc), ('tens', args.tens), ('vpot', args.pot)) if on]
+    want = [k for k, on in (('vahc', args.vahc), ('tens', args.tens), ('vpot', args.pot), ('pk', args.pk)) if on]
     todo = [k for k in want if args.overwrite or not os.path.isfile(base + '.' + k)]
     if not todo:
         return '%d: skipped (exists)' % snap
     if not os.path.isfile(base + '.trees'):
+        if todo == ['pk'] or (args.pk and 'pk' in todo):
+            return _pk_only(snap, args, base, t0)
         return '%d: no %s.trees' % (snap, base)
     sr = SnapshotReader(sim_stem=args.stem, real=args.real, snap=snap, verbose=False)
     if 'vpot' in todo and not (getattr(getattr(sr, 'pkc', None), 'has_potential', False) or _hdf5_pot(sr)):
@@ -149,6 +155,33 @@ def do_snap(snap, args):
         snap, '+'.join(todo), halos.size, npos, sr.snapshot_file + sr.snapshot_ext, t1 - t0, time.time() - t1)
 
 
+def _pk_only(snap, args, base, t0):
+    """Matter P(k) of a snapshot without a halo catalogue (early outputs): density pass only."""
+    from readers import SnapshotReader
+    from correlations import PowerSpectrum
+    import pk_measure
+    sr = SnapshotReader(sim_stem=args.stem, real=args.real, snap=snap, verbose=False)
+    ps = PowerSpectrum(grid=args.grid, Lbox=sr.Lbox, verbose=False)
+    if getattr(sr, 'pkc', None) is not None and args.stream and (args.down_to == 0 or args.down_to**3 >= sr.npart):
+        from vahc_fast import streamed_fields
+        density, npos, _ = streamed_fields(sr.pkc, ps, args.threads)
+    else:
+        pos = sr.read_block('pos', down_to=args.down_to, seed=args.seed)
+        npos = pos.shape[1]
+        density = ps.density_field(pos)
+        del pos
+    t1 = time.time()
+    gp = pk_measure.GridPower(ps)
+    B = gp.transform(density, args.threads)
+    del density
+    meta = dict(snap=snap, redshift=float(sr.redshift), scale=1.0 / (1.0 + float(sr.redshift)),
+                snapshot=sr.snapshot_file + sr.snapshot_ext, mpart=float(sr.mpart), halos='no catalogue')
+    m, cols, tab = pk_measure.measure(gp, B, npos, meta=meta, klin=args.pk_klin)
+    pk_measure.write(base + '.pk', m, cols, tab)
+    return '%d: pk only (no halo catalogue); %d particles; read+density %.0f s, pk %.0f s' % (
+        snap, npos, t1 - t0, time.time() - t1)
+
+
 def _hdf5_pot(sr):
     from vpot_hdf5 import has_potential
     return has_potential(sr)
@@ -180,11 +213,24 @@ def _fast_snap(snap, args, hr, sr, ps, base, todo, t0):
                       halos=halos, verbose=False)
     del density
     gc.collect()
-    res = av.compute(want=todo)
+    kinds = [k for k in todo if k != 'pk']
+    res = av.compute(want=kinds) if kinds else {}
     for k in todo:
+        if k == 'pk':
+            continue
         part = base + '.' + k + '.part'
         av.write(k, res[k], part)
         os.replace(part, base + '.' + k)
+    if 'pk' in todo:   # matter and halo spectra from the same transformed density (pk_measure.py)
+        import pk_measure
+        t2 = time.time()
+        gp = pk_measure.GridPower(ps)
+        meta = dict(snap=snap, redshift=float(sr.redshift), scale=1.0 / (1.0 + float(sr.redshift)),
+                    snapshot=sr.snapshot_file + sr.snapshot_ext, mpart=float(sr.mpart))
+        m, cols, tab = pk_measure.measure(gp, av.B, npos, halos=halos, hpos=hpos, mpart=float(sr.mpart),
+                                          mbins=args.pk_mbins, threads=args.threads, klin=args.pk_klin, meta=meta)
+        pk_measure.write(base + '.pk', m, cols, tab)
+        tm['pk'] = time.time() - t2
     return '%d: %s (fast, %d threads); %d halos; %d particles (%s); read+density %.0f s, add_value %.0f s (%s)' % (
         snap, '+'.join(todo), args.threads, halos.size, npos, sr.snapshot_file + sr.snapshot_ext, t1 - t0,
         time.time() - t1, ', '.join('%s %.0f' % kv for kv in tm.items()))
@@ -216,7 +262,14 @@ def main():
     ap.add_argument('--pot', action='store_true',
                     help='also write out_<snap>.vpot (mean particle potential within rs, R200b and at the .vahc scales; '
                          'only snapshots that store the potential; implies --fast)')
+    ap.add_argument('--pk', action='store_true',
+                    help='also write out_<snap>.pk: matter and halo-mass-bin power spectra and biases from the same '
+                         'density grid (pk_measure.py), for every output (density-only pass without a halo catalogue)')
+    ap.add_argument('--pk-mbins', default=None, help='halo mass bin edges in particles (default %s)' % '100,300,1000,3000,10000')
+    ap.add_argument('--pk-klin', type=float, default=0.1, help='k [h/Mpc] up to which the large-scale bias is averaged')
     args = ap.parse_args()
+    if args.pk:
+        args.fast = True
     if args.pot:
         args.fast = True
     if args.threads <= 0:

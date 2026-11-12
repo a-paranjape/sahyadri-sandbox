@@ -910,8 +910,12 @@ class Manager:
             V = json.load(open(f))
         except ValueError:
             return None
+        pk = V['checks'].get('pk', {}).get('info', {})
         return dict(ok=V['ok'], time=V['time'], checks={k: dict(ok=c['ok'], errors=c['errors'][:5],
-                                                                 warnings=c['warnings'][:5]) for k, c in V['checks'].items()})
+                                                                 warnings=c['warnings'][:5]) for k, c in V['checks'].items()},
+                    pk=dict(plot=pk.get('plot'), R_range=pk.get('R_range'), G_range=pk.get('G_range'), klin=pk.get('klin'),
+                            ic_check=pk.get('ic_check'),
+                            last=(pk.get('snapshots') or [None])[-1]) if pk else None)
 
     def tail_log(self):
         try:
@@ -1054,6 +1058,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith('/api/state'):
             with mgr.lock:
                 self._send(200, json.dumps(mgr.snapshot))
+        elif self.path.startswith('/api/file?'):
+            # an image of a registered run (the P(k) summary plot)
+            from urllib.parse import parse_qs, urlparse
+            p = parse_qs(urlparse(self.path).query).get('path', [''])[0]
+            rp = os.path.realpath(p)
+            okroots = [r.E['SCRATCH'] for r in mgr.runs.values()] + [r.E.get('ARCHIVE') for r in mgr.runs.values()]
+            if (not rp.endswith('.png') or not os.path.isfile(rp)
+                    or not any(rp.startswith(os.path.realpath(x) + '/') for x in okroots if x)):
+                self._send(404, json.dumps(dict(error='not found')))
+                return
+            self._send(200, open(rp, 'rb').read(), 'image/png')
         elif self.path.startswith('/api/log?'):
             # tail of a job log (only files below a registered run's directories)
             from urllib.parse import parse_qs, urlparse

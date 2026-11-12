@@ -15,6 +15,8 @@ Checks (failures block the archive; warnings are reported only):
   fits        the fits stage ended with 0 check failures after the last vahc; every kept FITS table and the
               tree FITS present and non-empty
   halos       halo counts per snapshot (warning when they jump by more than a factor 1.5 between neighbours)
+  pk          (PP_PK=1) every output's matter P(k) against CLASS: absolute and growth ratios, CLASS vs the IC
+              table, halo bias (pk_check.py); writes <halo dir>/pk/pk_summary.png
 
 usage: verify_run.py <run.conf> [--threads N] [--skip-pkc-check]
 """
@@ -231,6 +233,16 @@ def main():
         for n in ('locations', 'forests', 'tree_'):
             if not glob.glob(os.path.join(comp, 'trees', n + '*.fits*')):
                 R.fail('fits', 'no compressed/trees/%s*.fits*' % n)
+    # ------------------------------------------------------------ power spectra (pk_check.py)
+    if E.get('PP_PK', '1') == '1':
+        import pk_check
+        rows = pk_check.check(E, P, outs, R)
+        try:
+            png = pk_check.plot(rows, os.path.join(P['halo'], 'pk'), os.path.join(P['halo'], 'pk', 'pk_summary.png'),
+                                '%s r%s' % (E['STEM'], E['REAL']))
+            R.check('pk')['info']['plot'] = png
+        except Exception as e:  # noqa: BLE001  a plot failure is not a data failure
+            R.warn('pk', 'plot failed: %s' % e)
     # ------------------------------------------------------------ write
     out = dict(run='%s/r%s' % (E['STEM'], E['REAL']), conf=E['CONF'], time=time.strftime('%Y-%m-%dT%H:%M:%S'),
                t=time.time(), seconds=round(time.time() - t0, 1), ok=R.ok(), checks=R.checks,
