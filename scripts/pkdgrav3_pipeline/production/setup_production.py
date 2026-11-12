@@ -130,7 +130,7 @@ def steps_plan(a_out, a_start, step_da):
 
 def resources(N):
     """Default PBS resources by size (edit run.conf to change). Measured: 512^3 sim 25 GB / 80 min on 64 cores for 60
-    steps; Rockstar ~2x its particle array (32 B/particle); .vahc PP_NPROC x 26 GB at grid 512."""
+    steps; Rockstar ~2x its particle array (32 B/particle); .vahc PP_NPROC x ~13 GB at grid 512 (26 GB with PP_FAST=0)."""
     if N <= 256:
         return dict(SIM=(64, '120gb', '24:00:00'), RS=(16, '64gb', '12:00:00'), CT=(2, '16gb', '12:00:00'),
                     PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=16, PP_NPROC=4)
@@ -365,10 +365,10 @@ MIN_HALO_OUTPUT_SIZE=30; MIN_HALO_PARTICLES=20; UNBOUND_THRESHOLD=0.5
 CLEAN_ROCKSTAR=1        # clean_trees.pl: keep out_<snap>.trees, logs/; delete out_*.list, halos_*, hlists/, outputs/
 
 # value-added catalogs (.vahc, .tens): density on PP_GRID^3 from all particles, built block by block
-PP_GRID=512             # production grid; memory ~26 GB per process
+PP_GRID=512             # production grid; memory per process ~13 GB (PP_FAST=1, measured), ~26 GB (PP_FAST=0)
 PP_DOWN_TO=0            # 0 = all particles (no downsampling)
 PP_TENS=1
-PP_FAST=0               # 1: vahc_fast.py (same results as the default, much faster; being validated)
+PP_FAST=1               # 1: vahc_fast.py (identical .vahc/.tens to AddValue, ~12x faster); 0: original AddValue
 PP_POT=0                # 1 (needs PP_FAST): out_<snap>.vpot, mean particle potential around halos (snapshots with potential)
 PP_NPROC=%(ppn)d             # snapshots in parallel
 

@@ -7,8 +7,9 @@ source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/p
 ls "$HALO_DIR"/out_*.trees > /dev/null 2>&1 || { stamp "no out_<snap>.trees in $HALO_DIR (run stage ctrees first)"; exit 1; }
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 TENS=; [ "$PP_TENS" = 1 ] && TENS=--tens
-# PP_FAST=1: vahc_fast.py (same results, one pass, multithreaded FFTs); PP_POT=1: also .vpot where the .pkc store the potential
-[ "${PP_FAST:-0}" = 1 ] && TENS="$TENS --fast"
+# PP_FAST=1 (default): vahc_fast.py (same results, one pass, multithreaded FFTs); PP_FAST=0: the original AddValue path
+# PP_POT=1: also .vpot where the .pkc store the potential (needs PP_FAST=1)
+[ "${PP_FAST:-1}" = 1 ] && TENS="$TENS --fast"
 [ "${PP_POT:-0}" = 1 ] && TENS="$TENS --pot"
 /usr/bin/time -v "$PY" "$PP/run_addvalue.py" "$STEM" --real "$REAL" --grid "$PP_GRID" --down-to "$PP_DOWN_TO" \
     $TENS --nproc "$PP_NPROC" 2> "$LOGS/vahc_time.${PBS_JOBID%%.*}.log" | grep -v '^\.\.\.'

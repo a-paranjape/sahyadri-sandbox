@@ -234,9 +234,30 @@ memory at any resolution. It gives byte-identical `.vahc`/`.tens` to loading all
 threads; ~4-5 min expected at 1024^3, ~35 min at 2048^3, against ~30 min of `AddValue` per snapshot at grid 512).
 `--no-stream` restores the old path.
 
-Memory: about 12 × 16 × `PP_GRID`^3 bytes per process (complex grids of the tensor calculation): ~26 GB at grid
-512, ~85 GB at 768. Choose `PP_NPROC` so that `PP_NPROC` times that fits in
-`PP_MEM`. Measured (512^3 run, `PP_GRID=512`, `PP_NPROC=4`): largest process 25.5 GB, job peak 91.6 GB.
+**`vahc_fast.py` (`PP_FAST=1`, the default).** `run_addvalue.py --fast` computes `.vahc` and `.tens` in one pass:
+one real FFT of the density, a separable Gaussian kernel, one inverse FFT per tensor component and scale on
+`--threads` threads, vectorized eigenvalues and interpolation, and b1 as one filtered field. Its output is identical
+to `AddValue`'s: in-process comparison on the same density and halos, every column equal in float32 and the same
+halo IDs (pawna job 2536678, 128^3 snap 4, grid 128; job 2536679, 512^3 snap 5, grid 512, 234,258 halos). Time for
+that 512^3 snapshot: 147 s (8 FFT threads) against 1126 s (`.vahc`) + 722 s (`.tens`) for `AddValue`; the tidal
+FFTs are 84% of the 147 s. `PP_FAST=0` restores the original path.
+
+**`.vpot` (`PP_POT=1`, needs `PP_FAST=1`).** For snapshots whose `.pkc` files store the potential
+(`dCompPotMaxRedshift`), `out_<snap>.vpot` holds the mean pkdgrav3 particle potential around each halo, in
+(km/s)^2, with pkdgrav3's constant softened self term -(105/64) m/eps removed: particle counts and means within
+rs, R200b, 0.5, 1 and 1.5 Rvir (`Np_<R>`, `phi_<R>`; R200b from M200b) and Gaussian-weighted means at the seven
+`.vahc` scales; nan where undefined. The FITS stage appends these columns (except `haloID`) to
+`out_<snap>_vahc.fits.gz` (card `HAS_VPOT`). Checks: the sphere values equal a KD-tree sum over all particles
+for 300 random halos per sphere (0 count and 0 mean mismatches, float32 rounding; 128^3 snaps 70 and 100,
+512^3 snap 5); the grid-scale values agree with direct Gaussian sums to <= 1e-3 (one 1e-2 at 5 Mpc/h); pkdgrav3's
+potential with the self term removed matches an FFT Poisson solution of the same particles with slope 1.002-1.007,
+correlation >= 0.998. Cost: 47-68 s per snapshot (grid 512, 4-5 threads) on top of the tidal FFTs.
+
+Memory: about 6 × 16 × `PP_GRID`^3 bytes per process with `PP_FAST=1` (measured: 12-13 GB per process at grid
+512, 128^3 and 512^3 runs; job peak 78 GB for 6 processes on the 512^3 run with `.vpot`), about 12 × 16 ×
+`PP_GRID`^3 with `PP_FAST=0` (~26 GB at grid 512, ~85 GB at 768). Choose `PP_NPROC` so that `PP_NPROC` times that
+fits in `PP_MEM`. Measured with `PP_FAST=0` (512^3 run, `PP_GRID=512`, `PP_NPROC=4`): largest process 25.5 GB,
+job peak 91.6 GB.
 
 **When to run it.** `.vahc`/`.tens` rows are the halos of `out_<snap>.trees`, with consistent-trees IDs
 (`haloID` = `id` of the hlist), so this stage needs the finished consistent-trees catalogs and cannot start
