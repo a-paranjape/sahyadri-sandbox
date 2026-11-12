@@ -48,6 +48,9 @@ LOGF = os.path.join(HOME, 'manager.log')
 PBS = '/opt/pbs/bin'
 DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180)
 STAGES = ['sim', 'rockstar', 'ctrees', 'vahc', 'fits', 'verify', 'archive']
+# actions that read the archive on /storage (NFS, can take minutes when it is busy): run in a worker thread, the
+# run marked busy (no automation for it meanwhile), so events of the other runs are still handled
+SLOW = ('check_trash', 'approve_trash', 'undo_trash', 'approve_purge')
 
 
 def now():
@@ -114,6 +117,7 @@ class Run:
         self.simcache = (0, None)
         self.scratch_bytes = None
         self.err = None
+        self.busy = None
         self.load()
         if paused and not os.path.isfile(self.msfile):
             self.ms['paused'] = True
@@ -431,7 +435,7 @@ class Manager:
 
     def policy(self, run, D, active_rs):
         """Submit what is due for this run; returns the number of Rockstar jobs submitted."""
-        if run.err or run.ms.get('paused') or run.ms.get('failed') or run.ms.get('trash') or run.ms.get('purged'):
+        if run.busy or run.err or run.ms.get('paused') or run.ms.get('failed') or run.ms.get('trash') or run.ms.get('purged'):
             return 0
         E = run.E
         # failures and vanished jobs
@@ -696,7 +700,7 @@ class Manager:
             D = derived.get(run.conf) or run.derive(self.qjobs, self.qtime)
             pl = run.plan
             runs.append(dict(
-                name=run.name, conf=run.conf, phase=run.phase(D), paused=run.ms.get('paused'), failed=run.ms.get('failed'),
+                name=run.name, conf=run.conf, phase=run.phase(D), paused=run.ms.get('paused'), failed=run.ms.get('failed'), busy=run.busy,
                 err=run.err, n_out=D['n_out'], ready=D['ready'], rs_done=D['rs_done'], sim_done=D['sim_done'],
                 sim=D['sim_info'], jobs=D['jobs'][-40:], active=D['active'],
                 verify=self.verify_summary(run, D), archive=D['archive'], fits=D['fits'],
@@ -732,6 +736,34 @@ class Manager:
         except OSError:
             return []
 
+    def _disk_bg(self):
+        try:
+            self.refresh_disk()
+        except Exception as e:  # noqa: BLE001
+            log('disk refresh: %s' % e)
+        self._disk_busy = False
+        self.q.put(('wake',))
+
+    def slow_action(self, a, box):
+        run = next((r for r in self.runs.values() if r.name == a.get('run') or r.conf == a.get('run')), None)
+        if run is None or run.busy:
+            box['result'], box['ok'] = ('no run %s' % a.get('run')) if run is None else ('busy: %s' % run.busy), False
+            box['ev'].set()
+            return
+        run.busy = a['action']
+
+        def work():
+            try:
+                box['result'] = self.action(a)
+                box['ok'] = True
+            except Exception as e:  # noqa: BLE001
+                box['result'], box['ok'] = str(e), False
+                log('action %s failed: %s' % (a, e))
+            run.busy = None
+            box['ev'].set()
+            self.q.put(('wake',))
+        threading.Thread(target=work, daemon=True).start()
+
     # ------------------------------------------------------------------ main loop
     def serve(self):
         try:
@@ -765,6 +797,8 @@ class Manager:
                 for it in items:
                     if it[0] == 'file' and it[1] == CONFIG:
                         changed_cfg = True
+                    elif it[0] == 'action' and it[1].get('action') in SLOW:
+                        self.slow_action(it[1], it[2])
                     elif it[0] == 'action':
                         a, box = it[1], it[2]
                         try:
@@ -786,7 +820,9 @@ class Manager:
                 if t >= self.next_hb or (self.recheck_at and t >= self.recheck_at):
                     self.recheck_at = None
                     self.refresh_qstat()
-                    self.refresh_disk()
+                    if not getattr(self, '_disk_busy', False):    # statfs/walks on NFS: in the background
+                        self._disk_busy = True
+                        threading.Thread(target=self._disk_bg, daemon=True).start()
                     self.next_hb = t + self.cfg['heartbeat_s']
                 derived = self.tick()
                 self.build_snapshot(derived)

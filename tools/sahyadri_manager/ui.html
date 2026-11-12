@@ -109,7 +109,7 @@ function stageInfo(run, st){
 function phaseBadge(r){
   const p=r.phase; let c='b-run';
   if(p==='failed') c='b-bad'; else if(['archived','purged'].includes(p)) c='b-ok'; else if(p==='not started'||r.paused) c='b-off'; else if(p==='in trash') c='b-wait';
-  return `<span class="badge ${c}">${h(p)}${r.paused?' · paused':''}</span>`;
+  return `<span class="badge ${c}">${h(p)}${r.paused?' · paused':''}${r.busy?' · '+h(r.busy)+'…':''}</span>`;
 }
 function renderRun(r, idx){
   const id='r'+idx;
