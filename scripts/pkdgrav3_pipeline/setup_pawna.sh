@@ -6,8 +6,11 @@
 #   PKD_IO_ROOT  pkdgrav3 install (default /storage/$USER/pkdgrav3_io; set it up first with pkdgrav3's
 #                tools/pawna/setup_pawna.sh, see pkdgrav3 docs/running_on_pawna.md). Its snapcomp build
 #                provides the zstd library that Rockstar's .pkc reader links against.
-# Builds (each from the upstream source plus the changed files kept in this repository under code/):
-#   $CODES/rockstar   Rockstar 36ce9eea36ee + Sahyadri changes (PKC reader, curvature, w0-wa), make with_hdf5_pkc
+# Builds:
+#   $CODES/rockstar   Rockstar from github.com/shadaba/rockstar, branch sahyadri at ROCKSTAR_REF (upstream 36ce9eea36ee +
+#                     Sahyadri changes: PKC reader, curvature, w0-wa; see SAHYADRI.md there), make with_hdf5_pkc.
+#                     (public). If it cannot be fetched (no network to GitHub), the same source is made from
+#                     upstream 36ce9ee plus the older overlay kept here in code/Rockstar/.
 #   $CODES/ctrees     consistent-trees 7c20add + Sahyadri changes (w0-wa/curvature background), make
 #   $CODES/venv       Python 3 venv (own packages) + numpy scipy pandas h5py fitsio zstandard
 #   $CODES/lib        cic_update.so, ngp_update.so for post-process (found through SAHYADRI_LIBDIR)
@@ -25,9 +28,18 @@ overlay() {  # copy the repository's changed files (not the .bak originals) over
 }
 
 echo "== Rockstar"
+ROCKSTAR_REPO=${ROCKSTAR_REPO:-https://github.com/shadaba/rockstar.git}
+ROCKSTAR_REF=${ROCKSTAR_REF:-5a73982879a5d43106cc601ec97aad6dc609c416}   # branch sahyadri
 [ -d "$CODES/rockstar/.git" ] || git clone -q https://bitbucket.org/gfcstanford/rockstar.git "$CODES/rockstar"
-(cd "$CODES/rockstar" && git checkout -q -f 36ce9eea36eeda4c333acf56f8bb0d40ff0df2a1 && git clean -qfdx)
-overlay "$SB/code/Rockstar/gfcstanford-rockstar-36ce9eea36ee" "$CODES/rockstar"
+git -C "$CODES/rockstar" remote get-url sahyadri >/dev/null 2>&1 || git -C "$CODES/rockstar" remote add sahyadri "$ROCKSTAR_REPO"
+if GIT_TERMINAL_PROMPT=0 git -C "$CODES/rockstar" fetch -q sahyadri 2>/dev/null; then
+  (cd "$CODES/rockstar" && git checkout -q -f "$ROCKSTAR_REF" && git clean -qfdx)
+  echo "Rockstar from $ROCKSTAR_REPO at $ROCKSTAR_REF"
+else
+  echo "cannot fetch $ROCKSTAR_REPO: upstream 36ce9ee + overlay from $SB/code/Rockstar (same source)"
+  (cd "$CODES/rockstar" && git checkout -q -f 36ce9eea36eeda4c333acf56f8bb0d40ff0df2a1 && git clean -qfdx)
+  overlay "$SB/code/Rockstar/gfcstanford-rockstar-36ce9eea36ee" "$CODES/rockstar"
+fi
 # HDF5 (Gadget-4/AREPO input, not needed for .pkc): pawna's system HDF5 instead of the pegasus paths in the Makefile
 HDF5_INC=${HDF5_INC:-/usr/include/hdf5/serial}; HDF5_LIB=${HDF5_LIB:-/usr/lib/x86_64-linux-gnu/hdf5/serial}
 (cd "$CODES/rockstar" && make with_hdf5_pkc ZSTD_INC="$ZSRC" ZSTD_LIB="$ZBLD" \

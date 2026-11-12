@@ -102,7 +102,7 @@ bash sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pawna.sh /storage/$USER/sa
 
 | Directory | What | Source |
 |---|---|---|
-| `rockstar/` | Rockstar, `make with_hdf5_pkc` (`FILE_FORMAT = "PKC"`, also AREPO/Gadget HDF5) | `git clone https://bitbucket.org/gfcstanford/rockstar.git` at `36ce9eea36ee`, then the changed files of `code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/` copied over (`.pkc` reader, Aseem's curvature and Gadget-4 HDF5 changes, w0/wa in `gen_merger_cfg.pl`; see `scripts/rockstar/readme_*.txt`) |
+| `rockstar/` | Rockstar, `make with_hdf5_pkc` (`FILE_FORMAT = "PKC"`, also AREPO/Gadget HDF5) | [github.com/shadaba/rockstar](https://github.com/shadaba/rockstar), branch `sahyadri`, at the commit pinned in `setup_pawna.sh` (`ROCKSTAR_REF`): upstream `36ce9eea36ee` plus one commit per Sahyadri change with its author (Aseem's curvature and Gadget-4 HDF5 changes, Saee's w0/wa in `gen_merger_cfg.pl`, the `.pkc` reader; see `SAHYADRI.md` there). Its source is byte-identical to the older overlay `code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/` on upstream, which `setup_pawna.sh` uses only if it cannot fetch the repository. New Rockstar changes go to that repository. |
 | `ctrees/` | consistent-trees, `make` | `git clone https://bitbucket.org/pbehroozi/consistent-trees.git` at `7c20add`, then `code/ConsistentTrees/consistent-trees-7c20add/` copied over (w0-wa and curvature background, `README_sahyadri.txt`) |
 | `venv/` | self-contained Python 3 venv with numpy, scipy, pandas, h5py, fitsio, zstandard (pip; the system scipy on pawna needs numpy < 1.25) | PyPI |
 | `lib/` | `cic_update.so`, `ngp_update.so` compiled from `scripts/post-process/*.c` | this repository |
@@ -126,7 +126,7 @@ Copy [`example_512.conf`](../scripts/pkdgrav3_pipeline/example_512.conf) and edi
 | outputs | `Z_START`, `OUT_Z`, `STEPS` | one snapshot per entry of `OUT_Z` (decreasing), `STEPS[i]` steps to reach it. For the Sahyadri 101 outputs write the 101 redshifts and steps |
 | snapshot format | `SUBSAMPLES`, `ALSO_HDF5`, `EXTRA_PAR` | `.pkc` subsample percents; `ALSO_HDF5=1` also writes HDF5 (validation only, large); `EXTRA_PAR="key = value; key = value"` adds pkdgrav3 parameters (e.g. `dCompPotStep = 0.0` for no potential) |
 | resources | `*_NCPU`, `*_MEM`, `*_WALL` per stage | a pawna node has 192 cores and 755 GB |
-| Rockstar | `FORCE_RES`, `RS_NUM_BLOCKS`, `RS_WRITERS`, `RS_PKC_SUBSAMPLES`, `MIN_HALO_OUTPUT_SIZE`, `MIN_HALO_PARTICLES`, `UNBOUND_THRESHOLD` | `FORCE_RES` empty = `LBOX/NPART/50` (pkdgrav3's default softening); other values as in the production `config/halos/rockstar_template.cfg` |
+| Rockstar | `FORCE_RES`, `RS_NUM_BLOCKS`, `RS_WRITERS`, `RS_WRITERS_FIXED`, `RS_LOCAL_OUT`, `RS_LOCAL_DIR`, `RS_SYNC_S`, `RS_PKC_SUBSAMPLES`, `MIN_HALO_OUTPUT_SIZE`, `MIN_HALO_PARTICLES`, `UNBOUND_THRESHOLD` | `FORCE_RES` empty = `LBOX/NPART/50` (pkdgrav3's default softening); writers = cores of the job unless `RS_WRITERS_FIXED=1`; `RS_LOCAL_OUT=1` (default) writes on the node's disk (section 5.2); other values as in the production `config/halos/rockstar_template.cfg` |
 | trees | `CLEAN_ROCKSTAR` | 1: as production (`clean_trees.pl`), 0: keep all Rockstar outputs |
 | value added | `PP_GRID`, `PP_DOWN_TO`, `PP_TENS`, `PP_NPROC` | grid 512; `PP_DOWN_TO=0` (all particles, streamed; pegasus production used 512 when `NPART > 512`) |
 | FITS | `FITS_NPROC`, `FITS_DELETE_ASCII` | delete only after looking at the check log |
@@ -204,6 +204,45 @@ Writes `rs_input.cfg` with `FILE_FORMAT = "PKC"`, `FILENAME = "snap.<snap>.<bloc
 the `.pkc` headers (also w0/wa). `RS_NUM_BLOCKS` readers each read an equal share of the `.pkc` blocks.
 `RS_PKC_SUBSAMPLES="1,3"` would find halos in a 4% subsample (quick looks only).
 Reader details and validation: [rockstar_pkc_reader_plan.md](rockstar_pkc_reader_plan.md).
+
+**Output on the node's disk (`RS_LOCAL_OUT=1`, default).** Rockstar writes its halo files (`halos_<snap>.*.bin`,
+`.ascii`, `out_<snap>.list`) inside the halo-finding phase, so on `/storage` that phase waits for the disk. The job
+sets `OUTBASE` to `/var/tmp/$USER_rockstar_<job>` (`RS_LOCAL_DIR` to change the disk) and copies to the halo
+directory every `RS_SYNC_S` seconds (default 600) and at the end: the finished `out_<snap>.list`, `rockstar.cfg`
+(with `OUTBASE` pointed back to the halo directory, which `gen_merger_cfg.pl` reads), `restart.cfg` and the `.bin`
+files of the newest complete snapshot only (the previous snapshot's halos are all a restart needs). After a
+successful run every copied `out_<snap>.list` is compared with the local one before the local directory is deleted;
+after a failure it is left on the node. `RS_RESTART=1` copies the saved `.bin` files back to the local disk.
+`RS_LOCAL_OUT=0` writes to the halo directory as before.
+
+**Writers.** One writer per core of the job (`PBS_NCPUS`, else `NCPUS`, else `RS_NCPU`); the job writes the
+configuration it runs to `rs_job.cfg` (`NUM_WRITERS`, `FORK_PROCESSORS_PER_MACHINE`, `OUTBASE` set, the rest from
+`RS_CFG` or the generated `rs_input.cfg`). `RS_WRITERS_FIXED=1` uses `RS_WRITERS` instead.
+
+**Measured** (pawna job 2536781, node3, 64 cores: the last two outputs of a 512^3/200 Mpc/h run, z = 0.1 and 0, the
+second with the merger-tree step; wall time of the server and client, phase times from the server log, memory
+summed over all Rockstar processes every 1 s):
+
+| Writers | Output on | Wall [s] | Peak memory (PSS) [GB] |
+|---|---|---|---|
+| 16 | `/storage` | 188.5 | 7.49 |
+| 16 | node SSD | 113.8 | 7.49 |
+| 32 | node SSD | 77.7 | 7.38 |
+| 64 | node SSD | 64.1 | 8.12 |
+
+Halo finding of the z = 0 output took 73 s (16 writers, `/storage`), 42 s (16, SSD), 25 s (32) and 16 s (64);
+reading the `.pkc` files 2-4 s. Copying the two `out_<snap>.list` back took 6-14 s. Halo counts at z = 0 were
+254,279-254,442 in all runs (0.06%, Rockstar is not reproducible run to run at the 0.1% level).
+`OUTPUT_FORMAT = "BINARY"` still wrote the ascii files and saved nothing.
+
+**Memory.** Measured at 1 s intervals the peak is in the friends-of-friends step, not in reading: reading holds
+the particle array (4.21 GB = 134M x 32 B), the FoF step 6.9-7.4 GB, halo finding 4.5-6.5 GB. The FoF peak is
+the particles plus their copies in the writers' overlap shells (`OVERLAP_LENGTH = 3`; +26% with 16 writers in
+this box, +40% with 64) plus an 8-byte group index per particle; at z = 0 the previous output's halos (for the
+merger tree) add ~0.5 GB. Peak = 1.75-1.9 x the particle array. The job requests `RS_MEM`; `setup_production.py`
+sets it to 2.2 x 32 B x N^3 + 8 GB, rounded up to 16 GB (`rockstar_mem`): 16 GB at 128^3, 32 GB at 512^3, 96 GB at
+1024^3, 624 GB at 2048^3 (estimate: one node, 755 GB, should suffice; to be checked with the 1024^3 run). 3200^3
+would need ~2.3 TB, more than one pawna node.
 
 ### 5.3 ctrees — `job_ctrees.pbs`
 `gen_merger_cfg.pl rockstar.cfg` (writes `outputs/merger_tree.cfg` with Om, Ol, h0 and w0, wa from the
@@ -326,9 +365,10 @@ Memory of vahc is `PP_NPROC` × 12 × 16 × `PP_GRID`^3 bytes and does not grow 
 run: at the same `PP_GRID` a 2048^3 run needs the same ~26 GB per process as the 512^3 run (with no downsampling
 the density is built block by block); only a larger grid raises it (768: ~87 GB per process). Not measured
 above 512^3: a 2048^3 run has 64 times the particles. From 128^3 to 512^3 the simulation grew by a factor
-4.3 (fixed overhead at 128^3) and Rockstar by 40. Rockstar needs about twice its particle array (32 B per particle): ~0.53 TB at
-2048^3 of a node's 755 GB, so check at 1024^3 that one node suffices. Rockstar time ~130 s per output at 512^3 on 8 cores;
-use more readers (`RS_NUM_BLOCKS`, `RS_WRITERS`, `RS_NCPU`) and a long `RS_WALL` for large runs. Plots and the
+4.3 (fixed overhead at 128^3) and Rockstar by 40. Rockstar needs 1.75-1.9 times its particle array (32 B per
+particle; section 5.2): ~0.5 TB at 2048^3 of a node's 755 GB (requested: 624 GB), to be checked with the 1024^3 run.
+Rockstar time at 512^3: 64 s for two z ~ 0 outputs with 64 writers and the output on the node's disk, 188 s with 16
+writers writing to `/storage` (section 5.2); give large runs many cores (`RS_NCPU`) and a long `RS_WALL`. Plots and the
 full measurement: [report](report/pkdgrav3_pipeline_report.pdf), section 6.
 
 - Above 512^3 nothing may be submitted without approval. For 2048^3: simulation as in pkdgrav3's pawna doc;
