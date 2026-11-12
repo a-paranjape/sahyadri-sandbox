@@ -654,6 +654,54 @@ The manager runs on the head node, because compute nodes cannot `qsub`, `qrls` o
 
 The page is opened on the Mac with `tools/sahyadri_manager/open_gui.sh`. See `tools/sahyadri_manager/README.md`.
 
+### 13.1 Queueing many runs
+
+```bash
+cd scripts/pkdgrav3_pipeline/production
+python setup_production.py --cosmo default --npart 512 --box 200 --real 1-4 --schedule      # priority 0
+python setup_production.py --cosmo 'var_*' --real 1 --schedule 5                            # lower priority
+tools/sahyadri_manager/manager.py limits max_sim_running=3 max_sim_queued=1 max_rockstar=1
+```
+
+- `--cosmo` takes a name, a comma list, shell patterns or `all` (`cosmologies/<name>.cosmo`). Only
+  `default.cosmo` exists so far; the `var_*` cosmologies need their `.cosmo` files made first from
+  `config/submit/sinhagad/sub_var_*.conf` with CLASS.
+- `--schedule [P]` registers each run with the manager and queues its simulation. The manager submits queued
+  simulations by priority, then age, while running + waiting simulations < `max_sim_running`, waiting <
+  `max_sim_queued`, and the run fits in scratch next to the running ones plus `scratch_reserve_gb`.
+- A simulation that stops cleanly at its wall time is queued again at priority −1 and restarts from its newest
+  checkpoint, at most `max_sim_restarts` (5) times.
+- With `max_rockstar` Rockstar jobs running, the run whose next ready snapshot has waited longest goes next.
+
+### 13.2 Power spectrum checks
+
+With `PP_PK=1` (default) the vahc stage also measures, from the same density grid, the matter P(k) and the
+halo–matter cross spectra and bias in mass bins `PK_MBINS` (particles; host haloes) for every output
+(`out_<snap>.pk`, `pk_measure.py`). Outputs with no halo catalogue get the matter P(k) only.
+`class_pk.py` computes CLASS linear and halofit spectra at every output redshift (`classy` 3.4.2 in the venv).
+`verify` then checks, on k ≤ `PK_KLIN` (0.1 h/Mpc):
+
+| check | what | fails when |
+|---|---|---|
+| absolute | R = ⟨P_mm/P_ref⟩, P_ref = P_CLASS(z_start)·[D(z)/D(z_start)]²·halofit/linear | \|R − 1\| > 4σ + 0.02, σ = √(2/N_modes) |
+| growth | G = ⟨[P(z)/P(z₀)]/[P_ref(z)/P_ref(z₀)]⟩ on bins with Δ²_lin ≤ 0.01 | \|G − 1\| > 0.03 |
+| IC table | CLASS at z_start vs the table the ICs were made from | > 2 % |
+
+D is the linear growth without radiation, as in pkdgrav3. CLASS at z itself includes radiation and is only
+reported: at z = 0, σ8 is 0.8227 from CLASS against 0.8305 from the no-radiation growth.
+
+Two lessons from the tests are built into these checks:
+
+- **No shot-noise subtraction.** The particles start on a lattice, so their discreteness noise on these scales is far
+  below Poisson 1/n̄. Subtracting 1/n̄ removed about 7 % of the z = 12 power at k = 0.063 h/Mpc (64³,
+  100 Mpc/h) and faked 7 % excess growth.
+- **Only nearly linear bins in the growth check.** The lowest bins hold 6–12 modes each. Mode coupling moves a
+  single bin by about (2–3)·Δ²_lin, with either sign. Measured at 128³, 200 Mpc/h, z = 1.24, Δ²_lin = 0.02–0.04:
+  bins at +6 %, −6 % and +10 %. A growth error in the code would show at high z, where many bins are linear.
+
+The plot `<halo dir>/pk/pk_summary.png` has three panels: the matter P(k) at a few redshifts with CLASS linear
+and halofit and the 1/n̄ level; the ratio to the reference against k; and the halo bias b_hm(k) at the last output. It is shown on the manager page and kept in the archive.
+
 Tested on two 64^3 runs, `Sahyadri_L100N64/default64` r1 and r2, 12 Nov 2026:
 
 - Full chain on both, through verify and archive.

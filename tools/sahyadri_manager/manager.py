@@ -14,10 +14,13 @@ What it does, per run (state = files in <SCRATCH>/state/<stem>/r<real>/: events/
 manager.json written here; nothing is lost when the manager stops, it catches up when started again):
   * waits for events: one `inotifywait -m -r` on the state directories (and ~/.sahyadri_mgr for config changes);
     `qstat` only every HEARTBEAT_S (default 30 min), at start, and shortly after a job seems to have vanished
-  * the simulation is submitted from the page (button), never automatically; a restart from the newest checkpoint
-    likewise
+  * the simulation is submitted from the page (button), or by the simulation queue: a scheduled run (page, `manager.py
+    schedule`, `setup_production.py --schedule`) is submitted when the limits (max_sim_running, max_sim_queued) and
+    the scratch space allow, by priority then age, not before its --at time; a simulation that stops cleanly at its
+    wall time is queued again to restart from its newest checkpoint (at most max_sim_restarts times)
   * Rockstar in batches (RS_BATCH=1): when RS_BATCH_MIN consecutive snapshots after the last batch are ready, or the
-    simulation has finished, one batch job; at most MAX_ROCKSTAR Rockstar jobs over all runs (default 1)
+    simulation has finished, one batch job; at most MAX_ROCKSTAR Rockstar jobs over all runs (default 1), taken in
+    turn between runs (the run whose next ready snapshot has waited longest goes first)
   * then ctrees -> vahc -> fits -> verify (one chain, afterok), then archive (copy, check, read-only) automatically
   * a failed job stops the run's automation (shown in red; retry from the page)
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to

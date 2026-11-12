@@ -454,6 +454,7 @@ PP_PK=1                 # matter + halo-mass-bin P(k) and bias of every output f
 PK_MBINS=100,300,1000,3000,10000   # halo mass bin edges in particles (host halos, Mvir); last bin open
 PK_KLIN=0.1             # k [h/Mpc] of the linear-scale checks and the large-scale bias
 PK_ABS_TOL=0.02; PK_GROWTH_TOL=0.03   # verify: |P/P_ref - 1| <= 4 sigma + PK_ABS_TOL; growth ratio within PK_GROWTH_TOL
+PK_DELTA2_LIN=0.01      # growth checked only on bins with Delta^2_lin(k, z) <= this (mode coupling of the few low-k modes)
 
 # FITS
 FITS_NPROC=16

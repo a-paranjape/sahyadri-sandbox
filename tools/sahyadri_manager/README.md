@@ -18,6 +18,17 @@ tools/sahyadri_manager/manager.py add <run.conf>    # register a run (or use the
 tools/sahyadri_manager/start_manager.sh status
 ```
 
+Set up runs and queue them in one step (they are registered with the manager, which submits the simulations as
+the limits below allow):
+
+```bash
+cd scripts/pkdgrav3_pipeline/production
+python setup_production.py --cosmo default --npart 512 --box 200 --real 1-2 --schedule        # priority 0
+python setup_production.py --cosmo 'var_*' --real 1 --schedule 5                              # several cosmologies
+```
+
+`--cosmo` takes a name, a comma list, shell patterns or `all` (files `cosmologies/<name>.cosmo`).
+
 To start it again after a reboot, add this line with `crontab -e`:
 `@reboot <repo>/tools/sahyadri_manager/start_manager.sh`.
 
@@ -43,11 +54,37 @@ away: the manager keeps working.
 - **State.** The run's state lives in files: the event files written by the jobs and `manager.json` written by
   the manager. Stopping or restarting the manager loses nothing.
 
+## Simulation queue and limits
+
+A run is *scheduled* from the page, with `manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]`
+or with `setup_production.py --schedule [N]`. The manager submits scheduled simulations, lowest priority number
+first, then oldest, when all of these hold:
+
+- running + waiting-in-PBS simulations < `max_sim_running` (default 3) and waiting-in-PBS < `max_sim_queued` (1);
+- the `--at` time has passed;
+- the run fits in scratch: free space − (this run's estimate) − (what the running simulations will still write) −
+  `scratch_reserve_gb` (2000) ≥ 0. The estimate is 10.5 bytes per particle per snapshot (measured at 128³ and
+  512³), +15 % for halo catalogues, trees and FITS, plus `SIM_KEEPCHK` checkpoints at 48 bytes per particle, all
+  +10 %.
+  The page shows the numbers; a run that does not fit waits (the *Submit simulation* button can override).
+
+A simulation that stops cleanly at its wall time (checkpoint written, outputs missing) is queued again with
+priority −1 and restarts from its newest checkpoint, at most `max_sim_restarts` (5) times. A simulation that
+fails stops the run as usual.
+
+Change the limits on the page or with `manager.py limits max_sim_running=4 max_rockstar=2 ...` (keys:
+`max_sim_running`, `max_sim_queued`, `max_sim_restarts`, `max_rockstar`, `scratch_reserve_gb`, `heartbeat_s`).
+
+When `max_rockstar` Rockstar jobs are already running, the run whose next ready snapshot has waited longest gets
+the next turn, so one large run does not hold back the others.
+
+Each registered run's `run.conf` is copied to `~/.sahyadri_mgr/confs/` when it is added.
+
 ## What it does
 
 | When | Action |
 |---|---|
-| you press *Submit simulation* | `submit_pipeline.sh --stages sim` (never automatic); *Restart from checkpoint* = `--restart latest` |
+| you press *Submit simulation*, or the queue submits a scheduled run | `submit_pipeline.sh --stages sim`; *Restart from checkpoint* = `--restart latest` |
 | `RS_BATCH_MIN` consecutive snapshots after the last Rockstar batch are ready | Rockstar batch `--rs-snaps A-B` (at most `max_rockstar` Rockstar jobs over all runs, default 1) |
 | simulation finished | Rockstar batch with all the remaining snapshots |
 | Rockstar covers every snapshot | `ctrees → vahc → fits → verify` (one afterok chain) |
@@ -81,6 +118,17 @@ ARCHIVE_FILE_MODE=0444; ARCHIVE_DIR_MODE=0555
    - **vahc / tens / vpot.** The same halo IDs, in the same order, as the `.trees` catalogue.
    - **FITS.** The FITS stage passed its read-back check, after the last vahc run, and every kept FITS file is
      present.
+   - **P(k)** (`pk_check.py`; spectra from the vahc stage: `pk_measure.py` for every output, CLASS linear and
+     halofit at every output redshift from `class_pk.py`). On the bins with k ≤ `PK_KLIN` (0.1 h/Mpc):
+     - *absolute*: R = ⟨P_mm / P_ref⟩ over modes, P_ref = P_CLASS(z_start) [D(z)/D(z_start)]² × halofit/linear,
+       D the no-radiation growth that pkdgrav3 uses. FAIL if |R − 1| > 4σ + 0.02, σ = √(2/N_modes);
+     - *growth*: G = ⟨[P(z)/P(z_first)] / [P_ref(z)/P_ref(z_first)]⟩ over the bins with Δ²_lin(k, z) ≤ 0.01
+       (`PK_DELTA2_LIN`). The same modes at both times, so the realisation's scatter cancels. FAIL if |G − 1| > 0.03;
+     - CLASS at z_start against the table the ICs were made from: FAIL above 2 %;
+     - the ratio to CLASS at z itself (CLASS includes radiation) and the halo bias b1 per mass bin: reported.
+     P(k) is the raw P_mm, without 1/n̄ subtraction: particles start on a lattice, so on these scales their
+     discreteness noise is far below Poisson. The summary plot `<halo dir>/pk/pk_summary.png` is shown on the
+     page and kept in the archive.
 2. **`archive`** (`archive_run.py`):
    - refuses unless verify passed after the last change to any kept file;
    - copies each file while computing its SHA-256;
