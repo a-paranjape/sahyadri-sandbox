@@ -167,12 +167,10 @@ def read_hlist(path):
         h = {k: np.zeros(0) for k in names}
     else:
         h = {k: d[:, i] for i, k in enumerate(names)}
-    for k in list(h):                 # consistent-trees hlists: Mvir, Rvir; use lower-case names throughout
+    for k in list(h):   # lower-case names throughout (hlists: Mvir, Rvir; Rockstar .list: ID, Mvir, Rvir, X, Y, Z)
         h.setdefault(k.lower(), h[k])
-    if 'x' not in h:   # Rockstar out_<snap>.list (no consistent-trees): ID Mvir Rvir X Y Z ..., no pid column
-        low = {k.lower(): v for k, v in h.items()}
-        h = dict(id=low['id'], mvir=low['mvir'], rvir=low['rvir'], x=low['x'], y=low['y'], z=low['z'],
-                 pid=np.full(len(low['id']), -1.0))
+    if 'pid' not in h:  # Rockstar out_<snap>.list (no consistent-trees): no host/subhalo flag, all treated as hosts
+        h['pid'] = np.full(len(h['id']), -1.0)
     return h
 
 
