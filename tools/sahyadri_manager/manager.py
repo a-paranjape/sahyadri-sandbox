@@ -5,6 +5,9 @@
   manager.py add <run.conf> [--paused]   register a run (the running manager picks it up at once)
   manager.py remove <stem/rN>      forget a run (nothing is deleted)
   manager.py list                  registered runs
+  manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
+  manager.py unschedule <stem/rN>
+  manager.py limits [max_sim_running=3] [max_sim_queued=1] [max_sim_restarts=5] [max_rockstar=1] [scratch_reserve_gb=2000]
   On the Mac: open_gui.sh  (ssh tunnel to the socket, opens http://localhost:8765)
 
 What it does, per run (state = files in <SCRATCH>/state/<stem>/r<real>/: events/*.jsonl written by the jobs,
@@ -47,7 +50,12 @@ SOCK = os.path.join(HOME, 'gui.sock')
 LOGF = os.path.join(HOME, 'manager.log')
 PBS = '/opt/pbs/bin'
 # scratch_reserve_gb: kept free on the scratch file system (shared home) when deciding whether a new simulation fits
-DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000)
+# simulation queue: a scheduled run is submitted when running + waiting-in-PBS simulations < max_sim_running and
+# waiting-in-PBS < max_sim_queued (and it fits in scratch); a simulation that stops cleanly at its wall time
+# (checkpoint, not all outputs) is scheduled again to restart, at most max_sim_restarts times
+DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000,
+                   max_sim_running=3, max_sim_queued=1, max_sim_restarts=5)
+LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s')
 
 
 def scratch_estimate(E, n_out):
@@ -265,6 +273,9 @@ class Run:
         def ok_after(evname):   # the event of the newest job
             es = sorted((e for e in self.ev if e['ev'] == evname), key=lambda e: jobnum(e['job']))
             return es[-1] if es else None
+        # sim jobs that stopped cleanly before the last output (pkdgrav3 iWallRunTime / STOP: rc 0, outputs missing)
+        D['sim_clean_stop'] = {e['job'] for e in self.ev if e['ev'] == 'sim_outputs' and int(e.get('rc', 1)) == 0
+                               and int(e.get('ndone', 0)) < int(e.get('nout', 0))}
         D['verify'] = ok_after('verify_done')
         D['archive'] = ok_after('archive_done')
         D['fits'] = ok_after('fits_done')
@@ -300,6 +311,8 @@ class Run:
     def phase(self, D):
         if self.ms.get('purged'):
             return 'purged'
+        if self.ms.get('scheduled') and not self.ms.get('failed'):
+            return 'waiting to restart' if self.ms['scheduled'].get('restart') else 'scheduled'
         if self.ms.get('trash'):
             return 'in trash'
         if self.ms.get('failed'):
@@ -448,6 +461,7 @@ class Manager:
             D = run.derive(self.qjobs, self.qtime)
             derived[run.conf] = D
             active_rs += sum(1 for j in D['active'] if j['stage'] == 'rockstar')
+        self.schedule_sims(derived)
         # Rockstar turn order over the runs: the one whose next snapshot has waited longest goes first
         def waiting(run):
             D = derived[run.conf]
@@ -470,6 +484,19 @@ class Manager:
         E = run.E
         # failures and vanished jobs
         for j in D['jobs']:
+            if (j['status'] == 'failed' and j['stage'] == 'sim' and j['job'] in D['sim_clean_stop']
+                    and not self.acked(run, j)):
+                n = int(run.ms.get('restarts', 0))
+                run.ms.setdefault('acked', []).append(j['job'])
+                if n >= int(self.cfg.get('max_sim_restarts', 5)):
+                    run.ms['failed'] = dict(stage='sim', job=j['job'], rc=j.get('rc'), log=j.get('log'), t=now(),
+                                            msg='stopped at its wall time again after %d restarts (max_sim_restarts)' % n)
+                    run.note('simulation job %s stopped at its wall time; %d restarts done, not restarting' % (j['job'], n))
+                    return 0
+                run.ms['scheduled'] = dict(t=now(), priority=-1, restart=True, after=j['job'])
+                run.note('simulation job %s stopped cleanly before the last output (wall time); scheduled to restart '
+                         'from the newest checkpoint (restart %d of at most %d)' % (j['job'], n + 1, self.cfg.get('max_sim_restarts', 5)))
+                continue
             if j['status'] == 'failed' and not self.acked(run, j):
                 run.ms['failed'] = dict(stage=j['stage'], job=j['job'], rc=j.get('rc'), log=j.get('log'), t=now(),
                                         first=j.get('first'), last=j.get('last'))
@@ -529,6 +556,61 @@ class Manager:
                 run.submit('archive', [], dict(after_verify=lv['job']))
         return 0
 
+    def sim_counts(self, derived):
+        running = queued = 0
+        for run in self.runs.values():
+            for j in derived[run.conf]['active']:
+                if j['stage'] == 'sim':
+                    if j['status'] in ('running', 'exiting'):
+                        running += 1
+                    else:
+                        queued += 1
+        return running, queued
+
+    def schedule_sims(self, derived):
+        """Submit scheduled simulations within max_sim_running / max_sim_queued, by priority then age."""
+        running, queued = self.sim_counts(derived)
+        cand = [r for r in self.runs.values() if r.ms.get('scheduled') and not (r.busy or r.err or r.ms.get('paused')
+                                                                               or r.ms.get('failed') or r.ms.get('trash'))]
+        cand.sort(key=lambda r: (r.ms['scheduled'].get('priority', 0), r.ms['scheduled'].get('t', 0)))
+        mr, mq = int(self.cfg.get('max_sim_running', 3)), int(self.cfg.get('max_sim_queued', 1))
+        self.queue_view = []
+        blocked = None
+        for run in cand:
+            sc = run.ms['scheduled']
+            D = derived[run.conf]
+            wait = None
+            if any(j['stage'] == 'sim' for j in D['active']):
+                wait = 'a simulation job of this run is still active'
+            elif sc.get('not_before') and now() < sc['not_before']:
+                wait = 'not before %s' % iso(sc['not_before'])
+                self.recheck_at = min(self.recheck_at or 1e30, sc['not_before'] + 1)
+            elif blocked:
+                wait = blocked
+            elif running + queued >= mr or queued >= mq:
+                blocked = wait = ('limits: %d running + %d waiting in PBS (max_sim_running %d, max_sim_queued %d)'
+                                  % (running, queued, mr, mq))
+            elif not sc.get('restart'):
+                ok, msg = self.space_check(run)
+                if not ok:
+                    wait = msg
+            if wait is None:
+                try:
+                    extra = ['--restart', 'latest'] if sc.get('restart') else []
+                    run.submit('sim', extra, dict(restart=bool(sc.get('restart')), scheduled=True))
+                    if sc.get('restart'):
+                        run.ms['restarts'] = int(run.ms.get('restarts', 0)) + 1
+                    run.ms['scheduled'] = None
+                    run.save()
+                    queued += 1
+                    continue
+                except Exception as e:  # noqa: BLE001
+                    wait = 'submission failed: %s' % e
+                    run.ms['failed'] = dict(stage='sim', msg=str(e), t=now())
+                    run.note('scheduled submission failed: %s' % e)
+            self.queue_view.append(dict(run=run.name, priority=sc.get('priority', 0), t=sc.get('t'), restart=sc.get('restart'),
+                                        not_before=sc.get('not_before'), wait=wait))
+
     def acked(self, run, j):
         return j['job'] in run.ms.get('acked', [])
 
@@ -540,6 +622,19 @@ class Manager:
         if act == 'refresh':
             self.next_hb = 0
             return 'refreshing'
+        if act == 'set_limits':
+            changed = []
+            for k in LIMIT_KEYS:
+                if a.get(k) not in (None, ''):
+                    v = int(float(a[k]))
+                    if v < (0 if k in ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb') else 1):
+                        raise ValueError('%s must be >= %d' % (k, 0 if k in ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb') else 1))
+                    if self.cfg.get(k) != v:
+                        self.cfg[k] = v
+                        changed.append('%s=%d' % (k, v))
+            save_cfg(self.cfg)
+            log('limits: %s' % (', '.join(changed) or 'unchanged'))
+            return 'set %s' % (', '.join(changed) or 'nothing changed')
         run = next((r for r in self.runs.values() if r.name == name or r.conf == name), None)
         if run is None:
             raise ValueError('no run %s' % name)
@@ -561,6 +656,25 @@ class Manager:
             run.offsets, run.ev = {}, []
             run.read_events()
             return 'reloaded %s' % run.conf
+        if act == 'schedule':
+            D = run.derive(self.qjobs, self.qtime)
+            if D['sim_done']:
+                raise ValueError('the simulation of %s has finished' % run.name)
+            nb = a.get('not_before')
+            if nb not in (None, ''):
+                nb = float(nb) if re.match(r'^[0-9.]+$', str(nb)) else time.mktime(time.strptime(str(nb).replace('T', ' ')[:16], '%Y-%m-%d %H:%M'))
+            else:
+                nb = None
+            restart = bool(D['last'].get('sim')) and bool(glob.glob(os.path.join(run.P['sim'], 'checkpoints', '*.chk')))
+            run.ms['scheduled'] = dict(t=now(), priority=int(a.get('priority') or 0), not_before=nb,
+                                       restart=bool(a.get('restart', restart)))
+            run.note('scheduled (priority %s%s%s)' % (run.ms['scheduled']['priority'], ', not before %s' % iso(nb) if nb else '',
+                                                     ', restart from checkpoint' if run.ms['scheduled']['restart'] else ''))
+            return 'scheduled %s' % run.name
+        if act == 'unschedule':
+            run.ms['scheduled'] = None
+            run.note('removed from the simulation queue')
+            return 'unscheduled %s' % run.name
         if act == 'submit_sim':
             D = run.derive(self.qjobs, self.qtime)
             if any(j['stage'] == 'sim' for j in D['active']):
@@ -763,7 +877,8 @@ class Manager:
                 err=run.err, n_out=D['n_out'], ready=D['ready'], rs_done=D['rs_done'], sim_done=D['sim_done'],
                 sim=D['sim_info'], jobs=D['jobs'][-40:], active=D['active'],
                 verify=self.verify_summary(run, D), archive=D['archive'], fits=D['fits'],
-                trash=run.ms.get('trash'), purged=run.ms.get('purged'), actions=run.ms.get('actions', [])[-30:],
+                trash=run.ms.get('trash'), purged=run.ms.get('purged'), scheduled=run.ms.get('scheduled'),
+                restarts=run.ms.get('restarts', 0), actions=run.ms.get('actions', [])[-30:],
                 keep=dict(full=pl['full_z'] if pl else [], pct=pl['subsample_pct'] if pl else None,
                           tables=pl['tables'] if pl else []),
                 outputs=[[o[0], o[1], o[3]] for o in run.outs], scratch_bytes=run.scratch_bytes,
@@ -774,7 +889,10 @@ class Manager:
                              info={k: v for k, v in e.items() if k not in ('t', 'time', 'run', 'stage', 'job', 'host', 'ev', 'conf')})
                         for e in run.ev[-60:]]))
         with self.lock:
-            self.snapshot = dict(t=now(), runs=runs, disk=self.disk, reserve_gb=self.cfg.get('scratch_reserve_gb'), qtime=self.qtime, qok=self.qok,
+            sr, sq = self.sim_counts(derived) if derived else (0, 0)
+            self.snapshot = dict(t=now(), runs=runs, disk=self.disk, reserve_gb=self.cfg.get('scratch_reserve_gb'),
+                                 limits={k: self.cfg.get(k) for k in LIMIT_KEYS}, sims_running=sr, sims_queued=sq,
+                                 queue=getattr(self, 'queue_view', []), qtime=self.qtime, qok=self.qok,
                                  next_heartbeat=self.next_hb, heartbeat_s=self.cfg['heartbeat_s'],
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
 
@@ -963,6 +1081,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 # ====================================================================================================== CLI
+def call(action):
+    """Send an action to the running manager (its socket), as the page does."""
+    import http.client
+
+    class C(http.client.HTTPConnection):
+        def connect(self):
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.connect(SOCK)
+    c = C('localhost', timeout=900)
+    c.request('POST', '/api/action', json.dumps(action), {'X-Sahyadri': '1', 'Content-Type': 'application/json'})
+    r = json.loads(c.getresponse().read())
+    print(r['result'])
+    return 0 if r['ok'] else 1
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -990,6 +1123,17 @@ def main():
         c['runs'] = keep
         save_cfg(c)
         print('%d runs registered' % len(keep))
+    elif cmd in ('schedule', 'unschedule'):
+        a = dict(action=cmd, run=sys.argv[2])
+        if '--priority' in sys.argv:
+            a['priority'] = sys.argv[sys.argv.index('--priority') + 1]
+        if '--at' in sys.argv:
+            a['not_before'] = sys.argv[sys.argv.index('--at') + 1]
+        sys.exit(call(a))
+    elif cmd == 'limits':
+        a = dict(action='set_limits')
+        a.update(kv.split('=', 1) for kv in sys.argv[2:])
+        sys.exit(call(a))
     elif cmd == 'list':
         for r in load_cfg()['runs']:
             print(r['conf'], '(paused at registration)' if r.get('paused') else '')

@@ -63,6 +63,7 @@ input[type=text] { font: inherit; padding: 4px 8px; border: 1px solid var(--line
   <button onclick="act({action:'refresh'})" title="qstat and disk now">Check now</button>
 </header>
 <main>
+  <div class="card" id="queuecard"></div>
   <div id="runs"></div>
   <div class="card">
     <div class="row"><b>Add a run</b><span class="muted small">path of its run.conf on pawna (added paused)</span></div>
@@ -108,7 +109,7 @@ function stageInfo(run, st){
 }
 function phaseBadge(r){
   const p=r.phase; let c='b-run';
-  if(p==='failed') c='b-bad'; else if(['archived','purged'].includes(p)) c='b-ok'; else if(p==='not started'||r.paused) c='b-off'; else if(p==='in trash') c='b-wait';
+  if(p==='failed') c='b-bad'; else if(p==='scheduled'||p==='waiting to restart') c='b-wait'; else if(['archived','purged'].includes(p)) c='b-ok'; else if(p==='not started'||r.paused) c='b-off'; else if(p==='in trash') c='b-wait';
   return `<span class="badge ${c}">${h(p)}${r.paused?' · paused':''}${r.busy?' · '+h(r.busy)+'…':''}</span>`;
 }
 function renderRun(r, idx){
@@ -147,7 +148,9 @@ function renderRun(r, idx){
       <button class="danger" onclick="trash('${h(r.name)}')">Move scratch data to the trash…</button><span class="muted small">re-checks the manifest first; can be undone until purged</span></div>`;
   else cleanup='<span class="muted small">available once verified and archived</span>';
   const ctl = `<button onclick="act({run:'${h(r.name)}',action:'${r.paused?'resume':'pause'}'})">${r.paused?'Resume automation':'Pause automation'}</button>
-     <button onclick="submitSim('${h(r.name)}')">Submit simulation</button>
+     ${r.scheduled ? `<button onclick="act({run:'${h(r.name)}',action:'unschedule'})">Unschedule</button>`
+                   : `<button class="primary" onclick="schedule('${h(r.name)}')">Schedule simulation</button>`}
+     <button onclick="submitSim('${h(r.name)}')" title="submit now, outside the queue limits">Submit now</button>
      <button onclick="if(confirm('Restart the simulation of ${h(r.name)} from its newest checkpoint?')) act({run:'${h(r.name)}',action:'submit_sim',restart:true})">Restart from checkpoint</button>
      <button onclick="act({run:'${h(r.name)}',action:'reload_conf'})" title="read run.conf again">Reload config</button>`;
   const evs=r.events.slice().reverse().map(e=>`<tr><td class="muted">${when(e.t)}</td><td>${h(e.stage)}</td><td>${h(e.job)}</td><td>${h(e.ev)}</td><td class="small">${h(Object.entries(e.info).map(([k,v])=>k+'='+v).join(' '))}</td></tr>`).join('');
@@ -170,6 +173,18 @@ function renderRun(r, idx){
     <div class="small muted" style="margin-top:6px">${h(r.conf)}</div>
   </div>`;
 }
+function schedule(name){
+  const p = prompt('Schedule the simulation of '+name+'.\nPriority (lower first; same priority: first scheduled first):', '0');
+  if(p===null) return;
+  const t = prompt('Not before (YYYY-MM-DD HH:MM, head-node time), or empty for as soon as the limits allow:', '');
+  if(t===null) return;
+  act({run:name, action:'schedule', priority:p, not_before:t});
+}
+function setLimits(){
+  const a={action:'set_limits'};
+  document.querySelectorAll('#limits input').forEach(i=>{ a[i.name]=i.value; });
+  act(a);
+}
 async function submitSim(name){
   if(!confirm('Submit the simulation of '+name+'?\n(The manager first checks that it fits in scratch next to the running simulations.)')) return;
   const j = await act({run:name, action:'submit_sim'});
@@ -190,6 +205,15 @@ function render(){
   document.getElementById('hdr').innerHTML = `${h(S.host)} · qstat ${S.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(S.qtime)} · next check ${ago(S.next_heartbeat)} · page ${new Date().toLocaleTimeString()}`;
   const toCome = (S.runs||[]).reduce((a,r)=>a+(r.outstanding||0),0);
   document.getElementById('disk').innerHTML = (toCome?`<span class="muted">running simulations will add <b>${hum(toCome)}</b> · reserve ${S.reserve_gb} GB</span>`:'') + Object.entries(S.disk||{}).map(([p,d])=>`<span title="${h(p)}">${h(d.kind==='SCRATCH'?'scratch':'archive')} <b>${hum(d.free)}</b> free of ${hum(d.total)}</span><div class="bar" style="width:90px;min-width:90px"><div style="width:${(100*d.used/d.total).toFixed(0)}%;background:${d.used/d.total>0.9?'var(--bad)':'var(--run)'}"></div></div>`).join('');
+  const L=S.limits||{};
+  const q=(S.queue||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${h(x.run)}</td><td>${x.restart?'restart':'new'}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`).join('');
+  const lim=(k,label,w)=>`<label class="small">${label} <input name="${k}" value="${h(L[k])}" style="width:${w||60}px" type="text"></label>`;
+  const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#limits');
+  if(!editing) document.getElementById('queuecard').innerHTML = `<div class="row"><b>Simulation queue</b>
+     <span class="muted small">running ${S.sims_running} · waiting in PBS ${S.sims_queued}</span><span class="sp"></span>
+     <span id="limits" class="row">${lim('max_sim_running','max running')}${lim('max_sim_queued','max waiting in PBS')}${lim('max_sim_restarts','restarts')}${lim('max_rockstar','Rockstar at once')}${lim('scratch_reserve_gb','reserve GB',70)}</span>
+     <button onclick="setLimits()">Save limits</button></div>
+     ${q?`<table style="margin-top:8px"><tr><th>#</th><th>run</th><th></th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${q}</table>`:'<div class="muted small" style="margin-top:6px">no simulations scheduled</div>'}`;
   document.getElementById('runs').innerHTML = S.runs.length ? S.runs.map(renderRun).join('') : '<div class="card muted">No runs registered yet.</div>';
   document.getElementById('mlog').textContent = (S.log||[]).join('');
 }
