@@ -628,3 +628,38 @@ r, md, err = X['r_mid'], X['mean_diff'][p, k], X['mean_diff_err'][p, k]
   regions, NaN phi_rs included); diluted vs undiluted within 0.4 sigma; the stage ran on the Mac with a test config,
   including the restart skip. Gadget-4 vs pkdgrav3 at 256^3 agree within the jackknife errors (report).
 
+
+## 13. Run manager, scratch on home, retention and archive (`tools/sahyadri_manager`, branch `run-manager`)
+
+New production runs work in home and keep only part of their data. `setup_production.py` now defaults to:
+
+- **scratch:** `--root /user/$USER/sahyadri_scratch`. Writes to home measured 219 MB/s for one stream and about
+  540 MB/s for four; `/storage` measured 23–31 MB/s (job 2536812).
+- **archive:** `--archive /storage/$USER/sahyadri_sims`.
+
+What is kept is set in `run.conf` (`KEEP_FULL_Z`, `KEEP_SUBSAMPLE_PCT`, `KEEP_HALO_TABLES`, ...).
+`scripts/pkdgrav3_pipeline/retention.py run.conf` prints the resolved plan.
+
+Two new stages, both submitted by the manager:
+
+- **`verify`** (`verify_run.py`): checks that everything was computed and is consistent.
+- **`archive`** (`archive_run.py`): copies the kept files with SHA-256 checksums, reads them back from disk with
+  `O_DIRECT`, writes `MANIFEST.json` and `SHA256SUMS`, then makes the archive read-only.
+
+The manager runs on the head node, because compute nodes cannot `qsub`, `qrls` or `qalter`. It:
+
+- reacts to the jobs' event files through `inotifywait`, and runs `qstat` only every 30 min;
+- submits Rockstar in batches while the simulation runs, then `ctrees → vahc → fits → verify`, then `archive`;
+- moves the scratch data to a trash directory, then purges it, only after you approve each step in its web page.
+
+The page is opened on the Mac with `tools/sahyadri_manager/open_gui.sh`. See `tools/sahyadri_manager/README.md`.
+
+Tested on two 64^3 runs, `Sahyadri_L100N64/default64` r1 and r2, 12 Nov 2026:
+
+- Full chain on both, through verify and archive.
+- r2: Rockstar batches 0–9, 10–30 and 31–100 submitted while the simulation was running.
+- Archive read-back: 0 mismatches.
+- Deletion: refused when a kept file changed after the archive. Move to trash, undo, move again and purge all
+  worked on r1.
+- Clocks: the compute nodes run about 3 min and `/storage` about 15 min behind the head node. All ordering uses PBS
+  job IDs or file times from the same server.
