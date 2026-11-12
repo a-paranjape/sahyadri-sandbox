@@ -453,9 +453,9 @@ class FastAddValue(AddValue):
     def header(self, kind):
         if kind == 'vpot':
             V = self.vpot
-            h = ("# Mean pkdgrav3 particle potential around halos, (km/s)^2, self term %.6g (km/s)^2 removed; "
+            h = ("# Mean %s particle potential around halos, (km/s)^2, self term %.6g (km/s)^2 removed; "
                  "Np_*/phi_* within rs, R200b, 0.5/1/1.5 Rvir (spheres), phi_<scale> Gaussian-weighted on %d^3 grid (vahc_fast.py)\n"
-                 % (V['self_term'], self.grid))
+                 % (V.get('code', 'pkdgrav3'), V['self_term'], self.grid))
             h += '# haloID ' + ''.join('Np_%s phi_%s ' % (nm, nm) for nm, _ in SPHERES) + ' '.join('phi_' + s for s in self.scale_strings) + '\n'
             h += '# self_term_kms2 = %.10g ; R200b from M200b with rho_m = Om * %.9g (Msun/h)/(Mpc/h)^3 ; nan = undefined\n' % (
                 V['self_term'], RHO_CRIT)

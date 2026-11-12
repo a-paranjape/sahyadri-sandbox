@@ -17,7 +17,8 @@ Outputs: out_<snap>.vahc / out_<snap>.tens next to out_<snap>.trees.
 usage: run_addvalue.py <stem> [--real 1] [--snaps all|0-100|5,7] [--grid 512] [--down-to 512]
                        [--no-vahc] [--tens] [--nproc 4] [--overwrite] [--fast] [--pot]
 --fast uses vahc_fast.py (same quantities, much faster; see that file); without it addvalue.AddValue as before.
---pot (with --fast) also writes out_<snap>.vpot for snapshots whose .pkc files store the potential.
+--pot (with --fast) also writes out_<snap>.vpot for snapshots whose .pkc files store the potential, and for Gadget-4
+HDF5 snapshots with a Potential field (vpot_hdf5.py; all particles, --down-to 0).
 Memory per process is about 12 x 16 x grid^3 bytes (grid 512: ~26 GB; 768: ~85 GB). With .pkc input and no
 downsampling (--down-to 0, the default) the density is built block by block, so the particles add almost
 nothing at any resolution; with --down-to N (or Gadget input) the N^3 (all) positions are held at once.
@@ -108,7 +109,7 @@ def do_snap(snap, args):
     if not os.path.isfile(base + '.trees'):
         return '%d: no %s.trees' % (snap, base)
     sr = SnapshotReader(sim_stem=args.stem, real=args.real, snap=snap, verbose=False)
-    if 'vpot' in todo and not getattr(getattr(sr, 'pkc', None), 'has_potential', False):
+    if 'vpot' in todo and not (getattr(getattr(sr, 'pkc', None), 'has_potential', False) or _hdf5_pot(sr)):
         todo.remove('vpot')     # .vpot only for snapshots that store the potential
         if not todo:
             return '%d: skipped (outputs exist; no potential in this snapshot, no .vpot)' % snap
@@ -148,6 +149,11 @@ def do_snap(snap, args):
         snap, '+'.join(todo), halos.size, npos, sr.snapshot_file + sr.snapshot_ext, t1 - t0, time.time() - t1)
 
 
+def _hdf5_pot(sr):
+    from vpot_hdf5 import has_potential
+    return has_potential(sr)
+
+
 def _fast_snap(snap, args, hr, sr, ps, base, todo, t0):
     """vahc_fast.FastAddValue: .vahc, .tens (and .vpot) from one pass (see vahc_fast.py); files written to a
     temporary name and renamed when complete."""
@@ -157,6 +163,9 @@ def _fast_snap(snap, args, hr, sr, ps, base, todo, t0):
     if getattr(sr, 'pkc', None) is not None and args.stream and (args.down_to == 0 or args.down_to**3 >= sr.npart):
         density, npos, vpot = streamed_fields(sr.pkc, ps, args.threads, halos=halos if 'vpot' in todo else None,
                                               hpos=hpos, Om=hr.Om)
+    elif 'vpot' in todo and args.down_to == 0 and _hdf5_pot(sr):   # Gadget-4 HDF5 with Potential (vpot_hdf5.py)
+        from vpot_hdf5 import hdf5_fields
+        density, npos, vpot = hdf5_fields(sr, ps, args.threads, halos, hpos, hr.Om)
     else:
         pos = sr.read_block('pos', down_to=args.down_to, seed=args.seed)
         npos = pos.shape[1]

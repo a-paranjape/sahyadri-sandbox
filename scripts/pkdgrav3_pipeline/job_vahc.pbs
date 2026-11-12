@@ -11,6 +11,15 @@ TENS=; [ "$PP_TENS" = 1 ] && TENS=--tens
 # PP_POT=1: also .vpot where the .pkc store the potential (needs PP_FAST=1)
 [ "${PP_FAST:-1}" = 1 ] && TENS="$TENS --fast"
 [ "${PP_POT:-0}" = 1 ] && TENS="$TENS --pot"
+# PP_OVERWRITE=1: recompute every snapshot; the existing .vahc/.tens/.vpot are first copied to $HALO_DIR/vahc_prev/
+# (only if that directory does not exist yet, so a restarted job never replaces the copies with its own outputs)
+if [ "${PP_OVERWRITE:-0}" = 1 ]; then
+  if [ ! -d "$HALO_DIR/vahc_prev" ]; then
+    mkdir "$HALO_DIR/vahc_prev" && cp -p "$HALO_DIR"/out_*.vahc "$HALO_DIR"/out_*.tens "$HALO_DIR"/out_*.vpot "$HALO_DIR/vahc_prev/" 2>/dev/null
+  fi
+  stamp "PP_OVERWRITE=1: previous outputs in $HALO_DIR/vahc_prev ($(ls "$HALO_DIR/vahc_prev" | wc -l) files)"
+  TENS="$TENS --overwrite"
+fi
 /usr/bin/time -v "$PY" "$PP/run_addvalue.py" "$STEM" --real "$REAL" --grid "$PP_GRID" --down-to "$PP_DOWN_TO" \
     $TENS --nproc "$PP_NPROC" 2> "$LOGS/vahc_time.${PBS_JOBID%%.*}.log" | grep -v '^\.\.\.'
 rc=${PIPESTATUS[0]}
