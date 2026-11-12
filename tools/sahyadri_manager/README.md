@@ -23,7 +23,7 @@ the limits below allow):
 
 ```bash
 cd scripts/pkdgrav3_pipeline/production
-python setup_production.py --cosmo default --npart 512 --box 200 --real 1-2 --schedule        # priority 0
+python setup_production.py --cosmo default --N 512 --L 200 --real 1-2 --schedule        # priority 0
 python setup_production.py --cosmo 'var_*' --real 1 --schedule 5                              # several cosmologies
 ```
 
