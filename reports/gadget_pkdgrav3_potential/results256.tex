@@ -356,3 +356,59 @@ mass bin, with the mean (dashed) and median (dotted) of $\phi_{\rm pkd}-\phi_{\r
 (every 5th output). The halo values follow the particle mean, not the median zero point.}
 \label{fig:vpotz256}
 \end{figure}
+
+\subsection{Halo--halo potential cross-correlation}
+\label{sec:xc256}
+
+Figures~\ref{fig:xc256}--\ref{fig:xccols256} show $z=0$ for both codes, in the four stacked-profile mass bins
+(0: $2\times10^{12}$--$10^{13}$, 1: $10^{13}$--$5\times10^{13}$, 2: $5\times10^{13}$--$2\times10^{14}$,
+3: $>2\times10^{14}$\,\Msunh; 13\,375, 3181, 525 and 78 \gad{} hosts) and all ten bin pairs. No shell needed
+dilution at this size. The outputs are on pawna in \fp{data/compare/pkd256_vs_gadget256_r1/xcorr/} and reduced
+copies are in the report's \fp{data/pkd256_vs_gadget256_r1/xcorr/}.
+\begin{itemize}
+\item \textbf{The two codes agree.} For $\phi_{R_{\rm vir}}$, \pkd{} $-$ \gad{} is within 2.5 jackknife errors
+(added in quadrature) in every shell with at least 20 pairs. It is within $1\sigma$ above 2\,\Mpch, for every bin
+pair and every statistic. The largest deviations ($\sim2\sigma$) are in the least massive auto pair below 2\,\Mpch{},
+which has few pairs.
+\item \textbf{Mean difference between bins} (Fig.~\ref{fig:xc256}, left). Lower-mass halos sit in shallower
+potentials. $\langle\phi_i-\phi_j\rangle$ for bins 0 and 3 grows from $1.1\times10^6$\,\kms{} at 2\,\Mpch{} to
+$2.6\times10^6$ at 50\,\Mpch; for bins 0 and 1 it grows from $0.1\times10^6$ to $0.35\times10^6$. It rises with $r$
+because a close pair shares the potential of its common environment: a low-mass halo next to a cluster is deeper
+than the average low-mass halo.
+\item \textbf{Structure function and correlation within a bin} (Fig.~\ref{fig:xc256}, middle and right). For bin 0,
+$\langle(\phi_i-\phi_j)^2\rangle^{1/2}$ grows from $2\times10^4$\,\kms{} at 0.4\,\Mpch{} to $1.2\times10^5$ at 2,
+$4.8\times10^5$ at 18 and $7.8\times10^5$ at 50\,\Mpch. The correlation coefficient falls from 0.999 to 0.98, 0.92,
+0.72, 0.49 and 0.28 at 0.4, 2, 6, 18, 32 and 50\,\Mpch. In linear bins (Fig.~\ref{fig:xclin256}) it falls almost
+linearly with $r$ out to 50\,\Mpch: the halo potentials are coherent on the scales of the large-scale potential
+field.
+\item \textbf{The $\phi$ columns} (Fig.~\ref{fig:xccols256}). Within one bin the five columns are almost equally
+correlated: the large-scale potential dominates, and the halo's own well adds a nearly constant offset. Between
+bins 0 and 3, $\phi_{r_s}$ is the least correlated column and has the largest mean difference, because it includes
+the inner profile of the massive halos. $\phi$ within $0.5R_{\rm vir}$ lies between $r_s$ and $R_{\rm vir}$, and
+$1.5R_{\rm vir}$ and $R_{200b}$ are the smoothest.
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/xcorr_256.pdf}
+\caption{$256^3$, $z=0$: halo--halo correlation of $\phi_{R_{\rm vir}}$ in 30 log bins. Left: mean difference between
+different mass bins A--B ($\phi_i$ in A, $\phi_j$ in B). Middle and right: rms difference and correlation
+coefficient within a bin. Lines and bands: \gad{} with its jackknife error; circles: \pkd. Bottom:
+(\pkd{} $-$ \gad{}) over the two errors in quadrature. Shells with fewer than 20 pairs are omitted.}
+\label{fig:xc256}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/xcorr_lin_256.pdf}
+\caption{As Fig.~\ref{fig:xc256} (top row) in 250 linear bins of 0.2\,\Mpch.}
+\label{fig:xclin256}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/xcorr_cols_256.pdf}
+\caption{$256^3$ \gad{}, $z=0$: the five $\phi$ columns. Correlation coefficient within bin 0 and between bins 0 and
+3, and the mean difference between bins 0 and 3.}
+\label{fig:xccols256}
+\end{figure}

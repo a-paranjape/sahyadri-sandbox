@@ -106,8 +106,9 @@ job logs & \fp{data/logs/<stage>.potcmp_{gadget,pkd}256_r1.<job>.log}, chains \f
 \fp{compare_halos.py} & mass functions, matched halos, VAHC quantities \\
 \fp{compare_vpot.py} & per-halo pipeline potential (\texttt{.vpot} columns of the VAHC FITS files) of matched halos \\
 \fp{scripts/post-process/vpot_hdf5.py} & \texttt{.vpot} for \gad{} HDF5 snapshots (used by \fp{run_addvalue.py --fast --pot}) \\
+\fp{scripts/post-process/halo_potential_xcorr.py}, \fp{halo_pair_sums.c} & halo--halo potential cross-correlation between mass bins (Section~\ref{sec:xcm}); pipeline stage \texttt{xcorr} (\fp{job_xcorr.pbs}) \\
 \midrule
-\fp{reports/gadget_pkdgrav3_potential/} & this report: \fp{report.tex}, \fp{stack_potential.ipynb} (stacked potential figures), \fp{make_figures.py} (other figures), \fp{make_vpot_figures.py} (Section~\ref{sec:vpot256}), \fp{figs/}, \fp{data/} (copies of the small comparison outputs: \fp{particles.csv}, \fp{profiles/}, \fp{halos/*.csv}) \\
+\fp{reports/gadget_pkdgrav3_potential/} & this report: \fp{report.tex}, \fp{stack_potential.ipynb} (stacked potential figures), \fp{make_figures.py} (other figures), \fp{make_vpot_figures.py} (Section~\ref{sec:vpot256}), \fp{make_xcorr_figures.py} (Section~\ref{sec:xc256}), \fp{figs/}, \fp{data/} (copies of the small comparison outputs: \fp{particles.csv}, \fp{profiles/}, \fp{halos/*.csv}) \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -197,6 +198,27 @@ the \gad{} sphere sums equal a KD-tree brute-force sum (no count differences, re
 median and 16--84\% range of $\phi_{\rm pkd}/\phi_{\rm Gadget}$ and of $\phi_{\rm pkd}-\phi_{\rm Gadget}$ at every
 radius. Each code uses its own halo centre and radii, except for the fixed 2, 3, 5\,\Mpch{}. No zero point is removed.
 
+\paragraph{Halo--halo potential cross-correlation.}
+\label{sec:xcm}
+\fp{scripts/post-process/halo_potential_xcorr.py} correlates the per-halo potentials of two mass bins A and B. For
+all pairs ($i\in A$, $j\in B$) at comoving separation $r$ it measures the mean difference
+$\langle\phi_i-\phi_j\rangle(r)$, the structure function $\langle(\phi_i-\phi_j)^2\rangle(r)$, the covariance and the
+correlation coefficient. Its default columns are $\phi$ within $R_{\rm vir}$, $r_s$, $1.5R_{\rm vir}$,
+$0.5R_{\rm vir}$ and $R_{200b}$. Bins are log or linear (range and number set on input), and every bin pair
+$A\le B$ is computed in the stacked-profile mass bins unless chosen otherwise. Errors are jackknife over $3^3$
+sub-cubes, by the position of halo $i$. All statistics follow from six weighted pair sums per column
+($N$, $\sum\phi_i$, $\sum\phi_j$, $\sum\phi_i\phi_j$, $\sum\phi_i^2$, $\sum\phi_j^2$), which one pass over the
+pairs collects for all columns at once. The pass is written in C (\fp{halo_pair_sums.c}), with OpenMP over the
+halos of A and the halos of B in a cell grid matched to the distance range. Nothing is stored per pair.
+For $2048^3$ catalogues the large-$r$ shells are diluted: a shell uses the A halos with $u({\rm id})<2^{-l}$ ($u$ a
+hash of the halo ID, independent of $\phi$), with the smallest $l$ that keeps it at about $2\times10^7$ pairs.
+Each shell then uses a single subsample, so it stays unbiased.
+\emph{Checks}: the sums equal a numpy brute force to $10^{-13}$ (three bin pairs, all columns and jackknife regions,
+including halos without $\phi_{r_s}$). Diluted and undiluted statistics agree within $0.4\sigma$.
+The $256^3$ catalogues take 0.3\,s (30 log bins) and 0.6\,s (250 linear bins). 2.5 million synthetic
+(unclustered) halos in a 1\,$h^{-1}$\,Gpc box take 9 and 21\,s on 8 threads with 1.2\,GB. Clustering adds
+small-$r$ pairs, which are not diluted.
+
 %======================================================================================================
 \section{Results at $32^3$}
 \label{sec:r32}
@@ -244,6 +266,7 @@ shared node made the VAHC rerun take $\sim$3.5\,h for 94 snapshots with 4 proces
 
 %======================================================================================================
 \section{Reproducing}
+{\footnotesize
 \begin{verbatim}
 # on pawna, in a clone of sahyadri-sandbox (branch rockstar-pkc-reader)
 cd scripts/gadget_pkdgrav3_compare
@@ -259,7 +282,13 @@ D=data/pkd256_vs_gadget256_r1
 python ../../scripts/gadget_pkdgrav3_compare/compare_vpot.py <gadget copy> <pkd copy> \
     $D/vpot/vpot_match.csv --particles $D/particles.csv
 python make_vpot_figures.py
+# halo-halo potential cross-correlation, z = 0 (on pawna: submit_pipeline.sh <conf> --stages xcorr)
+for c in gadget256 pkd256; do for b in log:0.2,50,30 lin:0,50,0.2; do
+  python ../../scripts/post-process/halo_potential_xcorr.py <halos>/$c/r1/compressed 100 \
+      xc/${c}_out100_xc_${b%%:*}.npz --rbins $b; done; done
+python make_xcorr_figures.py --full xc
 latexmk -pdf report.tex
 \end{verbatim}
+}
 
 \end{document}

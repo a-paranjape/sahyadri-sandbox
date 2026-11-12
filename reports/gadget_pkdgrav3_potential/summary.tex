@@ -23,6 +23,11 @@ now also writes each halo's mean particle potential within $r_s$, $R_{200b}$, 0.
 VAHC scales, for \gad{} too (from its HDF5 \texttt{Potential}). For matched halos at $z=0$, \pkd{} is deeper by a
 median 3--6\% within $r_s$, 1.3--2\% within $R_{\rm vir}$ and $\sim$1\% at 5\,\Mpch{} (above $10^{12}$\,\Msunh).
 The outer $\sim$1\% is the mass-weighted mean of the deeper halo cores, not a zero-point offset.
+\item \textbf{Halo--halo potential cross-correlation.} A new tool measures, between two mass bins, the mean
+difference, structure function and correlation of the per-halo potentials as a function of separation. It is C with
+OpenMP and dilution, built for $2048^3$, and is an optional pipeline stage. At $256^3$ the two codes agree within
+the jackknife errors at all separations from 0.4 to 50\,\Mpch. Within the lowest mass bin the correlation falls
+from 0.999 at 0.4\,\Mpch{} to 0.28 at 50\,\Mpch.
 \end{itemize}
 The stacking tool keeps only per-mass-bin sums and dilutes the outer shells by particle ID. A stack of a $256^3$
 snapshot with $\sim17\,000$ halos takes $\sim10$\,s; gridding the potential for the volume weighting takes 6\,min.
