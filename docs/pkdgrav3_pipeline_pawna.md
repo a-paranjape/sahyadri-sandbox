@@ -105,7 +105,7 @@ bash sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pawna.sh /storage/$USER/sa
 | `rockstar/` | Rockstar, `make with_hdf5_pkc` (`FILE_FORMAT = "PKC"`, also AREPO/Gadget HDF5) | [github.com/shadaba/rockstar](https://github.com/shadaba/rockstar), branch `sahyadri`, at the commit pinned in `setup_pawna.sh` (`ROCKSTAR_REF`): upstream `36ce9eea36ee` plus one commit per Sahyadri change with its author (Aseem's curvature and Gadget-4 HDF5 changes, Saee's w0/wa in `gen_merger_cfg.pl`, the `.pkc` reader; see `SAHYADRI.md` there). Its source is byte-identical to the older overlay `code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/` on upstream, which `setup_pawna.sh` uses only if it cannot fetch the repository. New Rockstar changes go to that repository. |
 | `ctrees/` | consistent-trees, `make` | `git clone https://bitbucket.org/pbehroozi/consistent-trees.git` at `7c20add`, then `code/ConsistentTrees/consistent-trees-7c20add/` copied over (w0-wa and curvature background, `README_sahyadri.txt`) |
 | `venv/` | self-contained Python 3 venv with numpy, scipy, pandas, h5py, fitsio, zstandard (pip; the system scipy on pawna needs numpy < 1.25) | PyPI |
-| `lib/` | `cic_update.so`, `ngp_update.so` compiled from `scripts/post-process/*.c` | this repository |
+| `lib/` | `cic_update.so`, `ngp_update.so`, `vpot_sums.so` (`.vpot`), `halo_pair_sums.so` (section 12) compiled from `scripts/post-process/*.c` | this repository |
 
 It needs the pkdgrav3 install of 2a (for zstd), `git`, `cc`, `make`, `perl`, `python3` and network access
 to bitbucket.org and PyPI (all available on the pawna login node). Rerunning it rebuilds everything.
@@ -155,6 +155,7 @@ Options:
 | Option | Use |
 |---|---|
 | `--stages ctrees,vahc,fits` | run a subset (in pipeline order), e.g. redo the later stages after a change |
+| `--stages xcorr` | the optional halo-halo potential cross-correlation (section 12); never part of the default chain |
 | `--after <jobid>` | the first stage waits for an existing job (afterok), e.g. chain the halo stages after a simulation that is already running |
 | `--hold` | submit the first job held; `qrls <id>` starts the chain |
 | `--dry-run` | print only |
@@ -507,4 +508,123 @@ Default resources (in `run.conf`; one pawna node has 192 cores and 755 GB, `work
 32 GB / 48 h (serial: one process plus a forked writer, so it shares a node; 2048^3: 2 / 128 GB / 168 h); vahc 32 / 400 GB / 72 h (8 snapshots at a time); FITS 16 / 200 GB / 24 h. These are estimates
 from the 512^3 measurements (section 8), not measured at 1024^3. Runs above 512^3 need approval before
 submission; 2048^3 needs ~750 GB on one node and 8-10 days (more than the 168 h `workq` limit: plan restarts).
+
+## 12. Halo-halo potential cross-correlation (`halo_potential_xcorr.py`, stage `xcorr`)
+
+For host halos in two mass bins A and B, statistics of the per-halo potentials (the `.vpot` columns `phi_*` of
+`out_<snap>_vahc.fits.gz`: mean particle potential within rs, R200b, 0.5/1/1.5 Rvir, ...) over all pairs
+(i in A, j in B) at comoving separation r:
+
+| Statistic | Definition |
+|---|---|
+| `mean_diff` | <phi_i - phi_j> (tends to <phi>_A - <phi>_B at large r; 0 for A = B by symmetry) |
+| `sf` | <(phi_i - phi_j)^2> (structure function) |
+| `cov`, `corr` | <phi_i phi_j> - <phi_i><phi_j>, and divided by the pair-weighted sd of each side |
+
+each with a jackknife error (`*_err`, jk^3 sub-cubes by the position of i), for several `phi` columns at once.
+Files: `scripts/post-process/halo_potential_xcorr.py` (driver), `scripts/post-process/halo_pair_sums.c` (pair
+kernel), `scripts/pkdgrav3_pipeline/job_xcorr.pbs` (stage). Example results and figures: section "Halo-halo potential
+cross-correlation" of `reports/gadget_pkdgrav3_potential/report.pdf`.
+
+### 12a. Set-up and installation
+
+Requirements: Python 3 with numpy and fitsio, and a C compiler; OpenMP is used if the compiler supports it.
+The input is the FITS stage's output with the `.vpot` columns, so the run needs `PP_FAST=1 PP_POT=1` in its
+config (`vahc_fast.py` writes `.vpot`), then the `fits` stage (header `HAS_VPOT = T` in `out_<snap>_vahc.fits.gz`).
+
+- **pawna, new set-up:** `setup_pawna.sh` (section 2b) installs everything: numpy and fitsio in `$CODES/venv`, and
+  `$CODES/lib/halo_pair_sums.so` (`cc -O3 -fopenmp`, gcc 11 on pawna).
+- **pawna, existing set-up** (`$CODES` from before 2026-11-12): build the library once on the login node (a few
+  seconds):
+  ```bash
+  cc -O3 -fopenmp -shared -fPIC -o $CODES/lib/halo_pair_sums.so <repo>/scripts/post-process/halo_pair_sums.c
+  ```
+- **Anywhere else (e.g. a Mac):** `python3 -m pip install numpy fitsio`. The library is built automatically on first
+  use, next to the source, with `$CC` if set, else `cc`, else `gcc-16` ... `gcc-10`. Apple's `cc` has no
+  OpenMP, so on a Mac install gcc (`brew install gcc`) to get threads. Without an OpenMP compiler it builds a serial
+  library and prints a warning. To force a compiler: `CC=gcc-16 python halo_potential_xcorr.py ...`.
+
+The script uses `$SAHYADRI_LIBDIR/halo_pair_sums.so` (the jobs set `SAHYADRI_LIBDIR=$CODES/lib`) when it is not
+older than the source. Otherwise it builds `scripts/post-process/halo_pair_sums.so` itself, so a change to the C
+source is picked up automatically.
+
+### 12b. Running
+
+As a pipeline stage (after `fits`; for 2048^3 catalogues this is the way to run it):
+```bash
+$P/submit_pipeline.sh my.conf --stages xcorr                # z = 0 (the last snapshot)
+$P/submit_pipeline.sh my.conf --stages vahc,fits,xcorr      # chained after the value-added and FITS stages
+```
+Config variables (all optional):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `XC_SNAPS` | last snapshot | snapshots, comma separated, e.g. `100,64,46` |
+| `XC_ARGS` | (tool defaults) | options of `halo_potential_xcorr.py` (below), e.g. `"--rbins lin:0,50,0.2 --pairs auto"` |
+| `XC_TAG` | `log` or `lin` (from `--rbins`) | output name tag |
+| `XC_NCPU`, `XC_MEM`, `XC_WALL` | 16, 16gb, 02:00:00 | PBS resources |
+
+Output: `$HALO_DIR/xcorr/out_<snap>_xcorr_<tag>.npz`; log `$LOGS/xcorr.<run>.<jobid>.log`. Snapshots whose
+output exists are skipped, so to rerun with other options either delete the output or set another `XC_TAG`.
+Without PBS: `CONF=$PWD/my.conf PIPE_ENV=$P/pipeline_env.sh STAGE=xcorr bash $P/job_xcorr.pbs`.
+
+Directly (any machine, any FITS directory):
+```bash
+$CODES/venv/bin/python scripts/post-process/halo_potential_xcorr.py <HALO_DIR>/compressed 100 out.npz \
+    --rbins lin:0,50,0.2 --phi phi_Rvir,phi_rs --mbins 1e12,1e13,1e14,1e16 --pairs 0-0,0-2 --threads 16
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--phi` | `phi_Rvir,phi_rs,phi_R1p5vir,phi_R0p5vir,phi_R200b` | columns of the vahc FITS file; any `phi_*` (also `phi_R2R200b` ... `phi_R5Mpch`) |
+| `--rbins` | `log:0.2,50,30` | `log:rmin,rmax,nbins` or `lin:rmin,rmax,width` (comoving Mpc/h; rmax <= L/2) |
+| `--mbins`, `--mass-col` | `2e12,1e13,5e13,2e14,1e16`, `Mvir` | mass bin edges (Msun/h) and column of the basic FITS file (the stacked-profile bins) |
+| `--pairs` | `all` | `all` (every A <= B, including A = A), `auto` (A = A only), or a list `0-0,0-3,1-2` |
+| `--all-halos` | hosts only | include subhalos |
+| `--jk` | 3 | jackknife sub-cubes per side |
+| `--target`, `--min-a` | 2e7, 2000 | dilution: about this many pairs per shell, but at least this many A halos (`--target 0`: none) |
+| `--threads` | `PBS_NCPUS`, `NCPUS`, else all cores | OpenMP threads |
+| `--seed` | 0 | seed of the dilution hash |
+
+### 12c. Output (`.npz`, compressed)
+
+Index order `[pair, column, shell]`; `pairs[p] = (A, B)` are mass-bin indices, `phi_cols[k]` the columns.
+
+| Key | Shape | Content |
+|---|---|---|
+| `r_edges`, `r_mid`, `binning` | nbin+1, nbin | shell edges and centres (geometric for log), `log`/`lin` |
+| `r_mean` | P x nbin | mean pair separation in the shell |
+| `m_edges`, `mass_col`, `n_halos` | | mass bins and halos per bin |
+| `pairs`, `phi_cols`, `phi_shift` | P x 2, K, K | bin pairs; columns; the per-column mean subtracted before summing (cancels in every statistic) |
+| `mean_diff`, `sf`, `cov`, `corr` (+ `_err`) | P x K x nbin | the statistics and jackknife errors ((km/s)^2, (km/s)^4; corr dimensionless) |
+| `npair`, `frac`, `level`, `expected_pairs` | P x nbin | pairs used, dilution fraction 2^-level of A, expected undiluted pairs |
+| `S` | P x K x nbin x 6 | sums N, sum phi_i, sum phi_j, sum phi_i phi_j, sum phi_i^2, sum phi_j^2 (shifted phi) |
+| `S_jk`, `npair_jk` | P x nreg x K x nbin x 6, P x nreg x nbin | the same per jackknife region of i (to recombine) |
+| `a`, `z`, `box`, `target`, `jk`, `hosts_only`, `timing_s`, `source`, `snap` | | metadata |
+
+```python
+import numpy as np
+X = np.load('out_100_xcorr_log.npz')
+p = [tuple(q) for q in X['pairs']].index((0, 3)); k = list(X['phi_cols']).index('phi_Rvir')
+r, md, err = X['r_mid'], X['mean_diff'][p, k], X['mean_diff_err'][p, k]
+```
+
+### 12d. Method, cost and resources
+
+- One pass over the pairs per bin pair and distance range collects the six sums of every column at once (C,
+  `halo_pair_sums.c`): B is sorted into a cell grid of about a third of the range's outer radius, each A halo visits
+  the cells within that radius, and OpenMP threads split the A halos (dynamic schedule; per-thread accumulators, no
+  locks). Nothing is stored per pair.
+- Dilution: shell i expects n_A n_B V_i / L^3 pairs. It uses the A halos with u(id) < 2^-l, where u is the
+  splitmix64 hash of the halo ID (nested, independent of phi) and l is the smallest level that keeps the shell at
+  about `--target` pairs (and at least `--min-a` A halos). Shells with the same l share one pass. Each shell uses one
+  subsample, so its statistics are unbiased; dilution only adds noise. Pairs with the same ID are skipped (A = B).
+- Memory: the halo arrays ((4 + K) doubles per halo, read column by column) plus, per thread,
+  27 x nbins x (2 + 6K) doubles. 2.5e6 halos: 1.2 GB in total. For 2048^3, 16 GB is ample.
+- Time: about (number of shells) x target x 2.5 pair tests per bin pair. 2.5e6 synthetic (unclustered) halos in
+  1 Gpc/h on 8 Mac threads: 9 s (30 log bins), 21 s (250 linear bins), all 10 bin pairs. 256^3 (35k hosts):
+  0.3 / 0.6 s. Real clustering adds undiluted small-r pairs, so allow more; the 2 h default is generous.
+- Checks (2026-11-12): sums equal a numpy brute force to 1e-13 (bin pairs 0-1, 2-2, 3-3, all columns and jackknife
+  regions, NaN phi_rs included); diluted vs undiluted within 0.4 sigma; the stage ran on the Mac with a test config,
+  including the restart skip. Gadget-4 vs pkdgrav3 at 256^3 agree within the jackknife errors (report).
 
