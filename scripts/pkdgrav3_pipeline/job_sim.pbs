@@ -54,6 +54,7 @@ snap_watch() {
 snap_watch < /dev/null > /dev/null 2>&1 &
 SNAPWATCH_PID=$!
 event sim_info nth="$NTH" staging="${SIM_STAGING:-0}" restart="${CHK:-}"
+ln -sf run.$J.log run.log      # now, so that run.log follows the running simulation
 if [ "${SIM_STAGING:-0}" = 1 ]; then
   # pkdgrav3's staged I/O (tools/staging/run_staged.pbs): snapshots and checkpoints are written to the node's
   # local SSD and copied to $PKC_DIR and $SIM_DIR/checkpoints by pkd_drain.py while the simulation runs, so

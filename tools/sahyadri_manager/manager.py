@@ -292,7 +292,9 @@ class Run:
         if now() - t < 60:
             return v
         v = None
-        f = os.path.join(self.P['sim'], 'run.log')
+        # the newest pkdgrav3 log: run.<job>.log while the job runs (run.log links to it only at the end in older jobs)
+        logs = [x for x in glob.glob(os.path.join(self.P['sim'], 'run.*.log')) if re.search(r'run\.\d+\.log$', x)]
+        f = max(logs, key=os.path.getmtime) if logs else os.path.join(self.P['sim'], 'run.log')
         try:
             with open(f, 'rb') as fh:
                 fh.seek(max(0, os.path.getsize(f) - 65536))
