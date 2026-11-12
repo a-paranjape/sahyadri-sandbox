@@ -46,7 +46,19 @@ CONFIG = os.path.join(HOME, 'config.json')
 SOCK = os.path.join(HOME, 'gui.sock')
 LOGF = os.path.join(HOME, 'manager.log')
 PBS = '/opt/pbs/bin'
-DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180)
+# scratch_reserve_gb: kept free on the scratch file system (shared home) when deciding whether a new simulation fits
+DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000)
+
+
+def scratch_estimate(E, n_out):
+    """Bytes a run will occupy in SCRATCH at most (before its deletion is approved): every snapshot in full
+    (10.5 B/particle measured with the potential at z <= 0.5: 128^3 and 512^3 runs), SIM_KEEPCHK checkpoints
+    (48 B/particle), halo catalogues/trees/FITS (~0.5 of the snapshots at 64^3, a small fraction at large N;
+    0.15 used), plus 10 %."""
+    n3 = float(E.get('NPART', 0)) ** 3
+    snaps = 10.5 * n3 * n_out
+    chk = 48.0 * n3 * int(E.get('SIM_KEEPCHK', '2') or 2)
+    return int(1.10 * (snaps * 1.15 + chk))
 STAGES = ['sim', 'rockstar', 'ctrees', 'vahc', 'fits', 'verify', 'archive']
 # actions that read the archive on /storage (NFS, can take minutes when it is busy): run in a worker thread, the
 # run marked busy (no automation for it meanwhile), so events of the other runs are still handled
@@ -118,6 +130,7 @@ class Run:
         self.scratch_bytes = None
         self.err = None
         self.busy = None
+        self.seen_ready = {}       # snapshot number -> when the manager first saw it ready (its own clock)
         self.load()
         if paused and not os.path.isfile(self.msfile):
             self.ms['paused'] = True
@@ -176,6 +189,8 @@ class Run:
                         e[k] = str(e[k])
                 self.ev.append(e)
                 new += 1
+                if e.get('ev') == 'snap_ready' and e.get('step') in self.step_index:
+                    self.seen_ready.setdefault(self.step_index[e['step']], now())
             self.offsets[f] = off + cut
         if new:
             self.ev.sort(key=lambda e: e.get('t', 0))
@@ -423,7 +438,12 @@ class Manager:
             D = run.derive(self.qjobs, self.qtime)
             derived[run.conf] = D
             active_rs += sum(1 for j in D['active'] if j['stage'] == 'rockstar')
-        for run in self.runs.values():
+        # Rockstar turn order over the runs: the one whose next snapshot has waited longest goes first
+        def waiting(run):
+            D = derived[run.conf]
+            todo = set(range(len(run.outs))) - set(D['rs_done'])
+            return run.seen_ready.get(min(todo), float('inf')) if todo else float('inf')
+        for run in sorted(self.runs.values(), key=waiting):
             D = derived[run.conf]
             try:
                 active_rs += self.policy(run, D, active_rs)
@@ -535,6 +555,10 @@ class Manager:
             D = run.derive(self.qjobs, self.qtime)
             if any(j['stage'] == 'sim' for j in D['active']):
                 raise ValueError('a simulation job of this run is already queued or running')
+            if not a.get('restart'):
+                ok, msg = self.space_check(run)
+                if not ok and not a.get('force'):
+                    raise ValueError('not submitted: ' + msg)
             extra = ['--restart', 'latest'] if a.get('restart') else []
             ids = run.submit('sim', extra, dict(restart=bool(a.get('restart'))))
             return 'submitted %s' % ids
@@ -576,6 +600,27 @@ class Manager:
         if act == 'approve_purge':
             return self.purge(run)
         raise ValueError('unknown action %s' % act)
+
+    def outstanding(self, run, D=None):
+        """Bytes a run still adds to SCRATCH: its estimate minus what it uses now, while its simulation is not done."""
+        D = D or run.derive(self.qjobs, self.qtime)
+        if D['sim_done'] or run.ms.get('trash') or run.ms.get('purged') or not D['last'].get('sim'):
+            return 0
+        used = run.scratch_bytes if run.scratch_bytes is not None else 0
+        return max(0, scratch_estimate(run.E, len(run.outs)) - used)
+
+    def space_check(self, run):
+        """(ok, message): does a new simulation of `run` fit in SCRATCH next to the running ones and the reserve?"""
+        root = run.E['SCRATCH']
+        free = shutil.disk_usage(root).free
+        need = scratch_estimate(run.E, len(run.outs))
+        others = sum(self.outstanding(r) for r in self.runs.values() if r is not run and r.E['SCRATCH'] == root)
+        reserve = int(float(self.cfg.get('scratch_reserve_gb', 2000)) * 1e9)
+        left = free - need - others - reserve
+        msg = ('scratch %s: %s free; this run needs up to %s, running simulations %s more, reserve %s -> %s %s'
+               % (root, retention.human(free), retention.human(need), retention.human(others), retention.human(reserve),
+                  retention.human(abs(left)), 'left' if left >= 0 else 'SHORT'))
+        return left >= 0, msg
 
     def add_run(self, conf, paused=True):
         conf = os.path.abspath(conf)
@@ -712,13 +757,14 @@ class Manager:
                 keep=dict(full=pl['full_z'] if pl else [], pct=pl['subsample_pct'] if pl else None,
                           tables=pl['tables'] if pl else []),
                 outputs=[[o[0], o[1], o[3]] for o in run.outs], scratch_bytes=run.scratch_bytes,
+                scratch_estimate=scratch_estimate(run.E, len(run.outs)), outstanding=self.outstanding(run, D),
                 scratch=run.E.get('SCRATCH'), archive_root=run.E.get('ARCHIVE'), npart=run.E.get('NPART'),
                 rs_batch=run.E.get('RS_BATCH', '0'), rs_batch_min=run.E.get('RS_BATCH_MIN', '10'),
                 events=[dict(t=e['t'], stage=e['stage'], job=e['job'], ev=e['ev'],
                              info={k: v for k, v in e.items() if k not in ('t', 'time', 'run', 'stage', 'job', 'host', 'ev', 'conf')})
                         for e in run.ev[-60:]]))
         with self.lock:
-            self.snapshot = dict(t=now(), runs=runs, disk=self.disk, qtime=self.qtime, qok=self.qok,
+            self.snapshot = dict(t=now(), runs=runs, disk=self.disk, reserve_gb=self.cfg.get('scratch_reserve_gb'), qtime=self.qtime, qok=self.qok,
                                  next_heartbeat=self.next_hb, heartbeat_s=self.cfg['heartbeat_s'],
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
 

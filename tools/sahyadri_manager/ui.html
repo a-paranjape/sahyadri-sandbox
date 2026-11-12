@@ -147,14 +147,14 @@ function renderRun(r, idx){
       <button class="danger" onclick="trash('${h(r.name)}')">Move scratch data to the trash…</button><span class="muted small">re-checks the manifest first; can be undone until purged</span></div>`;
   else cleanup='<span class="muted small">available once verified and archived</span>';
   const ctl = `<button onclick="act({run:'${h(r.name)}',action:'${r.paused?'resume':'pause'}'})">${r.paused?'Resume automation':'Pause automation'}</button>
-     <button onclick="if(confirm('Submit the simulation of ${h(r.name)}?')) act({run:'${h(r.name)}',action:'submit_sim'})">Submit simulation</button>
+     <button onclick="submitSim('${h(r.name)}')">Submit simulation</button>
      <button onclick="if(confirm('Restart the simulation of ${h(r.name)} from its newest checkpoint?')) act({run:'${h(r.name)}',action:'submit_sim',restart:true})">Restart from checkpoint</button>
      <button onclick="act({run:'${h(r.name)}',action:'reload_conf'})" title="read run.conf again">Reload config</button>`;
   const evs=r.events.slice().reverse().map(e=>`<tr><td class="muted">${when(e.t)}</td><td>${h(e.stage)}</td><td>${h(e.job)}</td><td>${h(e.ev)}</td><td class="small">${h(Object.entries(e.info).map(([k,v])=>k+'='+v).join(' '))}</td></tr>`).join('');
   const acts=(r.actions||[]).slice().reverse().map(a=>`<tr><td class="muted">${when(a[0])}</td><td>${h(a[1])}</td></tr>`).join('');
   const D=(k,title,body)=>`<details data-k="${id+k}" ${openDetails.has(id+k)?'open':''}><summary>${title}</summary>${body}</details>`;
   return `<div class="card">
-    <div class="row"><b style="font-size:15px">${h(r.name)}</b>${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)}</span><span class="sp"></span>${ctl}</div>
+    <div class="row"><b style="font-size:15px">${h(r.name)}</b>${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)} of ≤${hum(r.scratch_estimate)}${r.outstanding?' (+'+hum(r.outstanding)+' to come)':''}</span><span class="sp"></span>${ctl}</div>
     ${r.err?`<div class="fail">config: ${h(r.err)}</div>`:''}
     ${fail}
     ${simline}
@@ -170,6 +170,12 @@ function renderRun(r, idx){
     <div class="small muted" style="margin-top:6px">${h(r.conf)}</div>
   </div>`;
 }
+async function submitSim(name){
+  if(!confirm('Submit the simulation of '+name+'?\n(The manager first checks that it fits in scratch next to the running simulations.)')) return;
+  const j = await act({run:name, action:'submit_sim'});
+  if(j && !j.ok && String(j.result).startsWith('not submitted: scratch') &&
+     confirm(j.result+'\n\nSubmit anyway?')) act({run:name, action:'submit_sim', force:true});
+}
 function trash(name){
   if(!confirm('Move the scratch data of '+name+' to the trash?\n\nThe manager first re-checks that every kept file is in the archive and unchanged. The move can be undone until you purge.')) return;
   act({run:name, action:'approve_trash'});
@@ -182,7 +188,8 @@ function render(){
   if(!S) return;
   document.querySelectorAll('details[data-k]').forEach(d=>{ if(d.open) openDetails.add(d.dataset.k); else openDetails.delete(d.dataset.k); });
   document.getElementById('hdr').innerHTML = `${h(S.host)} · qstat ${S.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(S.qtime)} · next check ${ago(S.next_heartbeat)} · page ${new Date().toLocaleTimeString()}`;
-  document.getElementById('disk').innerHTML = Object.entries(S.disk||{}).map(([p,d])=>`<span title="${h(p)}">${h(d.kind==='SCRATCH'?'scratch':'archive')} <b>${hum(d.free)}</b> free of ${hum(d.total)}</span><div class="bar" style="width:90px;min-width:90px"><div style="width:${(100*d.used/d.total).toFixed(0)}%;background:${d.used/d.total>0.9?'var(--bad)':'var(--run)'}"></div></div>`).join('');
+  const toCome = (S.runs||[]).reduce((a,r)=>a+(r.outstanding||0),0);
+  document.getElementById('disk').innerHTML = (toCome?`<span class="muted">running simulations will add <b>${hum(toCome)}</b> · reserve ${S.reserve_gb} GB</span>`:'') + Object.entries(S.disk||{}).map(([p,d])=>`<span title="${h(p)}">${h(d.kind==='SCRATCH'?'scratch':'archive')} <b>${hum(d.free)}</b> free of ${hum(d.total)}</span><div class="bar" style="width:90px;min-width:90px"><div style="width:${(100*d.used/d.total).toFixed(0)}%;background:${d.used/d.total>0.9?'var(--bad)':'var(--run)'}"></div></div>`).join('');
   document.getElementById('runs').innerHTML = S.runs.length ? S.runs.map(renderRun).join('') : '<div class="card muted">No runs registered yet.</div>';
   document.getElementById('mlog').textContent = (S.log||[]).join('');
 }
