@@ -17,6 +17,11 @@ usage:
     --target 2e7                       dilution: at most ~this many pairs per shell (0: no dilution)
     --min-a 2000                       ... but at least this many A halos per shell
     --threads N                        OpenMP threads (default PBS_NCPUS, NCPUS, else all cores)
+    --seed 0                           seed of the dilution hash
+
+Needs numpy and fitsio (the pipeline venv has both) and a C compiler; see docs/pkdgrav3_pipeline_pawna.md
+(section "Halo-halo potential cross-correlation") for set-up, the PBS stage (submit_pipeline.sh --stages xcorr)
+and the output format.
 
 Statistics, per bin pair, column k and shell (pairs with both phi defined; dphi = phi_i - phi_j, i in A, j in B):
   mean_diff  <phi_i - phi_j>                                  (-> <phi>_A - <phi>_B at large r)
@@ -50,10 +55,14 @@ DEFAULT_PHI = 'phi_Rvir,phi_rs,phi_R1p5vir,phi_R0p5vir,phi_R200b'
 
 
 def pair_lib():
-    """halo_pair_sums.so next to this file (built if missing or older than the source; $CC, else cc, gcc-NN)."""
+    """halo_pair_sums.so from $SAHYADRI_LIBDIR (setup_pawna.sh builds it) if it is not older than the source, else
+    built next to this file on first use ($CC, else cc, else gcc-16 ... gcc-10; serial if none supports OpenMP)."""
     src = os.path.join(HERE, 'halo_pair_sums.c')
     so = os.path.join(HERE, 'halo_pair_sums.so')
-    if not (os.path.isfile(so) and os.path.getmtime(so) >= os.path.getmtime(src)):
+    lib_so = os.path.join(os.environ.get('SAHYADRI_LIBDIR', ''), 'halo_pair_sums.so')
+    if os.environ.get('SAHYADRI_LIBDIR') and os.path.isfile(lib_so) and os.path.getmtime(lib_so) >= os.path.getmtime(src):
+        so = lib_so
+    elif not (os.path.isfile(so) and os.path.getmtime(so) >= os.path.getmtime(src)):
         ccs = [os.environ['CC']] if os.environ.get('CC') else ['cc'] + ['gcc-%d' % v for v in range(16, 9, -1)]
         for cc in ccs:
             try:

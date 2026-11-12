@@ -1,6 +1,7 @@
 #!/bin/bash
 # Submit the Sahyadri pkdgrav3 pipeline for one run as a chain of PBS jobs:
 #   sim -> rockstar -> ctrees -> vahc -> fits     (each starts only if the previous one succeeded: afterok)
+#   optional, only when named in --stages: -> xcorr (halo-halo potential cross-correlation, job_xcorr.pbs)
 #
 # usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits] [--after JOBID] [--hold] [--restart CHK] [--dry-run]
 #   --stages  any subset, in pipeline order (e.g. "ctrees,vahc,fits" to redo the later stages)
@@ -31,7 +32,7 @@ QSUB=$(command -v qsub || echo /opt/pbs/bin/qsub)
 RUN=$(echo "$STEM" | tr / _)_r$REAL
 CHAIN=$LOGS/chain.$RUN.$(date +%Y%m%d_%H%M%S).txt
 prev=$AFTER
-for st in sim rockstar ctrees vahc fits; do
+for st in sim rockstar ctrees vahc fits xcorr; do
   case ",$STAGES," in *",$st,"*) ;; *) continue ;; esac
   case $st in
     sim)      R="select=1:ncpus=$SIM_NCPU:mem=$SIM_MEM";   W=$SIM_WALL ;;
@@ -39,6 +40,7 @@ for st in sim rockstar ctrees vahc fits; do
     ctrees)   R="select=1:ncpus=$CT_NCPU:mem=$CT_MEM";     W=$CT_WALL ;;
     vahc)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
     fits)     R="select=1:ncpus=$FITS_NCPU:mem=$FITS_MEM"; W=$FITS_WALL ;;
+    xcorr)    R="select=1:ncpus=${XC_NCPU:-16}:mem=${XC_MEM:-16gb}"; W=${XC_WALL:-02:00:00} ;;
   esac
   DEP=; [ -n "$prev" ] && DEP="-W depend=afterok:$prev"
   H=; [ -z "$prev" ] && H=$HOLD

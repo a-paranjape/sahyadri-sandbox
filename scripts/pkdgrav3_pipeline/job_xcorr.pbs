@@ -1,0 +1,27 @@
+#!/bin/bash -l
+# Optional stage after fits: halo-halo potential cross-correlation (scripts/post-process/halo_potential_xcorr.py)
+# from $HALO_DIR/compressed/out_<snap>_{basic,vahc}.fits.gz (the vahc file needs the .vpot columns: PP_POT=1).
+#   submit_pipeline.sh <run.conf> --stages xcorr          (or --stages vahc,fits,xcorr)
+# Config (all optional):
+#   XC_SNAPS   snapshots, comma separated (default: the last one, z = 0)
+#   XC_ARGS    options of halo_potential_xcorr.py (default: its defaults, log:0.2,50,30 bins, profile mass bins,
+#              phi_Rvir,phi_rs,phi_R1p5vir,phi_R0p5vir,phi_R200b); e.g. XC_ARGS="--rbins lin:0,50,0.2"
+#   XC_TAG     output name tag (default: log or lin from --rbins)
+#   XC_NCPU, XC_MEM, XC_WALL   resources (default 16 cores, 16gb, 2 h; used by submit_pipeline.sh)
+# Output: $HALO_DIR/xcorr/out_<snap>_xcorr_<tag>.npz. Restart: rerun; existing outputs are skipped.
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+NS=$(grep -c . "$SIM_DIR/snapnames.txt")
+SNAPS=${XC_SNAPS:-$((NS - 1))}
+ARGS=${XC_ARGS:-}
+TAG=${XC_TAG:-$(echo "$ARGS" | grep -q 'lin:' && echo lin || echo log)}
+mkdir -p "$HALO_DIR/xcorr"
+rc=0
+for s in ${SNAPS//,/ }; do
+  out=$HALO_DIR/xcorr/out_${s}_xcorr_$TAG.npz
+  [ -f "$out" ] && { stamp "skip $out (exists)"; continue; }
+  stamp "snapshot $s -> $out"
+  "$PY" "$PP/halo_potential_xcorr.py" "$HALO_DIR/compressed" "$s" "$out" --threads "${NCPUS:-${XC_NCPU:-16}}" $ARGS || rc=1
+done
+stamp "xcorr stage exit $rc"
+exit $rc

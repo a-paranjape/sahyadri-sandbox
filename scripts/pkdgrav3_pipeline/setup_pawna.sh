@@ -13,7 +13,7 @@
 #                     upstream 36ce9ee plus the older overlay kept here in code/Rockstar/.
 #   $CODES/ctrees     consistent-trees 7c20add + Sahyadri changes (w0-wa/curvature background), make
 #   $CODES/venv       Python 3 venv (own packages) + numpy scipy pandas h5py fitsio zstandard
-#   $CODES/lib        cic_update.so, ngp_update.so for post-process (found through SAHYADRI_LIBDIR)
+#   $CODES/lib        cic_update.so, ngp_update.so, vpot_sums.so, halo_pair_sums.so for post-process (SAHYADRI_LIBDIR)
 # Rerunning rebuilds everything (the clones are kept).
 set -eu
 CODES=${1:?usage: setup_pawna.sh <CODES dir> [PKD_IO_ROOT]}
@@ -63,5 +63,6 @@ echo "== Python venv"
 echo "== post-process C helpers"
 for f in cic_update ngp_update; do cc -O2 -shared -fPIC -o "$CODES/lib/$f.so" "$SB/scripts/post-process/$f.c"; done
 cc -O3 -fopenmp -shared -fPIC -o "$CODES/lib/vpot_sums.so" "$SB/scripts/post-process/vpot_sums.c"   # .vpot (vahc_fast.py)
+cc -O3 -fopenmp -shared -fPIC -o "$CODES/lib/halo_pair_sums.so" "$SB/scripts/post-process/halo_pair_sums.c"   # halo_potential_xcorr.py
 ls -l "$CODES/lib"
 echo "setup done: CODES=$CODES (put it in the run config)"
