@@ -606,16 +606,29 @@ def convert_tree_aux(args, run_cards, run_prov, tile_rows):
         # row of each tree in its tree_X_Y_Z.fits.gz (-1 if that tile was not converted in this run)
         arr['FitsRow'] = -1
         arr['FitsRows'] = arr['Num_Halos'] if 'Num_Halos' in names else -1
+        tile_rows = dict(tile_rows)
+        for fname in np.unique(arr['Filename']):  # tiles skipped in this run (restart): rows from their FITS file
+            fname = fname.decode()
+            fits_tile = os.path.join(args.outdir, fname.replace('.dat', '.fits.gz'))
+            if fname not in tile_rows and os.path.isfile(fits_tile):
+                with fitsio.FITS(fits_tile) as f:
+                    r = f[1]['Tree_root_ID'][:]
+                new = np.flatnonzero(np.r_[len(r) > 0, r[1:] != r[:-1]])
+                tile_rows[fname] = (r[new], new)
         for fname, (roots, starts) in tile_rows.items():
             sel = np.flatnonzero(arr['Filename'] == fname.encode())
             pos = {int(r): int(s) for r, s in zip(roots, starts)}
             arr['FitsRow'][sel] = [pos.get(int(t), -1) for t in arr['TreeRootID'][sel]]
-        cards = run_cards + [card('SRCFILE', 'locations.dat'),
-                             card('FITSROW', 'first row of the tree in tree_X_Y_Z.fits.gz (-1: unknown)')]
-        tmp = os.path.join(args.tmpdir or args.outdir, '.tmp_locations_%d.fits' % os.getpid())
-        w = TableWriter(tmp, arr.dtype, 'LOCATIONS', cards)
-        w.append(arr)
-        res.append(finish(w, provenance_table(run_prov), out, args))
+        nbad = int((arr['FitsRow'] < 0).sum())
+        if nbad:  # not written, so that a restart (after the tree file is converted) writes it complete
+            res.append({'error': '%d trees without a row in their tree FITS file; not written' % nbad, 'task': loc})
+        else:
+            cards = run_cards + [card('SRCFILE', 'locations.dat'),
+                                 card('FITSROW', 'first row of the tree in tree_X_Y_Z.fits.gz (-1: unknown)')]
+            tmp = os.path.join(args.tmpdir or args.outdir, '.tmp_locations_%d.fits' % os.getpid())
+            w = TableWriter(tmp, arr.dtype, 'LOCATIONS', cards)
+            w.append(arr)
+            res.append(finish(w, provenance_table(run_prov), out, args))
     fl = os.path.join(args.indir, 'forests.list')
     out = os.path.join(args.outdir, 'forests.fits.gz')
     if os.path.isfile(fl) and (args.overwrite or not os.path.isfile(out)):
