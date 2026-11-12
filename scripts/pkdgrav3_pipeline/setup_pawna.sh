@@ -12,7 +12,7 @@
 #                     (public). If it cannot be fetched (no network to GitHub), the same source is made from
 #                     upstream 36ce9ee plus the older overlay kept here in code/Rockstar/.
 #   $CODES/ctrees     consistent-trees 7c20add + Sahyadri changes (w0-wa/curvature background), make
-#   $CODES/venv       Python 3 venv (own packages) + numpy scipy pandas h5py fitsio zstandard
+#   $CODES/venv       Python 3 venv (own packages) + numpy scipy pandas h5py fitsio zstandard, Corrfunc (fork)
 #   $CODES/lib        cic_update.so, ngp_update.so, vpot_sums.so, halo_pair_sums.so for post-process (SAHYADRI_LIBDIR)
 # Rerunning rebuilds everything (the clones are kept).
 set -eu
@@ -59,6 +59,10 @@ echo "== Python venv"
 "$CODES/venv/bin/python" -m pip install -q --upgrade pip
 "$CODES/venv/bin/python" -m pip install -q numpy scipy pandas "h5py<3.12" fitsio zstandard
 "$CODES/venv/bin/python" -c "import numpy, scipy, pandas, h5py, fitsio, zstandard; print('python', numpy.__version__, scipy.__version__, pandas.__version__, fitsio.__version__)"
+# Corrfunc fork with signed mu (dipole) for halo_xi_multipoles.py (stage ximult); gcc + OpenMP by default on Linux.
+# install_corrfunc.sh builds it against this venv's numpy (Ubuntu's system numpy headers would otherwise win)
+bash "$SB/scripts/pkdgrav3_pipeline/install_corrfunc.sh" "$CODES/venv/bin/python" ||
+  echo "WARNING: Corrfunc (adematti/Corrfunc@desi) not installed: stage ximult will not run"
 
 echo "== post-process C helpers"
 for f in cic_update ngp_update; do cc -O2 -shared -fPIC -o "$CODES/lib/$f.so" "$SB/scripts/post-process/$f.c"; done
