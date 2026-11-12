@@ -104,8 +104,10 @@ job logs & \fp{data/logs/<stage>.potcmp_{gadget,pkd}256_r1.<job>.log}, chains \f
 \fp{compare_potential.py} & particle by particle: potential, positions, velocities; FFT Poisson reference \\
 \fp{halo_potential_profile.py} & stacked potential around halos in mass bins (Section~\ref{sec:stack}) \\
 \fp{compare_halos.py} & mass functions, matched halos, VAHC quantities \\
+\fp{compare_vpot.py} & per-halo pipeline potential (\texttt{.vpot} columns of the VAHC FITS files) of matched halos \\
+\fp{scripts/post-process/vpot_hdf5.py} & \texttt{.vpot} for \gad{} HDF5 snapshots (used by \fp{run_addvalue.py --fast --pot}) \\
 \midrule
-\fp{reports/gadget_pkdgrav3_potential/} & this report: \fp{report.tex}, \fp{stack_potential.ipynb} (stacked potential figures), \fp{make_figures.py} (other figures), \fp{figs/}, \fp{data/} (copies of the small comparison outputs: \fp{particles.csv}, \fp{profiles/}, \fp{halos/*.csv}) \\
+\fp{reports/gadget_pkdgrav3_potential/} & this report: \fp{report.tex}, \fp{stack_potential.ipynb} (stacked potential figures), \fp{make_figures.py} (other figures), \fp{make_vpot_figures.py} (Section~\ref{sec:vpot256}), \fp{figs/}, \fp{data/} (copies of the small comparison outputs: \fp{particles.csv}, \fp{profiles/}, \fp{halos/*.csv}) \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -177,6 +179,24 @@ median and 16--84\% range of the ratios of $M_{\rm vir}$, $M_{200b}$, $V_{\max}$
 spin, shape and virial ratio, the centre offset and bulk-velocity difference, and the differences of the VAHC
 halo bias $b_1$ and tidal eigenvalues.
 
+\paragraph{Per-halo potential from the pipeline (\texttt{.vpot}).}
+\label{sec:vpotm}
+After the merge of the \fp{rockstar-pkc-reader} branch, VAHC runs as \fp{vahc_fast.py} (\fp{run_addvalue.py --fast
+--pot}). It reads every particle once and also writes \fp{out_<snap>.vpot}: for each halo the mean particle potential
+within spheres of radius $r_s$, $R_{200b}$ and 0.5, 1, 1.5\,$R_{\rm vir}$ around the halo centre (with the particle
+counts), and the Gaussian-weighted mean at the seven VAHC scales ($2, 4, 6, 8\,R_{200b}$; 2, 3, 5\,\Mpch). The latter
+is $[W\ast\sum_i\phi_i\,{\rm CIC}_i]/[W\ast\sum_i{\rm CIC}_i]$ on the $512^3$ VAHC grid at the halo's cell, so it is
+mass-weighted. The FITS stage merges these columns (\texttt{phi\_rs} \ldots{} \texttt{phi\_R5Mpch}) into
+\fp{out_<snap>_vahc.fits.gz} (header \texttt{HAS\_VPOT}). \pkd{}: $\phi$ from the \texttt{.pkc} files with the self
+term removed (header \texttt{self\_term\_kms2}). \gad{}: \fp{vpot_hdf5.py} reads \texttt{PartType1/Potential} from
+the HDF5 snapshot, $\phi = \texttt{Potential}/a$ with no self term, and uses the same C routines
+(\fp{vpot_sums.c}), so the two codes' \texttt{.vpot} are computed identically. The density and therefore
+\fp{.vahc} do not change: rerun \fp{.vahc} files are bit-identical to the previous ones for both codes (checked at $z=0$), and
+the \gad{} sphere sums equal a KD-tree brute-force sum (no count differences, relative difference $10^{-7}$).
+\fp{compare_vpot.py} matches host halos as \fp{compare_halos.py} does and reports, per output and mass bin, the
+median and 16--84\% range of $\phi_{\rm pkd}/\phi_{\rm Gadget}$ and of $\phi_{\rm pkd}-\phi_{\rm Gadget}$ at every
+radius. Each code uses its own halo centre and radii, except for the fixed 2, 3, 5\,\Mpch{}. No zero point is removed.
+
 %======================================================================================================
 \section{Results at $32^3$}
 \label{sec:r32}
@@ -213,6 +233,13 @@ headers and \texttt{.pkc} potential units are wrong unless \fp{dKpcUnit} and \fp
 pipeline's parameter generator now writes them. A Gadget-2 input file's IDs become iOrder directly, so they must be
 $0\ldots N-1$; \pkd{}'s HDF5 \texttt{Header/Time} is code time, not $a$. Recorded in the \pkd{} fork,
 \fp{docs/compressed_io_plan.md} section 7.
+\item \textbf{FITS stage on large tree files} (VAHC rerun with \texttt{.vpot}): \fp{compress_halo_outputs.py}
+verified float columns by comparing a sum over $2\times10^6$-row chunks with a single sum over the column, which
+differ in the last bits for the 2.5-million-row tree file (``column scale does not read back identically''). It then
+wrote \fp{locations.fits.gz} with every \texttt{FitsRow} $=-1$, which a restart skipped. Both are fixed (chunked
+read-back sums; \texttt{FitsRow} from existing tree FITS files, and no \fp{locations.fits.gz} while a tree lacks a row).
+Final check: 661 PASS, 0 FAIL per code. On pawna \texttt{qalter} cannot change a queued job's walltime, and the
+shared node made the VAHC rerun take $\sim$3.5\,h for 94 snapshots with 4 processes.
 \end{enumerate}
 
 %======================================================================================================
@@ -220,12 +247,18 @@ $0\ldots N-1$; \pkd{}'s HDF5 \texttt{Header/Time} is code time, not $a$. Recorde
 \begin{verbatim}
 # on pawna, in a clone of sahyadri-sandbox (branch gadget-pkdgrav3-potential)
 cd scripts/gadget_pkdgrav3_compare
-bash -lc "bash setup_gadget4_pawna.sh <gadget4 source> <G4HOME> 256"   # Gadget-4 builds (once)
+bash -lc "bash setup_gadget4_pawna.sh <gadget4 source> <G4HOME> 256"   # Gadget-4 (once)
 bash submit_compare.sh compare256.conf                                 # 9 PBS jobs
 # figures (Mac or anywhere with matplotlib), from reports/gadget_pkdgrav3_potential:
-rsync pawna:<data>/compare/pkd256_vs_gadget256_r1/{particles.csv,profiles,halos} data/pkd256_vs_gadget256_r1/
+rsync pawna:<data>/compare/pkd256_vs_gadget256_r1/{particles.csv,profiles,halos} \
+    data/pkd256_vs_gadget256_r1/
 jupyter nbconvert --to notebook --execute stack_potential.ipynb
 python make_figures.py 32=data/pkd32_vs_gadget32_r1 256=<copy with snap_*.npz>
+# .vpot: copies of <halos>/compressed/out_*_{basic,vahc}.fits.gz of both runs
+D=data/pkd256_vs_gadget256_r1
+python ../../scripts/gadget_pkdgrav3_compare/compare_vpot.py <gadget copy> <pkd copy> \
+    $D/vpot/vpot_match.csv --particles $D/particles.csv
+python make_vpot_figures.py
 latexmk -pdf report.tex
 \end{verbatim}
 

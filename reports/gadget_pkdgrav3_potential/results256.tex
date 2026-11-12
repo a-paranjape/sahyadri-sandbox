@@ -286,3 +286,73 @@ with the paired jackknife error.}
 \caption{As Fig.~\ref{fig:wlin256} at $z=1$.}
 \label{fig:wlin256b}
 \end{figure}
+
+\subsection{Per-halo potential from the pipeline (\texttt{.vpot})}
+\label{sec:vpot256}
+
+VAHC and FITS were rerun for both $256^3$ runs with \fp{vahc_fast.py} and \texttt{.vpot} (Section~\ref{sec:vpotm};
+pawna jobs 2536704/2536706, FITS 2536792/2536793). All 94 outputs of each code have \fp{.vahc} and \fp{.vpot}, and
+\fp{out_<snap>_vahc.fits.gz} carries the twelve \texttt{phi\_*} columns. The previous files are in
+\fp{<halos>/vahc_prev/}. The $32^3$ runs cannot be redone because VAHC needs the consistent-trees catalogues.
+Table~\ref{tab:vpot256} and Figs.~\ref{fig:vpot256} and \ref{fig:vpotz256} compare matched host halos (28\,484 at $z=0$).
+\begin{itemize}
+\item \textbf{\pkd{} is deeper at every radius, by about 1\% far from the centre.} The median excess grows inwards:
+at $z=0$ it is 1.0--1.3\% at 5\,\Mpch, 0.9--1.6\% at $4R_{200b}$, 1.3--2.1\% within $R_{\rm vir}$ and 3--6\% within
+$r_s$ (above $10^{12}$\,\Msunh). The $\langle\phi\rangle_{<R_{\rm vir}}$ excess agrees with the particle-level halo
+comparison above (Fig.~\ref{fig:hpot256}: 1--2\%), and the $r_s$ excess is the higher concentration of \pkd{}
+halos. Halos below $10^{12}$\,\Msunh{} (fewer than 100 particles) are 0.7--1.0\% deeper at every radius.
+\item \textbf{The excess within $r_s$ grows with time}, from $\sim$1.7\% at $z=3$ to 3--6\% at $z=0$
+(Fig.~\ref{fig:vpotz256}), as the concentration difference does. At 5\,\Mpch{} it grows from 0.5\% to 1\%.
+\item \textbf{The outer offset is a few $10^3$\,\kms{} and is mass-weighted.} At 5\,\Mpch{} the median difference
+is $-6.5\times10^3$ to $-9\times10^3$\,\kms{} at $z=0$ ($-1.9\times10^4$ above $10^{14}$\,\Msunh). The particle
+zero points differ by only $-1.1\times10^3$ (median over all particles), but the \emph{mean} over all particles of
+$\phi_{\rm pkd}-\phi_{\rm Gadget}$ is $-8.6\times10^3$\,\kms. The \texttt{.vpot} means are particle (mass)
+averages, and the particles in the halo cores inside any sphere sit deeper in \pkd{}'s more concentrated halos. So
+the outer offset is the same core difference, not a zero-point or unit problem. The volume-weighted stacks,
+which do not weight the halo cores, agree within errors (Section~\ref{sec:stack}).
+\item \textbf{Halo to halo} the ratio scatters by $\pm$3--4\% within $R_{\rm vir}$ and $\pm$1.5\% at 5\,\Mpch{}
+(16--84\%, $10^{12}$--$10^{13}$\,\Msunh, $z=0$), more than the median offsets. This scatter comes from the halo finder
+and the particles ending up in different places.
+\end{itemize}
+
+\begin{table}[H]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\toprule
+$M_{\rm vir}$ (\gad{}) [\Msunh] & $10^{11}$--$10^{12}$ & $10^{12}$--$10^{13}$ & $10^{13}$--$10^{14}$ & $>10^{14}$ \\
+matched hosts with \texttt{.vpot} & 2402 & 22\,335 & 3531 & 214 \\
+\midrule
+within $r_s$                     & $+0.8$\,{\scriptsize[$-3.0$,\,$+6.2$]} & $+3.1$\,{\scriptsize[$-4.9$,\,$+13.4$]} & $+6.1$\,{\scriptsize[$+0.1$,\,$+15.9$]} & $+3.1$\,{\scriptsize[$-0.1$,\,$+7.3$]} \\
+within $R_{\rm vir}$             & $+0.8$\,{\scriptsize[$-1.9$,\,$+4.1$]} & $+1.3$\,{\scriptsize[$-2.2$,\,$+5.3$]}  & $+2.1$\,{\scriptsize[$-0.4$,\,$+5.8$]}  & $+1.5$\,{\scriptsize[$+0.1$,\,$+3.0$]} \\
+$4R_{200b}$ (Gaussian)           & $+0.7$\,{\scriptsize[$-1.4$,\,$+3.5$]} & $+0.9$\,{\scriptsize[$-1.7$,\,$+3.9$]}  & $+1.6$\,{\scriptsize[$-0.4$,\,$+4.5$]}  & $+1.4$\,{\scriptsize[$+0.3$,\,$+2.6$]} \\
+5\,\Mpch{} (Gaussian)            & $+1.0$\,{\scriptsize[$-0.7$,\,$+2.7$]} & $+1.0$\,{\scriptsize[$-0.7$,\,$+2.6$]}  & $+1.2$\,{\scriptsize[$-0.2$,\,$+2.6$]}  & $+1.3$\,{\scriptsize[$+0.6$,\,$+2.2$]} \\
+\midrule
+$\Delta\phi$ at 5\,\Mpch{} [$10^3$\,\kms] & $-6.5$ & $-6.7$ & $-9.2$ & $-19.2$ \\
+\bottomrule
+\end{tabular}
+\caption{$256^3$, $z=0$: $\phi_{\rm pkd}/\phi_{\rm Gadget}-1$ in \% of the pipeline \texttt{.vpot} potential of
+matched host halos, median [16\%, 84\%]. The number of hosts with $r_s$ values is smaller (479, 14\,501, 3528, 214),
+because the sphere within $r_s$ is empty for some halos. All outputs:
+\fp{data/pkd256_vs_gadget256_r1/vpot/vpot_match.csv}.}
+\label{tab:vpot256}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/vpot_ratio_256.pdf}
+\caption{$256^3$: pipeline \texttt{.vpot} potential of matched host halos, $\phi_{\rm pkd}/\phi_{\rm Gadget}-1$
+against radius at $z\approx3$, 1, 0.5 and 0, per \gad{} mass bin (median and 16--84\% band; N matched hosts).
+Left of the dotted line: spheres around each code's own halo centre with its own radii. Right: Gaussian-weighted
+means on the VAHC grid.}
+\label{fig:vpot256}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/vpot_vs_z_256.pdf}
+\caption{$256^3$, all 94 outputs. Left and middle: median $\phi_{\rm pkd}/\phi_{\rm Gadget}-1$ against $z$ within $r_s$
+and $R_{\rm vir}$ and at $4R_{200b}$ and 5\,\Mpch. Right: median $\phi_{\rm pkd}-\phi_{\rm Gadget}$ at 5\,\Mpch{} per
+mass bin, with the mean (dashed) and median (dotted) of $\phi_{\rm pkd}-\phi_{\rm Gadget}$ over all particles
+(every 5th output). The halo values follow the particle mean, not the median zero point.}
+\label{fig:vpotz256}
+\end{figure}
