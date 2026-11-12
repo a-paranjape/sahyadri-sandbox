@@ -138,6 +138,8 @@ def plot(rows, cm_path, png, title):
     import matplotlib.pyplot as plt
     if not rows:
         return None
+    def zs(z):                       # no "-0.00" for the last output
+        return '%.2f' % (0.0 if abs(z) < 0.005 else z)
     lin = np.loadtxt(os.path.join(cm_path, 'class_pk_lin.txt'))
     nl = np.loadtxt(os.path.join(cm_path, 'class_pk_nl.txt'))
     want = [rows[0]['z'], 5, 3, 2, 1, 0.5, 0]
@@ -155,14 +157,14 @@ def plot(rows, cm_path, png, title):
         k = np.array(r['k'])
         Pm = np.array(r['Pm'])
         ok = (k < r['kNy']) & (Pm > 0)
-        ax[0].loglog(k[ok], Pm[ok], '-', color=colr, lw=2, label='z = %.2f' % r['z'])
+        ax[0].loglog(k[ok], Pm[ok], '-', color=colr, lw=2, label='z = ' + zs(r['z']))
         shot = r['shot']
         ax[0].loglog(lin[:, 0], lin[:, 2 + r['snap']], '--', color=colr, lw=1)
         ax[0].loglog(nl[:, 0], nl[:, 2 + r['snap']], ':', color=colr, lw=1)
         ref = np.array(r['ref'])
-        ax[1].semilogx(k[ok], Pm[ok] / ref[ok], '-', color=colr, lw=2, label='z = %.2f' % r['z'])
+        ax[1].semilogx(k[ok], Pm[ok] / ref[ok], '-', color=colr, lw=2, label='z = ' + zs(r['z']))
     ax[0].axhline(shot, color=MUTED, lw=0.8, ls='-.', zorder=0)
-    ax[0].text(ax[0].get_xlim()[0] * 1.3 if ax[0].get_xlim()[0] > 0 else 1e-3, shot * 1.15, '1/nbar', color=MUTED, fontsize=8)
+    ax[0].text(ax[0].get_xlim()[1] / 1.5, shot * 1.25, '1/nbar', color=MUTED, fontsize=8, ha='right')
     k0 = np.array(pick[-1]['k'])
     ax[0].axvline(pick[-1]['kNy'] / 2, color=GRID, lw=1, zorder=0)
     ax[0].set_xlabel('k  [h/Mpc]')
@@ -190,7 +192,7 @@ def plot(rows, cm_path, png, title):
         ax[2].semilogx(k[ok], b[ok], '-', color=CAT[i % len(CAT)], lw=2, label=lab)
     ax[2].set_xlabel('k  [h/Mpc]')
     ax[2].set_ylabel('b$_{hm}$(k) = P$_{hm}$ / P$_{mm}$')
-    ax[2].set_title('halo bias at z = %.2f (host halos, M$_{vir}$ [M$_\\odot$/h])' % last['z'], fontsize=9, color=MUTED)
+    ax[2].set_title('halo bias at z = %s (host halos, M$_{vir}$ [M$_\\odot$/h])' % zs(last['z']), fontsize=9, color=MUTED)
     ax[2].legend(frameon=False, fontsize=8)
     for a in ax:
         a.grid(True, color=GRID, lw=0.6)
