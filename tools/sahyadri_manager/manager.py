@@ -670,6 +670,10 @@ class Manager:
             if os.path.exists(src):
                 raise ValueError('%s exists again; not moving back' % src)
             os.rename(dst, src)
+        try:
+            os.rmdir(T['dir'])     # now empty
+        except OSError:
+            pass
         run.ms['trash'] = None
         run.note('trash undone: data back in place')
         return 'restored'
