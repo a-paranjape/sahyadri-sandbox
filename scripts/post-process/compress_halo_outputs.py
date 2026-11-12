@@ -302,10 +302,12 @@ class TableWriter:
         self.sums = {n: 0 for n in dtype.names}
         self.nnan = {n: 0 for n in dtype.names}  # float columns: NaNs counted, the rest summed (.vpot has NaNs)
         self.started = False
+        self.chunks = []  # rows per append: float sums are re-added in the same chunks on read-back (exact)
 
     def append(self, arr):
         if len(arr) == 0:
             return
+        self.chunks.append(len(arr))
         for n in arr.dtype.names:
             if arr.dtype[n].kind == 'S':  # strings: running CRC of the bytes
                 self.sums[n] = zlib.crc32(np.ascontiguousarray(arr[n]).tobytes(), self.sums[n])
@@ -356,9 +358,13 @@ def finish(writer, prov_arr, out, args, extra_cards=()):
                 elif col.dtype.kind in 'iu':
                     back = int(col.astype(np.int64).sum())
                 else:
-                    v = col.astype(np.float64)
-                    back = float(np.nansum(v))
-                    if int(np.isnan(v).sum()) != writer.nnan[name]:
+                    back, nnan, i0 = 0, 0, 0
+                    for m in writer.chunks:  # same chunks and order as the write-side sum (float addition order)
+                        v = col[i0:i0 + m].astype(np.float64)
+                        back += float(np.nansum(v))
+                        nnan += int(np.isnan(v).sum())
+                        i0 += m
+                    if nnan != writer.nnan[name]:
                         back = None
                 if back != s:
                     raise RuntimeError('%s: column %s does not read back identically' % (out, name))
