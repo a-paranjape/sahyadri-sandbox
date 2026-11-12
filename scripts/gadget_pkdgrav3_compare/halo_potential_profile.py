@@ -73,6 +73,8 @@ def read_halos(path, mass_col):
     if d.shape[0] == 0 or d.size == 0:
         return {k: np.zeros(0) for k in names + ['mass', 'pid']}
     h = {k: d[:, i] for i, k in enumerate(names)}
+    for k in list(h):                 # consistent-trees hlists: Mvir, Rvir; use lower-case names throughout
+        h.setdefault(k.lower(), h[k])
     if 'x' not in h:          # Rockstar out_*.list: '#ID DescID Mvir Vmax Vrms Rvir Rs Np X Y Z ...'
         low = {k.lower(): v for k, v in h.items()}
         h = dict(x=low['x'], y=low['y'], z=low['z'], rvir=low['rvir'], mvir=low['mvir'], pid=np.full(len(d), -1.0),
