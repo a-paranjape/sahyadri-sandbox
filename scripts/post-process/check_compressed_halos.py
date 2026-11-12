@@ -62,7 +62,7 @@ def check_snapshot(R, out, snap):
         V = np.loadtxt(vahc, ndmin=2)
         with fitsio.FITS(os.path.join(out, 'out_%s_vahc.fits.gz' % snap)) as f:
             d = f[1].read()
-        nb = [c for c in d.dtype.names if not same(d[c], V[:, vn.index(c)])]
+        nb = [c for c in vn if c not in C.BASIC_COLS and (c not in d.dtype.names or not same(d[c], V[:, vn.index(c)]))]  # .vpot cols: below
         if 'b1' in vn:
             nb += [] if same(got['b1'], V[:, vn.index('b1')]) else ['b1 (basic)']
         ok(not nb, 'out_%s: .vahc columns equal the ASCII%s' % (snap, (' (differ: %s)' % nb) if nb else ''))
