@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sahyadri runs</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #1d2330; --muted: #677087; --line: #e2e5ec;
+  --ok: #1f9d55; --okbg: #e3f5ea; --run: #2563eb; --runbg: #e3ecfd; --wait: #a16207; --waitbg: #fbf1d9;
+  --bad: #c62828; --badbg: #fde6e6; --off: #c9ced8; --ready: #93b4f5; --done: #3fb370; --full: #111827;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #12151b; --card: #1a1f27; --ink: #e6e9ef; --muted: #98a1b3; --line: #2a313c;
+    --okbg: #133322; --runbg: #15264a; --waitbg: #3a2c0c; --badbg: #3d1717; --off: #3a414d; --ready: #3b5ea8; --done: #2f8f5a; --full: #f5f7fa; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); padding: 10px 18px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+header h1 { font-size: 17px; margin: 0 10px 0 0; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+main { max-width: 1250px; margin: 0 auto; padding: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.sp { flex: 1; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.b-ok { background: var(--okbg); color: var(--ok); } .b-run { background: var(--runbg); color: var(--run); }
+.b-wait { background: var(--waitbg); color: var(--wait); } .b-bad { background: var(--badbg); color: var(--bad); }
+.b-off { background: var(--line); color: var(--muted); }
+button { font: inherit; font-size: 13px; padding: 4px 11px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.primary { background: var(--run); color: #fff; border-color: var(--run); }
+.stages { display: grid; grid-template-columns: repeat(8, minmax(90px, 1fr)); gap: 6px; margin: 10px 0; }
+.stage { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+.stage b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.st-ok { border-color: var(--ok); } .st-run { border-color: var(--run); } .st-bad { border-color: var(--bad); background: var(--badbg); }
+.snaps { display: flex; flex-wrap: wrap; gap: 2px; margin: 6px 0 2px; }
+.snaps span { width: 9px; height: 16px; border-radius: 2px; background: var(--off); }
+.snaps span.r { background: var(--ready); } .snaps span.d { background: var(--done); }
+.snaps span.k { outline: 2px solid var(--full); outline-offset: -1px; }
+.bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; min-width: 160px; }
+.bar > div { height: 100%; background: var(--run); }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+td, th { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+details { margin-top: 8px; } summary { cursor: pointer; color: var(--muted); }
+pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; overflow: auto; max-height: 360px; font-size: 12px; white-space: pre-wrap; }
+.fail { border: 1px solid var(--bad); background: var(--badbg); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.legend span { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 3px 0 10px; vertical-align: -1px; }
+input[type=text] { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); width: min(620px, 100%); }
+#toast { position: fixed; bottom: 16px; right: 16px; max-width: 520px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; display: none; box-shadow: 0 4px 18px rgba(0,0,0,.15); }
+@media (max-width: 720px) { .stages { grid-template-columns: repeat(4, 1fr); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sahyadri runs</h1>
+  <span id="hdr" class="muted small"></span>
+  <span class="sp"></span>
+  <span id="disk" class="row small"></span>
+  <button onclick="act({action:'refresh'})" title="qstat and disk now">Check now</button>
+</header>
+<main>
+  <div id="runs"></div>
+  <div class="card">
+    <div class="row"><b>Add a run</b><span class="muted small">path of its run.conf on pawna (added paused)</span></div>
+    <div class="row" style="margin-top:6px"><input type="text" id="newconf" placeholder="/user/shadab/sahyadri_scratch/sims/.../r1/run.conf"><button onclick="addRun()">Add</button></div>
+  </div>
+  <details class="card"><summary>Manager log</summary><pre id="mlog"></pre></details>
+</main>
+<div id="toast"></div>
+<script>
+const STAGES = ['sim','rockstar','ctrees','vahc','fits','verify','archive'];
+let S = null, openDetails = new Set();
+function h(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function hum(b){ if(b==null) return '?'; const u=['B','KB','MB','GB','TB','PB']; let i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return b.toFixed(i?1:0)+' '+u[i]; }
+function ago(t){ if(!t) return '—'; const d=(Date.now()/1000-t); if(d<0) return 'in '+dur(-d); return dur(d)+' ago'; }
+function dur(s){ s=Math.round(s); if(s<90) return s+' s'; if(s<5400) return Math.round(s/60)+' min'; if(s<172800) return (s/3600).toFixed(1)+' h'; return (s/86400).toFixed(1)+' d'; }
+function when(t){ return t ? new Date(t*1000).toLocaleString() : '—'; }
+function toast(msg, ok){ const t=document.getElementById('toast'); t.innerHTML=(ok?'':'<b style="color:var(--bad)">Error: </b>')+h(msg); t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', ok?5000:15000); }
+async function act(a){
+  try {
+    const r = await fetch('/api/action', {method:'POST', headers:{'Content-Type':'application/json','X-Sahyadri':'1'}, body: JSON.stringify(a)});
+    const j = await r.json(); toast(j.result, j.ok); setTimeout(load, 800); return j;
+  } catch(e){ toast(String(e), false); }
+}
+function addRun(){ const c=document.getElementById('newconf').value.trim(); if(c) act({action:'add_run', conf:c, paused:true}); }
+async function showLog(path, id){
+  const el=document.getElementById(id); if(!el) return;
+  const r=await fetch('/api/log?path='+encodeURIComponent(path)); const j=await r.json();
+  el.textContent = j.text || j.error || ''; el.style.display='block';
+}
+function stageInfo(run, st){
+  const js = run.jobs.filter(j=>j.stage===st);
+  if(st==='rockstar' && run.n_out) {
+    const n=run.rs_done.length, act=js.find(j=>['queued','running','submitted','held'].includes(j.status));
+    const cls = n===run.n_out ? 'st-ok' : (act ? 'st-run' : (js.some(j=>j.status==='failed') && run.failed ? 'st-bad':''));
+    return {cls, txt: `${n}/${run.n_out} snaps` + (act ? `<br>${act.status} ${act.first??''}-${act.last??''}` : '')};
+  }
+  const j = js[js.length-1];
+  if(!j) return {cls:'', txt:'<span class="muted">—</span>'};
+  const cls = {done:'st-ok', failed:'st-bad', running:'st-run', queued:'st-run', submitted:'st-run', held:'st-run', gone:'st-bad'}[j.status]||'';
+  let extra='';
+  if(st==='sim' && run.sim) extra = `<br>z=${run.sim.z.toFixed(2)}`;
+  return {cls, txt: `${h(j.status)} <span class="muted">${h(j.job)}</span>${extra}`};
+}
+function phaseBadge(r){
+  const p=r.phase; let c='b-run';
+  if(p==='failed') c='b-bad'; else if(['archived','purged'].includes(p)) c='b-ok'; else if(p==='not started'||r.paused) c='b-off'; else if(p==='in trash') c='b-wait';
+  return `<span class="badge ${c}">${h(p)}${r.paused?' · paused':''}</span>`;
+}
+function renderRun(r, idx){
+  const id='r'+idx;
+  const ready=new Set(r.ready), done=new Set(r.rs_done), full=new Set((r.keep.full||[]).map(x=>x[0]));
+  const snaps=r.outputs.map(o=>`<span class="${done.has(o[0])?'d':(ready.has(o[0])?'r':'')} ${full.has(o[0])?'k':''}" title="snapshot ${o[0]}, step ${o[1]}, z=${(+o[2]).toFixed(3)}${full.has(o[0])?' (kept in full)':''}"></span>`).join('');
+  const sim=r.sim; let simline='';
+  if(sim){ const f=sim.nsteps? Math.min(1, sim.step/sim.nsteps):0;
+    simline=`<div class="row small"><span>simulation step ${sim.step|0}${sim.nsteps?' / '+sim.nsteps:''}, z = ${sim.z.toFixed(3)}</span><div class="bar" style="width:220px"><div style="width:${(100*f).toFixed(1)}%"></div></div>
+      <span class="muted">${sim.rate? (sim.rate*3600).toFixed(0)+' steps/h, done ~'+when(sim.eta) : ''} · log ${ago(sim.log_mtime)}</span></div>`; }
+  const st=STAGES.map(s=>{const i=stageInfo(r,s); return `<div class="stage ${i.cls}"><b>${s}</b>${i.txt}</div>`;}).join('');
+  const clean = r.purged ? `<div class="stage st-ok"><b>cleanup</b>purged</div>` : (r.trash ? `<div class="stage st-run"><b>cleanup</b>in trash</div>` : `<div class="stage"><b>cleanup</b><span class="muted">—</span></div>`);
+  let fail='';
+  if(r.failed){ const f=r.failed;
+    fail=`<div class="fail"><b>${h(f.stage)} ${f.job?('job '+h(f.job)):''} failed</b> ${f.rc!=null?'(exit '+h(f.rc)+')':''} ${h(f.msg||'')}
+      ${f.first!=null?` · snapshots ${f.first}-${f.last}`:''} · ${when(f.t)}
+      <div class="row" style="margin-top:6px">${f.log?`<button onclick="showLog('${h(f.log)}','${id}flog')">Show log</button>`:''}
+      ${f.stage!=='sim'&&f.stage!=='manager'?`<button class="primary" onclick="act({run:'${h(r.name)}',action:'retry'})">Retry ${h(f.stage)}</button>`:''}
+      <button onclick="act({run:'${h(r.name)}',action:'ack'})">Acknowledge (no resubmission)</button></div><pre id="${id}flog" style="display:none"></pre></div>`; }
+  const active=r.active.length? `<table><tr><th>job</th><th>stage</th><th>status</th><th>node</th><th>snapshots</th><th>submitted</th><th></th></tr>`+
+     r.active.map(j=>`<tr><td>${h(j.job)}</td><td>${h(j.stage)}</td><td>${h(j.status)}</td><td>${h(j.node||j.host||'')}</td><td>${j.first!=null?j.first+'-'+j.last:''}</td><td>${ago(j.submitted||j.start)}</td>
+     <td>${j.log?`<button onclick="showLog('${h(j.log)}','${id}alog')">log</button>`:''}</td></tr>`).join('')+`</table><pre id="${id}alog" style="display:none"></pre>` : '<span class="muted small">no jobs queued or running</span>';
+  let ver='<span class="muted small">not run yet</span>';
+  if(r.verify){ ver=`<div class="small">${r.verify.ok?'<span class="badge b-ok">passed</span>':'<span class="badge b-bad">failed</span>'} ${h(r.verify.time)}</div><table>`+
+     Object.entries(r.verify.checks).map(([k,c])=>`<tr><td>${h(k)}</td><td>${c.ok?'<span class="badge b-ok">ok</span>':'<span class="badge b-bad">fail</span>'}</td><td class="small">${h(c.errors.join('; '))}${c.warnings.length?' <span class="muted">warnings: '+h(c.warnings.join('; '))+'</span>':''}</td></tr>`).join('')+'</table>'; }
+  const keep=r.keep;
+  const keepTxt = `full: ${keep.full.map(x=>x[0]+' (z='+(+x[1]).toFixed(2)+')').join(', ')} · ${keep.pct}% of the others · tables ${h(keep.tables.join(','))}`;
+  let arch='<span class="muted small">not archived</span>';
+  if(r.archive) arch = `<span class="badge ${+r.archive.ok?'b-ok':'b-bad'}">${+r.archive.ok?'archived':'archive failed'}</span> <span class="small muted">${when(r.archive.t)} · ${h(r.archive.manifest||'')}</span>`;
+  let cleanup='';
+  if(r.purged) cleanup=`<span class="badge b-ok">purged</span> <span class="small muted">${when(r.purged.t)} ${h(r.purged.dir)}</span>`;
+  else if(r.trash) cleanup=`<div class="small">in the trash since ${when(r.trash.t)}: ${h(r.trash.dir)}</div><div class="row" style="margin-top:6px">
+      <button onclick="act({run:'${h(r.name)}',action:'undo_trash'})">Undo (move back)</button>
+      <button class="danger" onclick="purge('${h(r.name)}')">Purge permanently…</button></div>`;
+  else if(r.phase==='archived') cleanup=`<div class="row"><button onclick="act({run:'${h(r.name)}',action:'check_trash'})">Check</button>
+      <button class="danger" onclick="trash('${h(r.name)}')">Move scratch data to the trash…</button><span class="muted small">re-checks the manifest first; can be undone until purged</span></div>`;
+  else cleanup='<span class="muted small">available once verified and archived</span>';
+  const ctl = `<button onclick="act({run:'${h(r.name)}',action:'${r.paused?'resume':'pause'}'})">${r.paused?'Resume automation':'Pause automation'}</button>
+     <button onclick="if(confirm('Submit the simulation of ${h(r.name)}?')) act({run:'${h(r.name)}',action:'submit_sim'})">Submit simulation</button>
+     <button onclick="if(confirm('Restart the simulation of ${h(r.name)} from its newest checkpoint?')) act({run:'${h(r.name)}',action:'submit_sim',restart:true})">Restart from checkpoint</button>
+     <button onclick="act({run:'${h(r.name)}',action:'reload_conf'})" title="read run.conf again">Reload config</button>`;
+  const evs=r.events.slice().reverse().map(e=>`<tr><td class="muted">${when(e.t)}</td><td>${h(e.stage)}</td><td>${h(e.job)}</td><td>${h(e.ev)}</td><td class="small">${h(Object.entries(e.info).map(([k,v])=>k+'='+v).join(' '))}</td></tr>`).join('');
+  const acts=(r.actions||[]).slice().reverse().map(a=>`<tr><td class="muted">${when(a[0])}</td><td>${h(a[1])}</td></tr>`).join('');
+  const D=(k,title,body)=>`<details data-k="${id+k}" ${openDetails.has(id+k)?'open':''}><summary>${title}</summary>${body}</details>`;
+  return `<div class="card">
+    <div class="row"><b style="font-size:15px">${h(r.name)}</b>${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)}</span><span class="sp"></span>${ctl}</div>
+    ${r.err?`<div class="fail">config: ${h(r.err)}</div>`:''}
+    ${fail}
+    ${simline}
+    <div class="snaps">${snaps}</div>
+    <div class="legend small muted">snapshots:<span style="background:var(--off)"></span>planned<span style="background:var(--ready)"></span>written<span style="background:var(--done)"></span>halos found<span style="outline:2px solid var(--full)"></span>kept in full</div>
+    <div class="stages">${st}${clean}</div>
+    ${D('a','Jobs now', active)}
+    ${D('v','Checks (verify)', ver)}
+    ${D('k','Retention and archive', `<div class="small">${keepTxt}</div><div class="small muted">${h(r.scratch)} → ${h(r.archive_root)}</div><div style="margin-top:6px">${arch}</div>`)}
+    ${D('c','Delete scratch data', cleanup)}
+    ${D('e','Events', `<table>${evs}</table>`)}
+    ${D('m','Manager actions', `<table>${acts}</table>`)}
+    <div class="small muted" style="margin-top:6px">${h(r.conf)}</div>
+  </div>`;
+}
+function trash(name){
+  if(!confirm('Move the scratch data of '+name+' to the trash?\n\nThe manager first re-checks that every kept file is in the archive and unchanged. The move can be undone until you purge.')) return;
+  act({run:name, action:'approve_trash'});
+}
+function purge(name){
+  const t=prompt('Permanently delete the trash of '+name+'?\nThe archive copy stays. Type the run name to confirm:');
+  if(t===name) act({run:name, action:'approve_purge'}); else if(t!==null) toast('name did not match; nothing deleted', false);
+}
+function render(){
+  if(!S) return;
+  document.querySelectorAll('details[data-k]').forEach(d=>{ if(d.open) openDetails.add(d.dataset.k); else openDetails.delete(d.dataset.k); });
+  document.getElementById('hdr').innerHTML = `${h(S.host)} · qstat ${S.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(S.qtime)} · next check ${ago(S.next_heartbeat)} · page ${new Date().toLocaleTimeString()}`;
+  document.getElementById('disk').innerHTML = Object.entries(S.disk||{}).map(([p,d])=>`<span title="${h(p)}">${h(d.kind==='SCRATCH'?'scratch':'archive')} <b>${hum(d.free)}</b> free of ${hum(d.total)}</span><div class="bar" style="width:90px;min-width:90px"><div style="width:${(100*d.used/d.total).toFixed(0)}%;background:${d.used/d.total>0.9?'var(--bad)':'var(--run)'}"></div></div>`).join('');
+  document.getElementById('runs').innerHTML = S.runs.length ? S.runs.map(renderRun).join('') : '<div class="card muted">No runs registered yet.</div>';
+  document.getElementById('mlog').textContent = (S.log||[]).join('');
+}
+async function load(){ try { const r=await fetch('/api/state'); S=await r.json(); render(); } catch(e){ document.getElementById('hdr').textContent='manager not reachable: '+e; } }
+load(); setInterval(load, 15000);
+</script>
+</body>
+</html>
