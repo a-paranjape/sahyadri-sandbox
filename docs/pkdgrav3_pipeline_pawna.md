@@ -104,7 +104,7 @@ bash sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pawna.sh /storage/$USER/sa
 |---|---|---|
 | `rockstar/` | Rockstar, `make with_hdf5_pkc` (`FILE_FORMAT = "PKC"`, also AREPO/Gadget HDF5) | [github.com/shadaba/rockstar](https://github.com/shadaba/rockstar), branch `sahyadri`, at the commit pinned in `setup_pawna.sh` (`ROCKSTAR_REF`): upstream `36ce9eea36ee` plus one commit per Sahyadri change with its author (Aseem's curvature and Gadget-4 HDF5 changes, Saee's w0/wa in `gen_merger_cfg.pl`, the `.pkc` reader; see `SAHYADRI.md` there). Its source is byte-identical to the older overlay `code/Rockstar/gfcstanford-rockstar-36ce9eea36ee/` on upstream, which `setup_pawna.sh` uses only if it cannot fetch the repository. New Rockstar changes go to that repository. |
 | `ctrees/` | consistent-trees, `make` | `git clone https://bitbucket.org/pbehroozi/consistent-trees.git` at `7c20add`, then `code/ConsistentTrees/consistent-trees-7c20add/` copied over (w0-wa and curvature background, `README_sahyadri.txt`) |
-| `venv/` | self-contained Python 3 venv with numpy, scipy, pandas, h5py, fitsio, zstandard (pip; the system scipy on pawna needs numpy < 1.25) | PyPI |
+| `venv/` | self-contained Python 3 venv with numpy, scipy, pandas, h5py, fitsio, zstandard (pip; the system scipy on pawna needs numpy < 1.25), and Corrfunc from the `adematti/Corrfunc` fork, branch `desi` (section 13) | PyPI, GitHub |
 | `lib/` | `cic_update.so`, `ngp_update.so`, `vpot_sums.so` (`.vpot`), `halo_pair_sums.so` (section 12) compiled from `scripts/post-process/*.c` | this repository |
 
 It needs the pkdgrav3 install of 2a (for zstd), `git`, `cc`, `make`, `perl`, `python3` and network access
@@ -156,6 +156,7 @@ Options:
 |---|---|
 | `--stages ctrees,vahc,fits` | run a subset (in pipeline order), e.g. redo the later stages after a change |
 | `--stages xcorr` | the optional halo-halo potential cross-correlation (section 12); never part of the default chain |
+| `--stages ximult` | the optional correlation multipoles in real/redshift space (section 13); never part of the default chain |
 | `--after <jobid>` | the first stage waits for an existing job (afterok), e.g. chain the halo stages after a simulation that is already running |
 | `--hold` | submit the first job held; `qrls <id>` starts the chain |
 | `--dry-run` | print only |
@@ -627,4 +628,131 @@ r, md, err = X['r_mid'], X['mean_diff'][p, k], X['mean_diff_err'][p, k]
 - Checks (2026-11-12): sums equal a numpy brute force to 1e-13 (bin pairs 0-1, 2-2, 3-3, all columns and jackknife
   regions, NaN phi_rs included); diluted vs undiluted within 0.4 sigma; the stage ran on the Mac with a test config,
   including the restart skip. Gadget-4 vs pkdgrav3 at 256^3 agree within the jackknife errors (report).
+
+## 13. Correlation multipoles in real and redshift space (`halo_xi_multipoles.py`, stage `ximult`)
+
+Halo cross-correlation multipoles xi_l(s), l = 0..4 (the dipole included), between halo mass bins A and B, in a
+periodic box with a fixed line of sight (plane parallel), in four spaces:
+
+| Space | Line-of-sight displacement of each halo (comoving Mpc/h; wraps periodically) |
+|---|---|
+| `real` | none |
+| `rsd` | v_los / (a H) (Rockstar bulk velocity, peculiar km/s) |
+| `grav` | v_g / (a H), v_g = -phi / c: gravitational redshift of a source at potential phi (observer at phi = 0) |
+| `rsd+grav` | both |
+
+H = 100 E(a) km/s/(Mpc/h), with E from Omega_m and Omega_L in the FITS header. phi is a `.vpot` column (default
+`phi_rs`, the mean potential within rs, the closest to a central galaxy; where it is undefined `phi_R0p5vir`). A
+constant zero point of phi moves every halo alike and changes nothing. Convention: s = x_B - x_A and
+mu = s_los / s in (-1, 1), so a B population shifted by +delta along the line of sight gives
+xi_1 = -delta dxi_0/ds. For A = B the dipole is identically 0.
+Files: `scripts/post-process/halo_xi_multipoles.py`, `scripts/pkdgrav3_pipeline/job_ximult.pbs`. Results at 256^3:
+section "Correlation multipoles in real and redshift space" of `reports/gadget_pkdgrav3_potential/report.pdf`.
+
+### 13a. Set-up and installation
+
+Requirements: Python 3 with numpy and fitsio, and **Corrfunc from Arnaud de Mattia's fork**:
+github.com/adematti/Corrfunc, branch `desi` (also mirrored as cosmodesi/Corrfunc). It counts pairs in *signed*
+mu in (-mu_max, mu_max). Stock Corrfunc counts |mu| only, which loses the odd multipoles. Corrfunc builds its C
+extensions with its own `common.mk` and **ignores the CC environment variable**.
+The input needs the `.vpot` columns for the `grav` spaces (`PP_FAST=1 PP_POT=1`, then the `fits` stage). The
+`real` and `rsd` spaces need only `out_<snap>_basic.fits.gz`.
+
+Install it with `scripts/pkdgrav3_pipeline/install_corrfunc.sh <python> [workdir]`. The script clones the fork,
+applies the two patches below only where they are needed, builds against that Python's numpy
+(`--no-build-isolation`), and ends with a smoke test. The test checks that mu is signed (bins from -1 to 1) and
+reports whether the extension is linked to OpenMP.
+
+- **pawna, new set-up:** `setup_pawna.sh` (section 2b) runs it for `$CODES/venv`.
+- **pawna, existing set-up** (on the login node; the build takes several minutes on the busy node):
+  ```bash
+  bash <repo>/scripts/pkdgrav3_pipeline/install_corrfunc.sh $CODES/venv/bin/python
+  ```
+  To keep it out of a shared `$CODES`, use your own venv and run the script directly with that Python (below):
+  ```bash
+  python3 -m venv my_venv && my_venv/bin/pip install numpy fitsio
+  bash <repo>/scripts/pkdgrav3_pipeline/install_corrfunc.sh $PWD/my_venv/bin/python
+  ```
+  Tested 2026-11-12 on pawna in such a venv (Python 3.10, numpy 2.2.6, gcc 11, libgomp).
+- **Mac:** `brew install libomp`, then the same command with your Python (a venv with numpy and fitsio). Tested with
+  Python 3.13 / numpy 2.1 (Anaconda) on Apple Silicon.
+
+The patches of Corrfunc's `common.mk`:
+- **Linux:** numpy's include directory goes first. Corrfunc passes `-isystem <python include>` before numpy's, and on
+  Debian/Ubuntu with the `python3-numpy` package, `<python include>/numpy` holds the *system* numpy's (1.x) headers.
+  A venv with numpy 2 then gets an extension that fails at import with `numpy.core.multiarray failed to import`
+  (`A module that was compiled using NumPy 1.x cannot be run in NumPy 2.2.6`). Plain `pip install
+  git+https://github.com/adematti/Corrfunc@desi` fails this way on pawna.
+- **Mac:** Apple clang has no OpenMP, and Homebrew gcc rejects Corrfunc's `-march=apple-m1`. The script adds
+  Homebrew's libomp to the clang branch. Without it the build is serial, about 7x slower on 8 cores.
+
+### 13b. Running
+
+As a pipeline stage (after `fits`):
+```bash
+$P/submit_pipeline.sh my.conf --stages ximult              # z = 0 (the last snapshot)
+$P/submit_pipeline.sh my.conf --stages vahc,fits,ximult
+```
+Config variables (all optional): `XM_SNAPS` (snapshots, default the last), `XM_ARGS` (options below, e.g.
+`"--los x,y,z"`), `XM_TAG` (output tag, default `ximult`), `XM_NCPU`/`XM_MEM`/`XM_WALL` (default 32 cores, 32gb,
+6 h). Output: `$HALO_DIR/xcorr/out_<snap>_<tag>.npz`. Existing outputs are skipped. The job stops at once with a
+message if Corrfunc is missing from `$CODES/venv`. Without PBS:
+`CONF=$PWD/my.conf PIPE_ENV=$P/pipeline_env.sh STAGE=ximult bash $P/job_ximult.pbs`.
+
+Directly:
+```bash
+python scripts/post-process/halo_xi_multipoles.py <HALO_DIR>/compressed 100 out.npz --los x,y,z --threads 32
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--spaces` | `real,rsd,grav,rsd+grav` | any subset |
+| `--phi`, `--phi-fallback` | `phi_rs`, `phi_R0p5vir` | potential column(s) for grav (several: `grav[<col>]` spaces each); fallback where undefined (`''`: drop those halos) |
+| `--pot-amp` | 1 | multiply the potential shift (response tests; 1 = physical) |
+| `--los` | `z` | line of sight `x`, `y` or `z`; a list (`x,y,z`) measures each and stores their mean (3x the pairs: less noise) |
+| `--sbins` | `lin:0,100,2` | `lin:smin,smax,width` or `log:smin,smax,n`, comoving Mpc/h, smax <= L/2 |
+| `--nmu`, `--ells` | 200, `0,1,2,3,4` | mu bins in (-1, 1); multipoles |
+| `--mbins`, `--mass-col`, `--pairs` | profile bins, `Mvir`, `all` | as section 12 (`all`, `auto`, `cross` or `0-3,1-2`) |
+| `--jk` | 3 | jackknife sub-cubes per side (by the real-space position of the A halo) |
+| `--subsample-a` | 1 | use A halos with hash(id) < f (fewer pairs for very large catalogues) |
+| `--threads`, `--all-halos` | `PBS_NCPUS`, `NCPUS`, all cores; hosts | |
+
+### 13c. Output (`.npz`, compressed)
+
+| Key | Shape | Content |
+|---|---|---|
+| `s_edges`, `s_mid`, `mu_edges`, `ells` | | bins |
+| `spaces`, `los`, `pairs`, `phi_cols` | S, NL, P x 2, | names; mass-bin pairs (A, B) |
+| `xi_ell`, `xi_ell_err` | S x NL x P x nell x ns | multipoles per line of sight, jackknife errors |
+| `xi_ell_mean`, `xi_ell_mean_err` | S x P x nell x ns | mean over the lines of sight and its jackknife error |
+| `xi_ell_jk` | S x P x nreg x nell x ns | leave-one-region-out multipoles of the mean (to rebin or form differences) |
+| `diff_names`, `dxi_ell`, `dxi_ell_err` | D, D x P x nell x ns | potential effect: `grav - real`, `rsd+grav - rsd` (same halos; most noise cancels) |
+| `DD` | S x NL x P x ns x nmu | pair counts |
+| `n_halos`, `n_a`, `n_b`, `vg_mean` | | halos per bin, halos used per pair, mean v_g (km/s) per phi column and bin |
+| `a`, `z`, `box`, `aH`, `omega_m`, `omega_l`, `pot_amp`, `jk`, `source`, `snap` | | metadata |
+
+```python
+import numpy as np
+X = np.load('out_100_ximult.npz')
+sp, pairs = list(X['spaces']), [tuple(p) for p in X['pairs']]
+s, ip, k = X['s_mid'], pairs.index((0, 3)), sp.index('rsd')
+xi0, xi2 = X['xi_ell_mean'][k, ip, 0], X['xi_ell_mean'][k, ip, 2]
+d = list(X['diff_names']).index('rsd+grav - rsd')
+dip, dip_err = X['dxi_ell'][d, ip, 1], X['dxi_ell_err'][d, ip, 1]        # dipole from the potential
+```
+A wider s bin is the volume-weighted mean of the narrow ones (exact for DD/RR - 1 in a periodic box). Apply the same
+to `xi_ell_jk` for its error (`reports/gadget_pkdgrav3_potential/make_ximult_figures.py`, `rebin`).
+
+### 13d. Method, cost and checks
+
+- xi(s, mu) = DD / RR - 1 with RR analytic, N_A N_B V_s (dmu/2) / L^3 (N_B - 1 for A = B). xi_l uses bin-integrated
+  Legendre polynomials. DD is counted with Corrfunc `DDsmu`, A halos one jackknife region at a time against all B.
+- Time: Corrfunc, OpenMP. 2.5e6 synthetic (unclustered) halos in 1 Gpc/h to 100 Mpc/h (2.2e10 pairs, all 10 bin
+  pairs) take 56 s per space and line of sight on 8 Mac threads, 0.8 GB. So 4 spaces x 3 lines of sight take about
+  11 min there, and less on 32 pawna cores. 256^3: 15 s for everything.
+- Checks (2026-11-12): DD(s, mu) equals a numpy brute force in every bin (real and rsd, cross and auto). Single-pair
+  tests fix the mu sign and the periodic wrap. A constant 1 Mpc/h shift of one bin gives xi_1 ~ -delta dxi_0/ds.
+  Same-bin dipoles are 0 and the real-space quadrupole is 0 within errors. The OpenMP and serial builds give
+  identical counts. A potential shift x50 gives a dipole linear in the shift, 0.5-1.2 times the mean-shift
+  prediction.
 
