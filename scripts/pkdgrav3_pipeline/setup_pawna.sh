@@ -9,8 +9,8 @@
 # Builds:
 #   $CODES/rockstar   Rockstar from github.com/shadaba/rockstar, branch sahyadri at ROCKSTAR_REF (upstream 36ce9eea36ee +
 #                     Sahyadri changes: PKC reader, curvature, w0-wa; see SAHYADRI.md there), make with_hdf5_pkc.
-#                     If that clone fails (the repository is private: needs GitHub credentials on this machine), the
-#                     same source is made from upstream 36ce9ee plus the overlay kept here in code/Rockstar/.
+#                     (public). If it cannot be fetched (no network to GitHub), the same source is made from
+#                     upstream 36ce9ee plus the older overlay kept here in code/Rockstar/.
 #   $CODES/ctrees     consistent-trees 7c20add + Sahyadri changes (w0-wa/curvature background), make
 #   $CODES/venv       Python 3 venv (own packages) + numpy scipy pandas h5py fitsio zstandard
 #   $CODES/lib        cic_update.so, ngp_update.so for post-process (found through SAHYADRI_LIBDIR)
