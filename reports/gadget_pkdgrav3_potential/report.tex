@@ -107,8 +107,9 @@ job logs & \fp{data/logs/<stage>.potcmp_{gadget,pkd}256_r1.<job>.log}, chains \f
 \fp{compare_vpot.py} & per-halo pipeline potential (\texttt{.vpot} columns of the VAHC FITS files) of matched halos \\
 \fp{scripts/post-process/vpot_hdf5.py} & \texttt{.vpot} for \gad{} HDF5 snapshots (used by \fp{run_addvalue.py --fast --pot}) \\
 \fp{scripts/post-process/halo_potential_xcorr.py}, \fp{halo_pair_sums.c} & halo--halo potential cross-correlation between mass bins (Section~\ref{sec:xcm}); pipeline stage \texttt{xcorr} (\fp{job_xcorr.pbs}) \\
+\fp{scripts/post-process/halo_xi_multipoles.py} & halo cross-correlation multipoles in real and redshift space, with the gravitational-redshift shift (Section~\ref{sec:xmm}); stage \texttt{ximult} (\fp{job_ximult.pbs}) \\
 \midrule
-\fp{reports/gadget_pkdgrav3_potential/} & this report: \fp{report.tex}, \fp{stack_potential.ipynb} (stacked potential figures), \fp{make_figures.py} (other figures), \fp{make_vpot_figures.py} (Section~\ref{sec:vpot256}), \fp{make_xcorr_figures.py} (Section~\ref{sec:xc256}), \fp{figs/}, \fp{data/} (copies of the small comparison outputs: \fp{particles.csv}, \fp{profiles/}, \fp{halos/*.csv}) \\
+\fp{reports/gadget_pkdgrav3_potential/} & this report: \fp{report.tex}, \fp{stack_potential.ipynb} (stacked potential figures), \fp{make_figures.py} (other figures), \fp{make_vpot_figures.py} (Section~\ref{sec:vpot256}), \fp{make_xcorr_figures.py} (Section~\ref{sec:xc256}), \fp{make_ximult_figures.py} (Section~\ref{sec:xm256}), \fp{figs/}, \fp{data/} (copies of the small comparison outputs: \fp{particles.csv}, \fp{profiles/}, \fp{halos/*.csv}) \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -219,6 +220,33 @@ The $256^3$ catalogues take 0.3\,s (30 log bins) and 0.6\,s (250 linear bins). 2
 (unclustered) halos in a 1\,$h^{-1}$\,Gpc box take 9 and 21\,s on 8 threads with 1.2\,GB. Clustering adds
 small-$r$ pairs, which are not diluted.
 
+\paragraph{Correlation multipoles in real and redshift space.}
+\label{sec:xmm}
+\fp{scripts/post-process/halo_xi_multipoles.py} measures the halo cross-correlation multipoles $\xi_\ell(s)$,
+$\ell=0\ldots4$, between mass bins A and B. The odd multipoles, in particular the dipole, are included. The
+geometry is a periodic box with a fixed line of sight, so the plane-parallel approximation is exact. Four spaces
+are measured: \emph{real} positions; \emph{rsd}, where each halo moves along the line of sight by
+$v_\parallel/(aH)$; \emph{grav}, which moves it by $v_g/(aH)$ with $v_g=-\phi/c$, the gravitational redshift of a
+source at potential $\phi$ seen from $\phi=0$; and \emph{rsd+grav}, which applies both. Displacements wrap
+periodically, and $H = 100E(a)$\,km\,s$^{-1}$/(\Mpch). $\phi$ is \texttt{phi\_rs}, the mean potential within $r_s$,
+which is closest to a central galaxy. Where it is undefined (an empty $r_s$ sphere) \texttt{phi\_R0p5vir} is used
+instead; both choices are options. A constant zero point of $\phi$ moves every halo alike and does not matter.
+Pairs are counted with Corrfunc \texttt{DDsmu} from the \fp{adematti/Corrfunc} fork (branch \texttt{desi}), which
+counts signed $\mu=s_\parallel/s\in(-1,1)$ in 200 bins, with $s = x_B-x_A$. A B population shifted by $+\delta$
+along the line of sight therefore gives $\xi_1=-\delta\,d\xi_0/ds$. The estimator is $\xi(s,\mu)=DD/RR-1$, with
+$RR$ analytic for the periodic box, and $\xi_\ell$ uses bin-integrated Legendre polynomials. Errors are jackknife
+over $3^3$ regions of the A halo; all spaces use the same halos and regions. The potential's effect is therefore
+measured as a difference between spaces (rsd+grav $-$ rsd, grav $-$ real) with its own jackknife error, and most
+of the cosmic variance cancels. We use 2\,\Mpch{} bins from 0 to 100\,\Mpch{} and average the x, y and z lines of
+sight; each is also stored separately.
+\emph{Checks}: $DD(s,\mu)$ equals a numpy brute force in every bin, in real and redshift space, for cross and auto
+pairs. A $\mu$ sign test and a periodic-wrap test were run on single pairs. A constant 1\,\Mpch{} shift of one bin
+gives $\xi_1\simeq-\delta\,d\xi_0/ds$. Dipoles of same-bin pairs vanish identically, and the real-space quadrupole
+is zero within errors. Corrfunc with OpenMP gives bit-identical counts. On the Mac it needs \texttt{libomp}: Apple
+clang has no OpenMP, and gcc rejects Corrfunc's \texttt{-march=apple-m1}. With that, 2.5 million synthetic halos in
+1\,$h^{-1}$\,Gpc to 100\,\Mpch{} ($2.2\times10^{10}$ pairs) take 56\,s per space and line of sight on 8 threads,
+with 0.8\,GB.
+
 %======================================================================================================
 \section{Results at $32^3$}
 \label{sec:r32}
@@ -287,6 +315,12 @@ for c in gadget256 pkd256; do for b in log:0.2,50,30 lin:0,50,0.2; do
   python ../../scripts/post-process/halo_potential_xcorr.py <halos>/$c/r1/compressed 100 \
       xc/${c}_out100_xc_${b%%:*}.npz --rbins $b; done; done
 python make_xcorr_figures.py --full xc
+# correlation multipoles (Corrfunc fork; on pawna: submit_pipeline.sh <conf> --stages ximult)
+for c in gadget256 pkd256; do python ../../scripts/post-process/halo_xi_multipoles.py \
+    <halos>/$c/r1/compressed 100 xm/${c}_out100_ximult.npz --los x,y,z; done
+python ../../scripts/post-process/halo_xi_multipoles.py <halos>/pkd256/r1/compressed 100 \
+    xm/pkd256_out100_amp50.npz --pot-amp 50 --spaces real,grav --pairs 0-1,0-2,0-3 --los x,y,z
+python make_ximult_figures.py --full xm
 latexmk -pdf report.tex
 \end{verbatim}
 }

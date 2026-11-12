@@ -28,6 +28,12 @@ difference, structure function and correlation of the per-halo potentials as a f
 OpenMP and dilution, built for $2048^3$, and is an optional pipeline stage. At $256^3$ the two codes agree within
 the jackknife errors at all separations from 0.4 to 50\,\Mpch. Within the lowest mass bin the correlation falls
 from 0.999 at 0.4\,\Mpch{} to 0.28 at 50\,\Mpch.
+\item \textbf{Correlation multipoles.} The halo cross-correlation multipoles ($\ell=0$--4, dipole included) between
+mass bins, from 0 to 100\,\Mpch, were measured in real space, in redshift space, and with the gravitational-redshift
+shift of each halo's potential. They use Corrfunc with signed $\mu$ (the \fp{adematti/Corrfunc@desi} fork) and are
+a pipeline stage. The codes agree within errors, and redshift space shows the Kaiser monopole boost and a negative
+quadrupole. The potential adds a small positive dipole between bins of different mass, measured as a difference
+of spaces. It is consistent between the codes and linear in the potential (checked with the shift $\times50$).
 \end{itemize}
 The stacking tool keeps only per-mass-bin sums and dilutes the outer shells by particle ID. A stack of a $256^3$
 snapshot with $\sim17\,000$ halos takes $\sim10$\,s; gridding the potential for the volume weighting takes 6\,min.
