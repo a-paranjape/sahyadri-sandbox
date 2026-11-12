@@ -7,10 +7,12 @@ k_mean <= KLIN (PK_KLIN, default 0.1 h/Mpc, at least the two lowest bins):
             (CLASS at z): cosmic variance of the realisation, sigma = sqrt(2 / N_modes); FAIL if |R - 1| >
             4 sigma + PK_ABS_TOL (0.02): catches normalisation, unit or growth errors, not the realisation's scatter
   growth    G = <[P(z) / P(z_first)] / [P_ref(z) / P_ref(z_first)]>_modes over the bins that are still linear at z,
-            Delta^2_lin(k, z) = k^3 P_lin / 2 pi^2 <= PK_DELTA2_LIN (0.05): the same modes at both times, so the
+            Delta^2_lin(k, z) = k^3 P_lin / 2 pi^2 <= PK_DELTA2_LIN (0.01): the same modes at both times, so the
             realisation's scatter cancels; FAIL if |G - 1| > PK_GROWTH_TOL (0.03). Snapshots without such a bin (late
-            times in small boxes; at k ~ 0.09 h/Mpc, z = 0 the few modes of a 100 Mpc/h box grow ~10 % below linear
-            theory through mode coupling, measured) are reported, not checked
+            times) are reported, not checked. Why 0.01: the lowest bins hold only 6-12 modes, and their growth departs
+            from linear theory by ~(2-3) x Delta^2_lin per bin through mode coupling, with either sign (measured:
+            128^3, 200 Mpc/h, z = 1.24, Delta^2_lin = 0.02-0.04: bins at +6 %, -6 %, +10 %; 64^3, 100 Mpc/h,
+            k ~ 0.09 h/Mpc, z = 0: -12 %); a code error in the growth shows at high z, where many bins are linear
   CLASS     the ratio to CLASS linear and halofit at z itself (CLASS includes radiation): reported, not checked
   IC table  CLASS at z_start against the table the ICs were made from: FAIL if it differs by more than 2 %
   bias      large-scale b1 per halo mass bin: reported (warning if not positive where a bin has >= 100 halos)
@@ -50,7 +52,7 @@ def check(E, P, outs, report):
     klin = float(E.get('PK_KLIN', '0.1') or 0.1)
     abs_tol = float(E.get('PK_ABS_TOL', '0.02') or 0.02)
     g_tol = float(E.get('PK_GROWTH_TOL', '0.03') or 0.03)
-    d2lin = float(E.get('PK_DELTA2_LIN', '0.05') or 0.05)
+    d2lin = float(E.get('PK_DELTA2_LIN', '0.01') or 0.01)
     ic = cm.get('ic_check')
     if ic is None:
         report.warn(name, 'no IC table to compare CLASS at z_start with')
