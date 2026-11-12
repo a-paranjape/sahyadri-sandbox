@@ -18,6 +18,11 @@
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
 RS=$CODES/rockstar/rockstar
+# Rockstar names its halo files after the snapshot NAME (line <snap> of SNAPSHOT_NAMES, the pkdgrav3 step, e.g.
+# halos_02126.*.bin) but its catalogues after the snapshot NUMBER (out_100.list): convert with these two
+sname() { sed -n "$(( $1 + 1 ))p" "$NAMEF"; }                                   # number -> name
+snum() { awk -v n="$1" '$1 == n {print NR - 1; exit}' "$NAMEF"; }               # name -> number
+binsnaps() { ls "$1" | sed -n 's/^halos_\([^.]*\)\..*\.bin$/\1/p' | sort -u | while read -r n_; do echo "$(snum "$n_") $n_"; done | sort -n; }
 FIRST=${RS_SNAP_FIRST:-}; LAST=${RS_SNAP_LAST:-}
 mkdir -p "$HALO_DIR" && cd "$HALO_DIR" || exit 1
 if [ -n "$FIRST" ]; then   # batch: snapshot list = the first LAST+1 planned outputs
@@ -26,7 +31,7 @@ if [ -n "$FIRST" ]; then   # batch: snapshot list = the first LAST+1 planned out
   else cp "$SIM_DIR/snapnames.txt" snapnames_planned.txt || exit 1; fi
   NS=$(grep -c . snapnames_planned.txt)
   [ "$LAST" -lt "$NS" ] || { stamp "RS_SNAP_LAST=$LAST but only $NS planned outputs"; exit 1; }
-  NAMES=$HALO_DIR/snapnames_b$((LAST + 1)).txt; head -n $((LAST + 1)) snapnames_planned.txt > "$NAMES"
+  NAMES=$HALO_DIR/snapnames_b$((LAST + 1)).txt; head -n $((LAST + 1)) snapnames_planned.txt > "$NAMES"; NAMEF=$NAMES
   # every snapshot of the batch complete (header, trailer, particle count of each file: pkcreader.PkcSnapshot)
   "$PY" - "$PP" "$PKC_DIR" $(sed -n "$((FIRST + 1)),$((LAST + 1))p" "$NAMES") <<'PYEOF' || { stamp "batch $FIRST-$LAST: snapshots not complete"; exit 1; }
 import sys
@@ -41,12 +46,12 @@ for s in sys.argv[3:]:
 sys.exit(1 if bad else 0)
 PYEOF
   FIRST0=$FIRST
-  if [ "$FIRST" -gt 0 ] && ! ls "$HALO_DIR"/halos_$((FIRST - 1)).*.bin > /dev/null 2>&1; then
+  if [ "$FIRST" -gt 0 ] && ! ls "$HALO_DIR"/halos_"$(sname $((FIRST - 1)))".*.bin > /dev/null 2>&1; then
     # a rerun of a batch that stopped part way: its finished snapshots are kept, continue after the newest one
-    m=$(ls "$HALO_DIR" | sed -n 's/^halos_\([0-9]*\)\..*\.bin$/\1/p' | sort -n | uniq | tail -1)
+    m=$(binsnaps "$HALO_DIR" | tail -1 | cut -d' ' -f1)
     okm=0; [ -n "$m" ] && [ "$m" -ge "$FIRST" ] && [ "$m" -le "$LAST" ] && okm=1
     [ $okm = 1 ] && for s_ in $(seq "$FIRST" "$m"); do [ -s out_$s_.list ] || okm=0; done
-    [ $okm = 1 ] || { stamp "batch $FIRST-$LAST: no halos_$((FIRST - 1)).*.bin from the previous batch in $HALO_DIR"; exit 1; }
+    [ $okm = 1 ] || { stamp "batch $FIRST-$LAST: no halos_$(sname $((FIRST - 1))).*.bin (snapshot $((FIRST - 1))) from the previous batch in $HALO_DIR"; exit 1; }
     stamp "batch $FIRST-$LAST: snapshots $FIRST-$m done by an earlier attempt, continuing at $((m + 1))"
     FIRST=$((m + 1))
   fi
@@ -59,7 +64,7 @@ PYEOF
   fi
 else
   [ -s "$SIM_DIR/snapnames.txt" ] || { stamp "no $SIM_DIR/snapnames.txt (run stage sim first)"; exit 1; }
-  NS=$(grep -c . "$SIM_DIR/snapnames.txt"); FIRST=0; LAST=$((NS - 1)); NAMES=; FIRST0=0
+  NS=$(grep -c . "$SIM_DIR/snapnames.txt"); FIRST=0; LAST=$((NS - 1)); NAMES=; FIRST0=0; NAMEF=$SIM_DIR/snapnames.txt
 fi
 NW=${PBS_NCPUS:-${NCPUS:-$RS_NCPU}}; [ "${RS_WRITERS_FIXED:-0}" = 1 ] && NW=$RS_WRITERS
 OUT=$HALO_DIR
@@ -122,7 +127,7 @@ if [ -n "$NAMES" ]; then   # batch: cut snapshot list, restart at FIRST
   sed -i -e '/^ *SNAPSHOT_NAMES *=/d' -e '/^ *NUM_SNAPS *=/d' -e '/^ *STARTING_SNAP *=/d' -e '/^ *RESTART_SNAP *=/d' "$RUNCFG"
   printf 'SNAPSHOT_NAMES = "%s"\nSTARTING_SNAP = 0\n' "$NAMES" >> "$RUNCFG"
   [ "$FIRST" -gt 0 ] && printf 'RESTART_SNAP = %s\n' "$FIRST" >> "$RUNCFG"
-  [ "$FIRST" -gt 0 ] && [ "$OUT" != "$HALO_DIR" ] && cp -p "$HALO_DIR"/halos_$((FIRST - 1)).*.bin "$OUT"/
+  [ "$FIRST" -gt 0 ] && [ "$OUT" != "$HALO_DIR" ] && cp -p "$HALO_DIR"/halos_"$(sname $((FIRST - 1)))".*.bin "$OUT"/
 fi
 NB=$(awk -F= '$1 ~ /^ *NUM_BLOCKS *$/ {print $2+0}' "$RUNCFG")
 stamp "Rockstar: snapshots $FIRST-$LAST of $NS, ${NB:-?} readers, $NW writers, FORCE_RES $FORCE_RES, config $RUNCFG"
@@ -134,7 +139,7 @@ sync_out() {  # finished catalogs and what a restart needs, from the local disk 
   [ -f "$OUT/rockstar.cfg" ] && sed "s|^ *OUTBASE *=.*|OUTBASE = \"$HALO_DIR\"|" "$OUT/rockstar.cfg" > "$HALO_DIR/rockstar.cfg"
   if [ -f "$OUT/restart.cfg" ]; then
     local r=$(awk -F= '$1 ~ /^ *RESTART_SNAP *$/ {print $2+0}' "$OUT/restart.cfg") last
-    last=$(ls "$OUT" | sed -n 's/^halos_\([0-9]*\)\..*\.bin$/\1/p' | sort -n | uniq | awk -v r="$r" '$1 < r' | tail -1)
+    last=$(binsnaps "$OUT" | awk -v r="$r" '$1 != "" && $1 < r {n=$2} END {print n}')   # name of the newest finished
     if [ -n "$last" ]; then  # keep only the newest complete snapshot's binaries on /storage
       cp -p "$OUT"/halos_"$last".*.bin "$HALO_DIR"/ && ls "$HALO_DIR" | grep '^halos_.*\.bin$' | grep -v "^halos_$last\." |
         sed "s|^|$HALO_DIR/|" | xargs -r rm -f
@@ -160,8 +165,9 @@ kill $SYNCPID 2>/dev/null; wait $SYNCPID 2>/dev/null
 ts=$(date +%s); sync_out
 # after a successful run the last snapshot is complete too (restart.cfg still names it): keep its binaries,
 # the next batch's merger links need them
-if [ $rc -eq 0 ] && [ "$OUT" != "$HALO_DIR" ] && ls "$OUT"/halos_$LAST.*.bin > /dev/null 2>&1; then
-  cp -p "$OUT"/halos_$LAST.*.bin "$HALO_DIR"/ && ls "$HALO_DIR" | grep '^halos_.*\.bin$' | grep -v "^halos_$LAST\." |
+LASTN=$(sname "$LAST")
+if [ $rc -eq 0 ] && [ "$OUT" != "$HALO_DIR" ] && ls "$OUT"/halos_"$LASTN".*.bin > /dev/null 2>&1; then
+  cp -p "$OUT"/halos_"$LASTN".*.bin "$HALO_DIR"/ && ls "$HALO_DIR" | grep '^halos_.*\.bin$' | grep -v "^halos_$LASTN\." |
     sed "s|^|$HALO_DIR/|" | xargs -r rm -f
 fi
 [ "$OUT" != "$HALO_DIR" ] && stamp "copied $(ls "$OUT"/out_*.list 2>/dev/null | wc -l) out_<snap>.list from $OUT in $(( $(date +%s) - ts )) s"
@@ -174,7 +180,7 @@ if [ "$OUT" != "$HALO_DIR" ] && [ $n -eq $NB_ ] && [ $rc -eq 0 ]; then
   for s_ in $(seq "$FIRST" "$LAST"); do
     cmp -s "$OUT/out_$s_.list" "$HALO_DIR/out_$s_.list" || { stamp "copy of out_$s_.list differs"; exit 1; }
   done
-  ls "$HALO_DIR"/halos_$LAST.*.bin > /dev/null 2>&1 || { stamp "halos_$LAST.*.bin not copied to $HALO_DIR"; exit 1; }
+  ls "$HALO_DIR"/halos_"$LASTN".*.bin > /dev/null 2>&1 || { stamp "halos_$LASTN.*.bin (snapshot $LAST) not copied to $HALO_DIR"; exit 1; }
   rm -rf "$OUT"
 fi
 nh=$(grep -vc '^#' out_$LAST.list 2>/dev/null)
