@@ -1,0 +1,14 @@
+# Sahyadri default cosmology, exactly as the pegasus production runs (config/submit/sahyadri/sub_default.conf;
+# CLASS input class_default2048.ini: H0 = 67.36, Omega_b, Omega_m, Omega_k, A_s, n_s below, k_pivot = 0.05/Mpc,
+# z_pk = 49). Flat: Omega_L = 1 - Omega_m - Omega_k.
+OMEGA_M=0.3137721
+OMEGA_B=0.0493017
+OMEGA_K=0.0
+HUBBLE=0.6736
+NS=0.9649
+AS=2.098903e-09
+Z_START=49.0
+# CLASS matter power spectrum at z = Z_START (columns k [h/Mpc], P [(Mpc/h)^3]): the file pegasus production fed to
+# NGenIC (class_default2048_pk.dat, ReNormalizeInputSpectrum = 0). Path relative to this file.
+PK_FILE=default_class_pk_z49.dat
+COMMENT="Sahyadri default: flat LCDM, Om=0.3137721 Ob=0.0493017 h=0.6736 ns=0.9649 As=2.098903e-9 (CLASS P(k) at z=49)"

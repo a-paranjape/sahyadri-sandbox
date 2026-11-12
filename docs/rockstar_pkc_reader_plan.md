@@ -532,6 +532,11 @@ for (i), (ii); from the header for (iii)) and everything else; same snapshots (a
    is 275 GB of 755 GB, and readers and writers hold particles concurrently during the transfer, plus
    overlap regions and halo structures. Whether 2048^3 fits on one pawna node at all is unknown; measure
    RSS at 512^3 and 1024^3 first. The PKC reader adds < 10 MB per reader.
+   **Measured at 512^3 (2026-11-11, pawna, job 2536496, `memmon.sh`: PSS summed over the job's processes,
+   sampled every 2 s):** 8.2-8.4 GB peak for every input route (pkc, pkc again, Gadget, raw HDF5→Gadget;
+   8 readers, 6 outputs), i.e. 1.9-2.0 times the particle array (1.34e8 x 32 B = 4.3 GB); one reader 6.5 GB;
+   the 1%+3% subsample route 0.84 GB; `pkc_to_gadget` 10.0 GB. The input format makes no difference. If the
+   ratio holds, 2048^3 needs ~0.53 TB of the node's 755 GB: plausible but tight; check at 1024^3.
 2. **Exactness of (ii) vs (iii)** relies on identical particle order per reader and identical float
    operations; designed for (section 2-3), but Rockstar's own determinism is untested here.
 3. **Spec vs reference decoder:** the spec says positions in box units are `(X+0.5)/Q - 0.5`
@@ -594,7 +599,7 @@ headers, with and without `ENABLE_PKC` (no warnings). Not done yet: building the
 ### End-to-end on the Mac (2026-11-10)
 
 Rockstar built from upstream 36ce9eea36ee + our files (`make with_pkc ZSTD_DIR=/opt/homebrew`, scratch
-copy; only upstream warnings). `pkc_to_gadget` extended on pkdgrav3 branch `pkc-to-gadget-v3`
+copy; only upstream warnings). `pkc_to_gadget` extended on pkdgrav3 branch `pkc-to-gadget-v3`, merged into `main` on 2026-11-11 (`a99f6142`)
 (`--blocks K`, version-3 cosmology with `<out>.rockstar.cfg`, `--from-hdf5`).
 
 Input: `tmp.nosync/p1/n128_L200/snap.00090` of the pkdgrav3 checkout (128^3, 200 Mpc/h, z = 0, HDF5,

@@ -14,3 +14,6 @@ Guide: [docs/pkdgrav3_pipeline_pawna.md](../../docs/pkdgrav3_pipeline_pawna.md) 
 | `job_ctrees.pbs` | consistent-trees + `clean_trees.pl` → `out_<snap>.trees` |
 | `job_vahc.pbs` | `scripts/post-process/run_addvalue.py` → `.vahc`, `.tens` |
 | `job_fits.pbs` | `compress_halo_outputs.py all` + `check_compressed_halos.py` |
+| `production/setup_production.py` | production runs: Sahyadri directory layout, `run.conf`, `p.par`, Rockstar config, `submit.sh` (guide section 11) |
+| `production/cosmologies/*.cosmo` | cosmologies (`default`: Sahyadri default with the production CLASS P(k) at z = 49) |
+| `production/sahyadri_outputs_a.txt` | the 101 Sahyadri output scale factors |

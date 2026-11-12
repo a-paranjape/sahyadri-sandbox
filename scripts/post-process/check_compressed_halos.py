@@ -5,7 +5,8 @@ check_compressed_halos.py: independent check of compress_halo_outputs.py results
 Parses the ASCII with numpy (not pandas, which the converter uses) and requires, for every column:
 int64 columns equal exactly, float64 columns equal exactly, float32 columns equal float32(ASCII value).
 Also checks .vahc alignment, readers.py-style access (ConvertToFITS.fits_to_record), tree files, the
-FitsRow index of locations.fits.gz and forests.fits.gz. Run it before deleting any ASCII file.
+FitsRow index of locations.fits.gz and forests.fits.gz, and that the headers read back (with the run's
+SIM_STEM, SIM_REAL, SIM_IC_SEED). Run it before deleting any ASCII file.
 
 usage: check_compressed_halos.py <run dir with out_*.trees> [--snaps 0,5,99] [--outdir DIR] [--trees]
 """
@@ -33,8 +34,8 @@ def same(v, a):
     if v.dtype.kind == 'i':
         return np.array_equal(v, a.astype(np.int64))
     if v.dtype.itemsize == 8:
-        return np.array_equal(v, a)
-    return np.array_equal(v, a.astype(np.float32))
+        return np.array_equal(v, a, equal_nan=True)
+    return np.array_equal(v, a.astype(np.float32), equal_nan=True)
 
 
 def check_snapshot(R, out, snap):
@@ -46,6 +47,12 @@ def check_snapshot(R, out, snap):
             d = f[1].read()
             for c in d.dtype.names:
                 got[c] = d[c]
+    try:  # headers must read back (fitsio) and carry the run identity
+        h = fitsio.read_header(os.path.join(out, 'out_%s_basic.fits.gz' % snap), 1)
+        ident = ['%s=%s' % (k, h[k]) for k in ('SIM_STEM', 'SIM_REAL', 'SIM_IC_SEED') if k in h]
+        ok(True, 'out_%s: header readable (%s)' % (snap, ', '.join(ident) or 'no SIM_ cards'))
+    except Exception as e:
+        ok(False, 'out_%s: header not readable by fitsio: %s' % (snap, str(e).splitlines()[0]))
     ok(sorted(set(got) - {'b1'}) == sorted(names), 'out_%s: basic + extended hold every .trees column (%d)' % (snap, len(names)))
     nb = [c for j, c in enumerate(names) if not same(got[c], A[:, j])]
     ok(not nb, 'out_%s: %d columns x %d rows equal the ASCII%s' % (snap, len(names), len(A), (' (differ: %s)' % nb) if nb else ''))
@@ -55,11 +62,19 @@ def check_snapshot(R, out, snap):
         V = np.loadtxt(vahc, ndmin=2)
         with fitsio.FITS(os.path.join(out, 'out_%s_vahc.fits.gz' % snap)) as f:
             d = f[1].read()
-        nb = [c for c in d.dtype.names if not same(d[c], V[:, vn.index(c)])]
+        nb = [c for c in vn if c not in C.BASIC_COLS and (c not in d.dtype.names or not same(d[c], V[:, vn.index(c)]))]  # .vpot cols: below
         if 'b1' in vn:
             nb += [] if same(got['b1'], V[:, vn.index('b1')]) else ['b1 (basic)']
         ok(not nb, 'out_%s: .vahc columns equal the ASCII%s' % (snap, (' (differ: %s)' % nb) if nb else ''))
         ok(np.array_equal(V[:, vn.index('haloID')], A[:, names.index('id')]), 'out_%s: .vahc rows are the .trees halos in order' % snap)
+        vpot = os.path.join(R, 'out_%s.vpot' % snap)
+        if os.path.isfile(vpot):
+            pn = C.halo_header_names(vpot, 'vpot')
+            P = np.loadtxt(vpot, ndmin=2)
+            nb = [c for c in pn if c != 'haloID' and (c not in d.dtype.names or not same(d[c], P[:, pn.index(c)]))]
+            ok(not nb and np.array_equal(P[:, pn.index('haloID')], A[:, names.index('id')]),
+               'out_%s: .vpot columns (%d) in the vahc file equal the ASCII, rows in order%s' % (
+                   snap, len(pn) - 1, (' (differ: %s)' % nb) if nb else ''))
     tens = os.path.join(R, 'out_%s.tens' % snap)
     if os.path.isfile(tens) and os.path.isfile(os.path.join(out, 'out_%s_tens.fits.gz' % snap)):
         tn = C.halo_header_names(tens, 'tens')
