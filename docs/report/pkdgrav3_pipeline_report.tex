@@ -15,7 +15,7 @@
 \setlist{itemsep=1pt,topsep=3pt}
 \title{The Sahyadri pkdgrav3 pipeline on pawna:\\ setup, bugs fixed, and systematic tests of the halo catalogs}
 \author{Sahyadri collaboration --- prepared with Claude Code}
-\date{11 November 2026 \\[2pt] \small repository \code{a-paranjape/sahyadri-sandbox}, branch \code{rockstar-pkc-reader}}
+\date{11 November 2026, updated 12 November 2026 \\[2pt] \small repository \code{a-paranjape/sahyadri-sandbox}, branch \code{rockstar-pkc-reader}}
 
 \begin{document}
 \maketitle
@@ -31,7 +31,10 @@ a 4\% particle subsample, and repeated runs. With one reader the \code{.pkc} rou
 byte for byte. Compression changes halo counts, masses, $V_{\max}$, positions and velocities at the per-mille level
 without bias; the inner structure (scale radius, spin) of halos with fewer than $\sim$1000 particles is the most
 sensitive. Wall time and peak memory of every stage are measured for $128^3$ and $512^3$ runs. All figures are
-made by a notebook from data files kept in the repository.
+made by a notebook from data files kept in the repository. The update of 12 November adds \code{vahc_fast.py}, which
+gives \code{.vahc}/\code{.tens} identical to the original code 12.6 times faster, the mean particle potential
+around halos (\code{.vpot}) with its checks, a test of running Rockstar in batches during the simulation, and the
+first measurements of the $1024^3$ production run.
 \end{abstract}
 
 \tableofcontents
@@ -79,7 +82,7 @@ Stage & Code (version) & Reads & Writes \\
 sim & pkdgrav3, \code{shadaba/pkdgrav3} \code{main} & config $\to$ \code{p.par}, transfer function & \code{.pkc} files per output, subsample and writer; \code{snapnames.txt}; \code{pkc_check} per output \\
 rockstar & Rockstar \code{36ce9eea36ee} + Sahyadri files (PKC reader, curvature, $w_0$--$w_a$) & \code{.pkc} (\code{FILE_FORMAT = "PKC"}); cosmology from the headers & \code{out_<snap>.list}, \code{halos_<snap>.*}, \code{rockstar.cfg} \\
 ctrees & consistent-trees \code{7c20add} + Sahyadri background patch; \code{clean_trees.pl} & all \code{out_<snap>.list} & \code{out_<snap>.trees} (hlists), \code{trees/}, \code{../scales.txt}, configs in \code{logs/} \\
-vahc & \code{scripts/post-process/run_addvalue.py} (\code{AddValue}) & particles (CIC density), \code{out_<snap>.trees} & \code{out_<snap>.vahc} ($b_1$, tidal and Hessian eigenvalues), \code{out_<snap>.tens} \\
+vahc & \code{scripts/post-process/run_addvalue.py} (\code{vahc_fast.py}; \code{AddValue} with \code{PP_FAST=0}) & particles (CIC density; potential for \code{.vpot}), \code{out_<snap>.trees} & \code{out_<snap>.vahc} ($b_1$, tidal and Hessian eigenvalues), \code{out_<snap>.tens}, \code{out_<snap>.vpot} \\
 fits & \code{compress_halo_outputs.py}, \code{check_compressed_halos.py} & \code{.trees}, \code{.vahc}, \code{.tens}, \code{trees/} & \code{compressed/*.fits.gz} with cosmology and run metadata; column-by-column check \\
 \bottomrule
 \end{tabularx}
@@ -425,11 +428,135 @@ input routes and other validation steps at $512^3$.}
 \end{figure}
 
 %======================================================================
+\section{Faster value-added catalogs and the halo potential (\texorpdfstring{\texttt{vahc\_fast.py}, \texttt{.vpot}}{vahc_fast.py, .vpot})}
+\label{sec:vahcfast}
+\code{scripts/post-process/vahc_fast.py} (class \code{FastAddValue}, a subclass of \code{AddValue}) computes
+\code{.vahc} and \code{.tens} in one pass: one real FFT of the density, a separable Gaussian kernel, one inverse real
+FFT per tensor component and smoothing scale on \code{--threads} threads (\code{scipy.fft}), one batched
+\code{eigvalsh} and vectorized interpolation for all halos, and $b_1$ as a single filtered field read at the 8 CIC
+corners of each halo instead of a sum over modes per halo. \code{run_addvalue.py --fast} selects it;
+\code{PP_FAST=1} is now the pipeline default (\code{PP_FAST=0} restores \code{AddValue}).
+
+\paragraph{Same results.} Old and new code were run in one process on the same density and halos
+(\code{test_vahc_fast.py}): every \code{.vahc} and \code{.tens} column is identical in float32 and the halo IDs are
+the same, for $128^3$ (snapshot 4, grid 128, job 2536678) and for $512^3$ (\code{lcdm512} $z=0$, grid 512,
+234\,258 halos, job 2536679). The text output formats were also compared (0 of 200\,004 float32 strings differ).
+
+\paragraph{Time.} For the $512^3$ snapshot with 8 FFT threads: 147\,s for both files against
+1126\,s (\code{.vahc}) + 722\,s (\code{.tens}) for \code{AddValue}, 12.6 times faster. Of the 147\,s the tidal FFTs
+(33 scales $\times$ 6 inverse FFTs) take 123.5\,s, eigenvalues 12.7\,s, Hessian 6.6\,s, $b_1$ 1.7\,s, the forward FFT
+0.9\,s; reading the \code{.pkc} snapshot and building the density takes another 24\,s for both versions. In the
+pipeline (Table~\ref{tab:fast}) a snapshot takes 4.5--5\,min with 4--5 threads per snapshot. The cost is set by the
+grid, not the number of halos, so it should not grow much at $1024^3$ and $2048^3$; there reading the particles
+($\sim$35\,min per $2048^3$ snapshot from \code{/storage}, estimated) becomes the largest part.
+
+\paragraph{Memory.} 12--13\,GB per process at grid 512 (about $6\times16\times$\code{PP_GRID}$^3$ bytes, half of
+\code{AddValue}'s), measured as job PSS divided by the number of snapshot processes (Table~\ref{tab:fast}).
+
+\paragraph{\code{.vpot}: the mean particle potential around halos} (\code{--pot}, \code{PP_POT=1}). For
+snapshots whose \code{.pkc} files store the pkdgrav3 potential ($z\le0.5$ in production), \code{out_<snap>.vpot} has,
+for every halo of \code{out_<snap>.trees}, the number of particles and their mean potential in (km/s)$^2$ within
+spheres of radius $r_s$, $R_{200b}$ (from $M_{200b}$), $0.5$, $1$ and $1.5\,R_{\rm vir}$, and the Gaussian-weighted mean
+potential at the seven \code{.vahc} smoothing scales. pkdgrav3's softened self potential $-(105/64)\,m/\epsilon$, the
+same for every particle, is removed. The particles are read once, in the same pass as the density: the sphere sums
+run in C with OpenMP (\code{vpot_sums.c}), the grid scales use a CIC grid of the potential smoothed with the
+\code{.vahc} kernel and divided by the smoothed density. The FITS stage appends the columns to
+\code{out_<snap>_vahc.fits.gz} (card \code{HAS_VPOT}).
+
+\paragraph{Checks of \code{.vpot}.}
+\begin{itemize}
+\item \emph{Spheres:} for 300 random halos per sphere the counts and mean potentials equal a KD-tree sum over all
+  particles (\code{scipy cKDTree}, periodic): 0 count and 0 mean mismatches at all five radii, worst relative
+  difference $5\times10^{-8}$ (float32), at $128^3$ snapshots 70 and 100 and $512^3$ snapshot 5. Median particle
+  numbers at $128^3$: 2 ($r_s$), 25 ($0.5R_{\rm vir}$), 45 ($R_{\rm vir}$), 48--50 ($R_{200b}$), 55--58 ($1.5R_{\rm vir}$).
+  The C routine alone was also checked against the KD-tree for 2000 random spheres $\times$ 5 radii, including
+  spheres across the box edge and zero and undefined radii (0 mismatches).
+\item \emph{Grid scales:} against direct Gaussian-weighted sums over the particles around the same grid point
+  (40 halos per scale): median relative difference $\le10^{-5}$, maximum $\le10^{-3}$ except one halo at
+  $5\,h^{-1}$Mpc ($1.2\times10^{-2}$), as expected from CIC.
+\item \emph{Normalisation and self term:} the particle potential minus the self term was fitted against an FFT
+  Poisson solution of the same particles (CIC on $4\times$ the particle grid, deconvolved, the routine validated
+  in the Gadget-4 comparison): slope 1.004 ($128^3$, $z=0.38$), 1.007 ($128^3$, $z=0$) and 1.002 ($512^3$, $z=0$, grid
+  1024), correlation 0.998--0.9996, offset 0.2--1\% of the rms potential. The self terms were $-1.2\times10^5$,
+  $-9.0\times10^4$ and $-5.6\times10^3$\,(km/s)$^2$. The \code{.pkc} header field \code{time} is pkdgrav3's code time,
+  not the scale factor; $a$ must be taken from \code{redshift}.
+\end{itemize}
+The potential costs 47--68\,s per snapshot on top of the tidal FFTs (grid 512, 4--5 threads); going from two to five
+spheres added about 11\,s (Table~\ref{tab:fast}).
+
+\begin{table}[htbp]
+\centering\footnotesize
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}l l r r r r l@{}}
+\toprule
+Run (job) & Outputs & Snapshots & Wall & \hd{Per snapshot}{[s]} & \hd{Job PSS}{[GB]} & Notes \\
+\midrule
+$128^3$, 101 outputs (2536685) & \code{.vahc}, \code{.tens}, \code{.vpot} (2 spheres) & 85 & 3.96\,h & 200--250 & 45.9 & 4 proc.\ $\times$ 4 threads; vpot 50\,s \\
+$128^3$, same (2536697) & \code{.vpot} (5 spheres) & 37 & 0.93\,h & 266--467 & 46.0 & 4 $\times$ 4; vpot 61--68\,s \\
+$512^3$, 6 outputs (2536691) & \code{.vahc}, \code{.tens}, \code{.vpot} (2 spheres) & 6 & 5\,min & 258--273 & 78.4 & 6 $\times$ 5; vpot 47--51\,s \\
+\bottomrule
+\end{tabular}}
+\caption{\code{vahc_fast.py} in the pipeline, grid 512. ``Per snapshot'' is the \code{add_value} time of one
+snapshot from the job log, without reading and density (14--41\,s); the tidal FFTs are 160--220\,s of it (396\,s for
+one snapshot of job 2536697, which shared the node). PSS is the peak sum over the job's processes (\code{memmon.sh}).}
+\label{tab:fast}
+\end{table}
+
+%======================================================================
+\section{Running Rockstar in batches during the simulation}
+\label{sec:batch}
+Rockstar can process the snapshots in groups while the simulation is still running, so that only the last group is
+left when it ends. Rockstar skips loading the previous snapshot's halos (needed for the descendant links) only at
+\code{STARTING_SNAP}, so a batch of snapshots $k\ldots k{+}K{-}1$ is run with \code{STARTING_SNAP = 0},
+\code{RESTART_SNAP = k} and a \code{SNAPSHOT_NAMES} file holding the first $k{+}K$ names (\code{NUM_SNAPS} is taken
+from its length). Test: \code{/storage/shadab/pipeline_test/rsbatch/rs_batch_test.pbs}, comparison
+\code{compare_lists.py}. Rockstar is not reproducible run to run, so a batched run is compared with a single run
+and two single runs with each other: halos are matched by position (0.05\,$h^{-1}$Mpc) and mass (1\%), and the
+descendant IDs of matched halos are compared.
+
+\begin{center}\footnotesize
+\begin{tabular}{@{}l r r r@{}}
+\toprule
+Run & Batch size $K$ & \hd{Descendant agreement}{single vs single} & \hd{Descendant agreement}{single vs batched} \\
+\midrule
+$512^3$/$50\,h^{-1}$Mpc, 6 outputs & 2 & 0.90373 & 0.90368 \\
+$128^3$/$200\,h^{-1}$Mpc, 101 outputs & 10 & 0.89209 & 0.89235 \\
+\bottomrule
+\end{tabular}
+\end{center}
+Batched runs agree with a single run as well as two single runs agree with each other; halo counts differ by
+$\sim$0.1\% in both comparisons, and the snapshots at batch boundaries get their descendants. Automatic submission of
+batches by the pipeline is not implemented yet.
+
+%======================================================================
+\section{Toward production: consistent-trees resources and the first $1024^3$ run}
+\label{sec:production}
+\begin{itemize}
+\item \textbf{consistent-trees} is serial (one process, plus a forked writer), so it now asks for 2 cores and
+  can share a node: 16\,GB/12\,h up to $256^3$, 32\,GB/24--48\,h up to $1024^3$, 128\,GB/168\,h above
+  (\code{setup_production.py}). Measured: 195\,s and 0.02\,GB for the 101-output $128^3$ run, 1967\,s and 1.5\,GB
+  for 6 outputs at $512^3$.
+\item \textbf{FITS stage fixes} found with \code{.vpot}: the write-time read-back checksum now counts NaNs (a float
+  sum with a NaN never equals itself); when only the vahc file of a snapshot is (re)written the \code{.trees} file
+  is still read (the scale-factor card and the row check needed it, \code{KeyError: 'trees'} before); the check
+  script compares the \code{.vahc} columns of the vahc FITS file separately from the \code{.vpot} ones. After the fixes:
+  0 failures on both test runs.
+\item \textbf{$1024^3$ production run} (\code{Sahyadri_L200N1024/default1024/r1}, 2126 steps, 101 outputs), started
+  12 November 08:57 on one node with 96 cores (job 2536567; reduced from 192 so that it could start). pkdgrav3
+  reports 110--112\,GB resident (its own per-step statistics), against 744--746\,GiB for $2048^3$. Steps took
+  120--137\,s up to step 48 and 70\,s from step 56 on; the first output (step 124, $z=12$, all subsamples 6.75\,GiB)
+  was written to the node's SSD in 9\,min and copied to \code{/storage} in 516\,s (13\,MB/s). The rest of the chain
+  (Rockstar, consistent-trees, \code{vahc_fast} with \code{.vpot}, FITS) is queued behind it and will give the first
+  measured Rockstar memory above $512^3$.
+\end{itemize}
+
+%======================================================================
 \section{Caveats and open questions}
 \begin{itemize}
-\item Nothing above $512^3$ has been run. Rockstar memory at $2048^3$ (64 times the particles) is extrapolated
-  ($\approx0.53$\,TB from twice the particle array), not measured; whether one pawna node (755\,GB) suffices must
-  be tested at $1024^3$ first.
+\item The first $1024^3$ run is in progress (Section~\ref{sec:production}); its Rockstar stage will give the first
+  measured Rockstar memory above $512^3$. Rockstar memory at $2048^3$ (64 times the $512^3$ particles) is still
+  extrapolated ($\approx0.53$\,TB from twice the particle array), not measured.
+\item The \code{.vahc}/\code{.tens} timings of \code{vahc_fast.py} at $1024^3$ and $2048^3$ are estimates.
 \item Rockstar's particle mass constant ($\rho_{\rm crit}=2.77519737\times10^{11}$) differs from the one used by
   \code{pkc_to_gadget} and the PKC reader ($2.77536627\times10^{11}$) by $6\times10^{-5}$; Sahyadri should pick one.
 \item Rockstar treats radiation as curvature; consistent-trees' \code{clean_trees.pl} matches hlists by five
