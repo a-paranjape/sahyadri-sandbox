@@ -26,6 +26,7 @@ job_gadget.pbs                                       submit_pipeline.sh compare3
 | `halo_potential_profile.py` | stacked potential around halos in mass bins (stacks only), r in comoving Mpc/h |
 | `compare_halos.py` | mass and Vmax functions, matched halos, VAHC quantities |
 | `compare_vpot.py` | per-halo pipeline potential (`.vpot` columns of `out_*_vahc.fits.gz`) of matched halos |
+| `halo_potential_xcorr.py`, `halo_pair_sums.c` | halo-halo potential cross-correlation between mass bins (below) |
 | `plot_compare.py` | figures from the comparison output (needs matplotlib; run anywhere) |
 | `submit_compare.sh` | submits everything as one PBS chain |
 
@@ -197,3 +198,23 @@ PP_OVERWRITE=1` (`compare256.conf`; pawna jobs 2536704/2536705 pkdgrav3, 2536706
 - Report section "Per-halo potential from the pipeline" (`compare_vpot.py`, `make_vpot_figures.py`): at z = 0
   pkdgrav3 deeper by a median 3-6 % within rs, 1.3-2 % within Rvir, ~1 % at 5 Mpc/h (above 1e12); the outer ~1 %
   follows the particle-mean (not median) potential difference, i.e. the deeper halo cores.
+
+## Halo-halo potential cross-correlation (`halo_potential_xcorr.py`)
+
+For host halos in mass bins A and B (default: the stacked-profile bins 2e12, 1e13, 5e13, 2e14, 1e16; every A <= B),
+statistics of the per-halo `.vpot` potentials over all pairs (i in A, j in B) at separation r: mean difference
+<phi_i - phi_j>, structure function <(phi_i - phi_j)^2>, covariance and correlation coefficient, with jackknife errors,
+for several columns at once (default `phi_Rvir,phi_rs,phi_R1p5vir,phi_R0p5vir,phi_R200b`; `--phi`).
+`--rbins log:rmin,rmax,n` or `lin:rmin,rmax,width`; `--mbins`, `--mass-col`, `--pairs all|auto|0-0,0-2`.
+Input: the FITS stage's `out_<snap>_{basic,vahc}.fits.gz`. Output: compressed npz (statistics `[pair, column, shell]`
+plus the raw sums per jackknife region).
+- Built for 2048^3 catalogues: one pass collects all sums of all columns (C, OpenMP over A, B in a cell grid sized to
+  the distance range); no per-pair storage. Large-r shells use a nested hash subsample of A (2^-l) so that a shell
+  has about `--target` pairs (default 2e7; at least `--min-a` A halos); unbiased, only noisier.
+- Checks (Mac, 2026-11-12): pair sums equal a numpy brute force (pairs 0-1, 2-2, 3-3; all columns, all jackknife
+  regions, including NaN phi_rs); diluted vs undiluted within 0.4 sigma. 256^3 z = 0: 0.3 s (log), 0.6 s (250
+  linear bins). Synthetic 2.5e6 halos in 1 Gpc/h: 9 s (30 log bins) / 21 s (250 linear bins) on 8 threads, 1.2 GB.
+- The library builds on first use (`$CC`, else `cc`, else `gcc-NN`; serial if no OpenMP compiler is found).
+```
+python halo_potential_xcorr.py <halos>/compressed 100 xc.npz --rbins lin:0,50,0.2 --threads 16
+```
