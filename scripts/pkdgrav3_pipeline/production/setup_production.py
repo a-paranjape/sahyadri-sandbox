@@ -4,7 +4,9 @@ setup_production.py: set up Sahyadri production runs (pkdgrav3 -> Rockstar -> co
 on pawna. It only creates directories and writes configuration files and a submit script; nothing is submitted.
 Check the files, adjust them if needed, then run the submit script it prints.
 
-Layout (ROOT default /storage/$USER/sahyadri_sims; SIM = Sahyadri_L<L>N<N>; COSMO = <cosmology><N>, e.g. default1024):
+Layout (ROOT = the working area while the run is computed, default /user/$USER/sahyadri_scratch (home: ~10x the
+write speed of /storage); ARCHIVE = the long-term copy of the kept data, default /storage/$USER/sahyadri_sims, same
+layout, read-only once checked (retention.py, archive_run.py); SIM = Sahyadri_L<L>N<N>; COSMO = <cosmology><N>):
   ROOT/sims/SIM/COSMO/            cosmology.txt, outputs_a.txt, transfer_pkdgrav3.dat, class_pk_z<zstart>.dat
   ROOT/sims/SIM/COSMO/r<R>/       run.conf (pipeline), p.par (pkdgrav3), output_steps.txt, submit.sh, README.txt,
                                   logs/ (job logs), checkpoints/, compressed/ (snap.<step>.s<pct>.<w>.pkc)
@@ -29,7 +31,7 @@ Simulation settings:
   I/O          staged (pkdgrav3 tools/staging/run_staged.pbs): snapshots and checkpoints go to the node's local SSD
                and are copied to NFS while the simulation runs (SIM_STAGING=1 in run.conf)
 
-usage: setup_production.py [--root DIR] [--L 200] [--N 1024] [--cosmo default] [--real 1|1,2|1-5]
+usage: setup_production.py [--root DIR] [--archive DIR|''] [--keep-full-z "0 0.5 1 2 3 5 7"] [--keep-pct 1] [--L 200] [--N 1024] [--cosmo default] [--real 1|1,2|1-5]
                            [--codes DIR] [--pkd-io-root DIR] [--step-da 4.6154e-4] [--check-interval 250] [--force]
 Run with the pipeline's Python (numpy, scipy), e.g. /storage/shadab/pipeline_test/codes/venv/bin/python.
 """
@@ -169,7 +171,12 @@ def write(path, text, force, mode=0o644):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--root', default='/storage/%s/sahyadri_sims' % os.environ.get('USER', 'shadab'))
+    ap.add_argument('--root', default='/user/%s/sahyadri_scratch' % os.environ.get('USER', 'shadab'),
+                    help='working area (SCRATCH) while the run is computed')
+    ap.add_argument('--archive', default='/storage/%s/sahyadri_sims' % os.environ.get('USER', 'shadab'),
+                    help="long-term copy of the kept data ('' = no archive stage)")
+    ap.add_argument('--keep-full-z', default='0 0.5 1 2 3 5 7', help='full snapshots kept: outputs nearest these z')
+    ap.add_argument('--keep-pct', type=float, default=1, help='percent of the particles kept of the other snapshots')
     ap.add_argument('--L', type=float, default=200.0, help='box size [Mpc/h]')
     ap.add_argument('--N', type=int, default=1024, help='particles per side')
     ap.add_argument('--cosmo', default='default', help='cosmologies/<name>.cosmo')
@@ -186,6 +193,12 @@ def main():
     ap.add_argument('--check-interval', type=int, default=250, help='steps between checkpoints')
     ap.add_argument('--force', action='store_true', help='overwrite existing configuration files')
     a = ap.parse_args()
+    sys.path.insert(0, PIPE)
+    import retention
+    try:   # the kept percentage must be a sum of the leading subsample files
+        retention.kept_subsamples(dict(SUBSAMPLES=SUBSAMPLES, KEEP_SUBSAMPLE_PCT=str(a.keep_pct)))
+    except ValueError as e:
+        sys.exit(str(e))
 
     c = read_cosmo(a.cosmo)
     L, N = a.L, a.N
@@ -344,8 +357,23 @@ def main():
 SANDBOX=%(sandbox)s
 PKD_IO_ROOT=%(pkd)s
 CODES=%(codes)s
-SCRATCH=%(root)s                    # sims/<STEM>/r<REAL>, halos/<STEM>/r<REAL>
+SCRATCH=%(root)s                    # working area: sims/<STEM>/r<REAL>, halos/<STEM>/r<REAL>, state/<STEM>/r<REAL>
+ARCHIVE=%(archive)s                    # long-term copy of the kept data (stage archive); empty = none
 LOGS=%(sdir)s/logs
+
+# retention (retention.py; `retention.py run.conf` prints the resolved plan): what ARCHIVE keeps. The rest stays in
+# SCRATCH until the archive is checked and the deletion is approved in the manager (tools/sahyadri_manager).
+KEEP_FULL_Z="%(keepz)s"   # full snapshots: the planned output nearest each redshift
+KEEP_FULL_SNAPS=""                # ... or Rockstar snapshot numbers (overrides KEEP_FULL_Z)
+KEEP_SUBSAMPLE_PCT=%(keeppct)g             # %% of the particles of every other snapshot: a sum of the leading SUBSAMPLES (1,4,9,18,...)
+KEEP_HALO_TABLES="basic,extended,tens,vahc"   # FITS halo tables, every snapshot
+KEEP_TREES=1                      # merger-tree FITS
+KEEP_CHECKPOINT=0                 # 1: also the newest checkpoint
+ARCHIVE_FILE_MODE=0444; ARCHIVE_DIR_MODE=0555   # read-only for everyone once checked (0440/0550: group only)
+
+# manager (tools/sahyadri_manager): Rockstar in batches while the simulation runs
+RS_BATCH=1              # 0: one Rockstar job after the simulation
+RS_BATCH_MIN=10         # snapshots per batch while the simulation runs (the last batch takes what is left)
 
 STEM=%(stem)s
 REAL=%(r)d
@@ -386,8 +414,9 @@ PP_NPROC=%(ppn)d             # snapshots in parallel
 
 # FITS
 FITS_NPROC=16
-FITS_DELETE_ASCII=0     # 1: delete the ASCII catalogs after verified FITS (check the log first)
+FITS_DELETE_ASCII=0     # keep 0 with the manager: verify reads the ASCII catalogues (deleted from SCRATCH after the archive)
 ''' % dict(name=name, now=now, sandbox=SANDBOX, pkd=a.pkd_io_root, codes=a.codes, root=a.root, sdir=sdir, hdir=hdir,
+           archive=a.archive, keepz=a.keep_full_z, keeppct=a.keep_pct,
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
            sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2],
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],

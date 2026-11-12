@@ -32,6 +32,28 @@ if [ -n "${RESTART:-}" ]; then
 fi
 NTH=${PBS_NCPUS:-$SIM_NCPU}
 J=${PBS_JOBID%%.*}; J=${J:-$$}
+# events for the manager: snap_ready step=<step> when all files of an output are in $PKC_DIR (staged: the drain's
+# "drained snap.<step>" line; otherwise pkdgrav3's snap.<step>.done marker, looked for every SIM_WATCH_S seconds)
+snap_watch() {
+  if [ "${SIM_STAGING:-0}" = 1 ]; then
+    for _ in $(seq 1 600); do [ -f "$SIM_DIR/drain.$J.log" ] && break; kill -0 $$ 2>/dev/null || return; sleep 1; done
+    tail -n +1 -F --pid=$$ "$SIM_DIR/drain.$J.log" 2>/dev/null | while read -r _t w name _rest; do
+      [ "$w" = drained ] && [[ $name == snap.* ]] && event snap_ready step="${name#snap.}"
+    done
+  else
+    local seen=" " f s
+    while kill -0 $$ 2>/dev/null; do
+      for f in "$PKC_DIR"/snap.*.done; do
+        [ -e "$f" ] || continue; s=${f##*/snap.}; s=${s%.done}
+        case "$seen" in *" $s "*) ;; *) seen="$seen$s "; event snap_ready step="$s" ;; esac
+      done
+      sleep "${SIM_WATCH_S:-30}"
+    done
+  fi
+}
+snap_watch < /dev/null > /dev/null 2>&1 &
+SNAPWATCH_PID=$!
+event sim_info nth="$NTH" staging="${SIM_STAGING:-0}" restart="${CHK:-}"
 if [ "${SIM_STAGING:-0}" = 1 ]; then
   # pkdgrav3's staged I/O (tools/staging/run_staged.pbs): snapshots and checkpoints are written to the node's
   # local SSD and copied to $PKC_DIR and $SIM_DIR/checkpoints by pkd_drain.py while the simulation runs, so
@@ -89,6 +111,10 @@ extra=$(ls "$PKC_DIR" 2>/dev/null | sed -n 's/^snap\.\([0-9]*\)\.s.*\.pkc$/\1/p'
 [ -n "$extra" ] && stamp "snapshots that are not planned outputs (wall-time/STOP exits), not used: $extra"
 NDONE=$(grep -c . snapnames.txt)
 stamp "pkdgrav3 exit $rc; $NDONE of $NOUT outputs: $(tr '\n' ' ' < snapnames.txt | cut -c1-300)"
+sleep 2; kill $SNAPWATCH_PID 2>/dev/null
+# the complete outputs, checked (pkcreader): the manager's list of snapshots that Rockstar may use
+for s in $(cat snapnames.txt); do event snap_ready step="$s" checked=1; done
+event sim_outputs ndone="$NDONE" nout="$NOUT" rc="$rc"
 # full check (all IDs once, subsamples) of the last output only: reading every snapshot from NFS would take hours
 LASTS=$(tail -1 snapnames.txt)
 [ -n "$LASTS" ] && "$PKD_IO_ROOT/build_snapcomp/pkc_check" --threads "$NTH" "$PKC_DIR/snap.$LASTS" | tail -2

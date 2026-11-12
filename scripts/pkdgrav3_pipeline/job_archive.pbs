@@ -1,0 +1,10 @@
+#!/bin/bash -l
+# Stage archive (after verify): the kept files (retention.py) copied SCRATCH -> ARCHIVE, read back from the disk
+# and compared (SHA-256), MANIFEST.json + SHA256SUMS written, the archive made read-only (archive_run.py).
+# Nothing in SCRATCH is deleted (that is done by the manager after approval). Restart: rerun (checked files skipped).
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+"$PY" "$PIPE/archive_run.py" "$CONF"
+rc=$?
+event archive_done rc="$rc" ok="$([ $rc = 0 ] && echo 1 || echo 0)" manifest="$ARCHIVE/state/$STEM/r$REAL/MANIFEST.json"
+exit $rc

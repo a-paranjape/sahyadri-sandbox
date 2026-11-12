@@ -16,6 +16,32 @@ mkdir -p "$LOGS"
 export CONF
 stamp() { echo "[$(date '+%F %T')] $*"; }
 stamp "job ${PBS_JOBID:-interactive} on $(hostname): stage ${STAGE:-?} for $STEM r$REAL (config $CONF)"
+# ---------------------------------------------------------------- events (for tools/sahyadri_manager)
+# Every job writes its own file $STATE_DIR/events/<date>.<stage>.<job>.jsonl, one JSON object per line
+# (one writer per file: appends from several NFS clients to one file are not safe). The manager on the head node
+# watches $STATE_DIR with inotifywait. Lines: {"t": epoch, "time": ISO, "run", "stage", "job", "host", "ev", ...}.
+#   event <ev> [key=value ...]     values are written as JSON strings unless they are plain integers
+STATE_DIR=$SCRATCH/state/$STEM/r$REAL
+_EVJOB=${PBS_JOBID%%.*}; _EVJOB=${_EVJOB:-pid$$}
+mkdir -p "$STATE_DIR/events" 2>/dev/null
+EVFILE=$STATE_DIR/events/$(date +%Y%m%dT%H%M%S).${STAGE:-job}.$_EVJOB.jsonl
+_json_str() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/ }; s=${s//$'\t'/ }; printf '"%s"' "$s"; }
+event() {
+  local ev=$1 kv k v line; shift
+  line=$(printf '{"t": %s, "time": "%s", "run": %s, "stage": %s, "job": %s, "host": %s, "ev": %s' "$(date +%s)" \
+    "$(date -Iseconds)" "$(_json_str "$STEM/r$REAL")" "$(_json_str "${STAGE:-job}")" "$(_json_str "$_EVJOB")" \
+    "$(_json_str "$(hostname -s)")" "$(_json_str "$ev")")
+  for kv in "$@"; do
+    k=${kv%%=*}; v=${kv#*=}
+    if [[ $v =~ ^-?[0-9]{1,15}$ ]]; then line="$line, $(_json_str "$k"): $v"; else line="$line, $(_json_str "$k"): $(_json_str "$v")"; fi
+  done
+  printf '%s}\n' "$line" >> "$EVFILE" 2>/dev/null
+  return 0
+}
+event start conf="$CONF" log="$LOGS/${STAGE:-job}.$(echo $STEM | tr / _)_r$REAL.$_EVJOB.log" ${RS_SNAP_FIRST:+first=$RS_SNAP_FIRST} ${RS_SNAP_LAST:+last=$RS_SNAP_LAST}
+# the end event is written by the EXIT trap (also on qdel / wall time: PBS sends SIGTERM first)
+_on_exit() { local rc=$?; eval "${EXIT_HOOK:-:}"; memmon_report; event end rc=$rc; }   # EXIT_HOOK: a job's own clean-up
+trap 'exit 143' TERM
 # memory of this job (all its processes): $LOGS/<stage>.<run>.<jobid>.mem.tsv, peak reported at exit
 if [ -n "${PBS_JOBID:-}" ] || [ "${MEMMON:-0}" = 1 ]; then
   MEMLOG=$LOGS/${STAGE:-job}.$(echo $STEM | tr / _)_r$REAL.${PBS_JOBID:-$$}.mem.tsv; MEMLOG=${MEMLOG/.pawna./.}
@@ -27,7 +53,7 @@ if [ -n "${PBS_JOBID:-}" ] || [ "${MEMMON:-0}" = 1 ]; then
          END{printf "peak memory: PSS %.2f GB (%d processes, at %.0f s), RSS sum %.2f GB; %d s sampled\n", p/1048576, n, t, r/1048576, T}' "$MEMLOG" |
       while read -r l; do stamp "$l (samples: $MEMLOG)"; done
   }
-  trap memmon_report EXIT
 else
   memmon_report() { :; }
 fi
+trap _on_exit EXIT

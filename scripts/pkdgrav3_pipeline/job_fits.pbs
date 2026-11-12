@@ -7,7 +7,7 @@
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
 cd "$HALO_DIR" || exit 1
-TMP=/var/tmp/${USER}_fits_${PBS_JOBID%%.*}; mkdir -p "$TMP"; trap 'rm -rf "$TMP"; memmon_report' EXIT
+TMP=/var/tmp/${USER}_fits_${PBS_JOBID%%.*}; mkdir -p "$TMP"; EXIT_HOOK='rm -rf "$TMP"'
 LAST=$(tail -1 "$SIM_DIR/snapnames.txt")
 DEL=; [ "$FITS_DELETE_ASCII" = 1 ] && DEL=--delete-ascii
 WHAT=all; [ -d trees ] || WHAT=halos
@@ -24,5 +24,6 @@ if [ -z "$DEL" ]; then  # independent check against the ASCII (impossible once d
   [ $rc2 -eq 0 ] || rc=1
 fi
 du -sh compressed
+event fits_done rc="$rc" npass="$(grep -c PASS "$LOGS/fits_check.${PBS_JOBID%%.*}.log" 2>/dev/null)" nfail="$(grep -c FAIL "$LOGS/fits_check.${PBS_JOBID%%.*}.log" 2>/dev/null)" check_log="$LOGS/fits_check.${PBS_JOBID%%.*}.log"
 stamp "FITS stage exit $rc"
 exit $rc

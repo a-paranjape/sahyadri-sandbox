@@ -25,4 +25,5 @@ fi
 rc=${PIPESTATUS[0]}
 grep -E "Elapsed|Maximum resident" "$LOGS/vahc_time.${PBS_JOBID%%.*}.log"
 stamp "run_addvalue exit $rc; $(ls "$HALO_DIR"/out_*.vahc 2>/dev/null | wc -l) .vahc, $(ls "$HALO_DIR"/out_*.tens 2>/dev/null | wc -l) .tens"
+event vahc_done rc="$rc" nvahc="$(ls "$HALO_DIR"/out_*.vahc 2>/dev/null | wc -l)" ntens="$(ls "$HALO_DIR"/out_*.tens 2>/dev/null | wc -l)" nvpot="$(ls "$HALO_DIR"/out_*.vpot 2>/dev/null | wc -l)"
 exit $rc

@@ -1,0 +1,10 @@
+#!/bin/bash -l
+# Stage verify (after fits): everything computed and consistent (verify_run.py) -> $STATE_DIR/verify.json.
+# Reads every snapshot's .pkc headers and trailers, all ASCII catalogues' halo IDs, and runs pkc_check (every
+# particle ID once) on the kept full snapshots. Restart: rerun (it starts over).
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+"$PY" "$PIPE/verify_run.py" "$CONF" --threads "${PBS_NCPUS:-${VF_NCPU:-8}}"
+rc=$?
+event verify_done rc="$rc" ok="$([ $rc = 0 ] && echo 1 || echo 0)" report="$STATE_DIR/verify.json"
+exit $rc

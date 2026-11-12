@@ -38,4 +38,5 @@ else  # same file names as clean_trees.pl, nothing deleted
 fi
 n=$(ls out_*.trees 2>/dev/null | wc -l)
 stamp "$n out_<snap>.trees; scales: $(wc -l < ../scales.txt) lines"
+event ctrees_done ntrees="$n" nhlists="$nh" ntreefiles="$(ls trees/tree_*.dat 2>/dev/null | wc -l)"
 [ "$n" -eq "$nh" ] || exit 1

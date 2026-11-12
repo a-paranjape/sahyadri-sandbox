@@ -2,6 +2,9 @@
 # Submit the Sahyadri pkdgrav3 pipeline for one run as a chain of PBS jobs:
 #   sim -> rockstar -> ctrees -> vahc -> fits     (each starts only if the previous one succeeded: afterok)
 #   optional, only when named in --stages: -> xcorr (halo-halo potential cross-correlation, job_xcorr.pbs)
+#   -> verify -> archive (checks; copy of the kept data to ARCHIVE, read-only), only when named in --stages
+#   (tools/sahyadri_manager submits them itself)
+# Rockstar batch: --stages rockstar --rs-snaps A-B (snapshots A..B, see job_rockstar.pbs)
 #
 # usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits] [--after JOBID] [--hold] [--restart CHK] [--dry-run]
 #   --stages  any subset, in pipeline order (e.g. "ctrees,vahc,fits" to redo the later stages)
@@ -13,7 +16,7 @@
 set -eu
 [ $# -ge 1 ] || { sed -n '2,12p' "$0"; exit 1; }
 CONF=$(readlink -f "$1"); shift
-STAGES=sim,rockstar,ctrees,vahc,fits; AFTER=; HOLD=; DRY=; RESTART=
+STAGES=sim,rockstar,ctrees,vahc,fits; AFTER=; HOLD=; DRY=; RESTART=; RSSNAPS=
 while [ $# -gt 0 ]; do
   case $1 in
     --stages) STAGES=$2; shift 2 ;;
@@ -21,6 +24,7 @@ while [ $# -gt 0 ]; do
     --hold) HOLD="-h"; shift ;;
     --restart) RESTART=$2; shift 2 ;;
     --dry-run) DRY=1; shift ;;
+    --rs-snaps) RSSNAPS=$2; shift 2 ;;
     *) echo "unknown option $1"; exit 1 ;;
   esac
 done
@@ -32,7 +36,7 @@ QSUB=$(command -v qsub || echo /opt/pbs/bin/qsub)
 RUN=$(echo "$STEM" | tr / _)_r$REAL
 CHAIN=$LOGS/chain.$RUN.$(date +%Y%m%d_%H%M%S).txt
 prev=$AFTER
-for st in sim rockstar ctrees vahc fits xcorr; do
+for st in sim rockstar ctrees vahc fits xcorr verify archive; do
   case ",$STAGES," in *",$st,"*) ;; *) continue ;; esac
   case $st in
     sim)      R="select=1:ncpus=$SIM_NCPU:mem=$SIM_MEM";   W=$SIM_WALL ;;
@@ -41,12 +45,16 @@ for st in sim rockstar ctrees vahc fits xcorr; do
     vahc)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
     fits)     R="select=1:ncpus=$FITS_NCPU:mem=$FITS_MEM"; W=$FITS_WALL ;;
     xcorr)    R="select=1:ncpus=${XC_NCPU:-16}:mem=${XC_MEM:-16gb}"; W=${XC_WALL:-02:00:00} ;;
+    verify)   R="select=1:ncpus=${VF_NCPU:-8}:mem=${VF_MEM:-32gb}"; W=${VF_WALL:-12:00:00} ;;
+    archive)  R="select=1:ncpus=${AR_NCPU:-2}:mem=${AR_MEM:-8gb}"; W=${AR_WALL:-72:00:00} ;;
   esac
   DEP=; [ -n "$prev" ] && DEP="-W depend=afterok:$prev"
   H=; [ -z "$prev" ] && H=$HOLD
   V="CONF=$CONF,PIPE_ENV=$HERE/pipeline_env.sh,STAGE=$st"
   [ "$st" = sim ] && [ -n "$RESTART" ] && V="$V,RESTART=$RESTART"
-  cmd=("$QSUB" -N "${st}_$REAL" -q workq -l "$R" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
+  N="${st}_$REAL"
+  if [ "$st" = rockstar ] && [ -n "$RSSNAPS" ]; then V="$V,RS_SNAP_FIRST=${RSSNAPS%-*},RS_SNAP_LAST=${RSSNAPS#*-}"; N="rs${RSSNAPS%-*}_$REAL"; fi
+  cmd=("$QSUB" -N "$N" -q workq -l "$R" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
        -v "$V" "$HERE/job_$st.pbs")
   if [ -n "$DRY" ]; then echo "${cmd[*]}"; prev="<$st>"; continue; fi
   id=$("${cmd[@]}")
