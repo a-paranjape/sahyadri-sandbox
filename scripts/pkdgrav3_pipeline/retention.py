@@ -145,10 +145,10 @@ def kept_files(E, pl=None):
     root = E['SCRATCH'].rstrip('/') + '/'
     out = []
 
-    def add(cat, snap, src):
+    def add(cat, snap, src, rel=None):
         if os.path.isfile(src) and not os.path.islink(src):
             assert src.startswith(root), src
-            out.append((cat, snap, src, src[len(root):]))
+            out.append((cat, snap, src, rel or src[len(root):]))
 
     sub_tags = [pct_tag(p) for p in pl['subsamples']]
     full = set(pl['full'])
@@ -181,10 +181,11 @@ def kept_files(E, pl=None):
         add('log', None, f)
     for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), '*.log'))):
         add('log', None, f)
-    for f in sorted(glob.glob(os.path.join(glob.escape(P['cosmo']), '*'))):   # cosmology.txt, transfer table, ...
-        add('cosmo', None, f)
-    scales = os.path.join(os.path.dirname(P['halo']), 'scales.txt')
-    add('meta', None, scales)
+    # cosmology.txt, transfer table, ...: shared by the realisations in SCRATCH (and rewritten by each set-up), so
+    # each run's archive gets its own copy in sims/<stem>/r<real>/cosmology/
+    for f in sorted(glob.glob(os.path.join(glob.escape(P['cosmo']), '*'))):
+        add('cosmo', None, f, os.path.join(P['rel']['sim'], 'cosmology', os.path.basename(f)))
+    add('meta', None, scales_file(P))
     for f in sorted(glob.glob(os.path.join(glob.escape(P['state']), 'events', '*.jsonl'))):
         add('events', None, f)
     for n in ('verify.json',):
@@ -196,6 +197,13 @@ def kept_files(E, pl=None):
             for f in sorted(glob.glob(glob.escape(base) + '*')):
                 add('checkpoint', None, f)
     return out
+
+
+def scales_file(P):
+    """consistent-trees' snapshot list of this run: <halo dir>/scales.txt (job_ctrees.pbs copies it there), else the
+    shared <halo dir>/../scales.txt of older runs (overwritten by every realisation's ctrees stage)."""
+    own = os.path.join(P['halo'], 'scales.txt')
+    return own if os.path.isfile(own) else os.path.join(os.path.dirname(P['halo']), 'scales.txt')
 
 
 def human(n):

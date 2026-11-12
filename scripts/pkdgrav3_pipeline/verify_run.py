@@ -156,7 +156,7 @@ def main():
     c['info']['batches'] = [(e['first'], e['last'], e['job']) for e in ev if e.get('ev') == 'rockstar_done']
     # ------------------------------------------------------------ ctrees
     c = R.check('ctrees')
-    scales = os.path.join(os.path.dirname(P['halo']), 'scales.txt')
+    scales = retention.scales_file(P)
     tree_snaps = []
     if not os.path.isfile(scales):
         R.fail('ctrees', 'no %s' % scales)
