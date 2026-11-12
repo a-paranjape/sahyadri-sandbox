@@ -1,7 +1,14 @@
 #!/bin/bash -l
 # Stage 2: Rockstar on all outputs, reading the .pkc snapshots directly (FILE_FORMAT = "PKC").
-# Server and client run in this one job on one node. Output: $HALO_DIR/out_<snap>.list, halos_<snap>.*,
-# rockstar.cfg (the full configuration Rockstar used), auto-rockstar.cfg.
+# Server and client run in this one job on one node. Output: $HALO_DIR/out_<snap>.list, rockstar.cfg (the full
+# configuration Rockstar used), restart.cfg and the newest snapshot's halos_<snap>.*.bin (for restarts).
+# RS_LOCAL_OUT=1 (default): Rockstar writes to the node's local disk (RS_LOCAL_DIR, default /var/tmp), and the
+#   finished out_<snap>.list, restart.cfg and the newest halos_<snap>.*.bin are copied to $HALO_DIR every
+#   RS_SYNC_S seconds and at the end. Rockstar writes its halo files inside the halo-finding phase, so on /storage
+#   (NFS) that phase waits for the disk: 188 s -> 114 s for two 512^3 snapshots (pawna job 2536781).
+#   RS_LOCAL_OUT=0: write to $HALO_DIR directly (as before; all halos_<snap>.* kept).
+# Writers: one per core of the job (PBS_NCPUS, NCPUS, else RS_NCPU) unless RS_WRITERS_FIXED=1 (then the configuration's NUM_WRITERS):
+#   16 -> 32 -> 64 writers took 114 -> 78 -> 64 s in the same test, peak memory 7.5 -> 7.4 -> 8.1 GB.
 # Restart: rerun the job; it starts from scratch unless RS_RESTART=1 (then Rockstar's restart.cfg is used).
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
@@ -9,9 +16,17 @@ RS=$CODES/rockstar/rockstar
 [ -s "$SIM_DIR/snapnames.txt" ] || { stamp "no $SIM_DIR/snapnames.txt (run stage sim first)"; exit 1; }
 NS=$(grep -c . "$SIM_DIR/snapnames.txt")
 mkdir -p "$HALO_DIR" && cd "$HALO_DIR" || exit 1
+NW=${PBS_NCPUS:-${NCPUS:-$RS_NCPU}}; [ "${RS_WRITERS_FIXED:-0}" = 1 ] && NW=$RS_WRITERS
+OUT=$HALO_DIR
+if [ "${RS_LOCAL_OUT:-1}" = 1 ]; then
+  OUT=${RS_LOCAL_DIR:-/var/tmp}/${USER}_rockstar_${PBS_JOBID%%.*}
+  mkdir -p "$OUT" || { stamp "cannot create $OUT"; exit 1; }
+  stamp "Rockstar output on local disk $OUT ($(df -h "$OUT" | awk 'NR==2{print $4}') free), copied to $HALO_DIR"
+fi
 CFG=$HALO_DIR/rs_input.cfg
 if [ "${RS_RESTART:-0}" = 1 ] && [ -f restart.cfg ]; then
   CFG=$HALO_DIR/restart.cfg; stamp "restarting from $CFG"
+  [ "$OUT" != "$HALO_DIR" ] && cp -p halos_*.bin "$OUT"/ 2>/dev/null   # previous snapshot's halos for the merger links
 elif [ -n "$RS_CFG" ]; then   # configuration written in advance (setup_production.py)
   [ -f "$RS_CFG" ] || { stamp "RS_CFG=$RS_CFG not found"; exit 1; }
   rm -f auto-rockstar.cfg; CFG=$RS_CFG
@@ -28,9 +43,9 @@ SNAPSHOT_NAMES = "$SIM_DIR/snapnames.txt"
 NUM_SNAPS = $NS
 STARTING_SNAP = 0
 NUM_BLOCKS = $RS_NUM_BLOCKS
-NUM_WRITERS = $RS_WRITERS
+NUM_WRITERS = $NW
 FORK_READERS_FROM_WRITERS = 1
-FORK_PROCESSORS_PER_MACHINE = $RS_WRITERS
+FORK_PROCESSORS_PER_MACHINE = $NW
 PARALLEL_IO = 1
 PARALLEL_IO_SERVER_ADDRESS = "localhost"
 OUTBASE = "$HALO_DIR"
@@ -45,15 +60,50 @@ UNBOUND_THRESHOLD = $UNBOUND_THRESHOLD
 OVERLAP_LENGTH = 3
 EOF
 fi
-stamp "Rockstar: $NS snapshots, $RS_NUM_BLOCKS readers, $RS_WRITERS writers, FORCE_RES $FORCE_RES"
+# the configuration this job runs: writers and output directory set here (the rest as written in advance)
+RUNCFG=$HALO_DIR/rs_job.cfg
+sed -e '/^ *NUM_WRITERS *=/d' -e '/^ *FORK_PROCESSORS_PER_MACHINE *=/d' -e '/^ *OUTBASE *=/d' "$CFG" > "$RUNCFG"
+printf 'NUM_WRITERS = %s\nFORK_PROCESSORS_PER_MACHINE = %s\nOUTBASE = "%s"\n' "$NW" "$NW" "$OUT" >> "$RUNCFG"
+NB=$(awk -F= '$1 ~ /^ *NUM_BLOCKS *$/ {print $2+0}' "$RUNCFG")
+stamp "Rockstar: $NS snapshots, ${NB:-?} readers, $NW writers, FORCE_RES $FORCE_RES, config $RUNCFG"
+
+sync_out() {  # finished catalogs and what a restart needs, from the local disk to $HALO_DIR
+  [ "$OUT" = "$HALO_DIR" ] && return 0
+  cp -p "$OUT"/out_*.list "$HALO_DIR"/ 2>/dev/null
+  # rockstar.cfg: OUTBASE pointed back to $HALO_DIR (consistent-trees' gen_merger_cfg.pl finds out_*.list through it)
+  [ -f "$OUT/rockstar.cfg" ] && sed "s|^ *OUTBASE *=.*|OUTBASE = \"$HALO_DIR\"|" "$OUT/rockstar.cfg" > "$HALO_DIR/rockstar.cfg"
+  if [ -f "$OUT/restart.cfg" ]; then
+    local r=$(awk -F= '$1 ~ /^ *RESTART_SNAP *$/ {print $2+0}' "$OUT/restart.cfg") last
+    last=$(ls "$OUT" | sed -n 's/^halos_\([0-9]*\)\..*\.bin$/\1/p' | sort -n | uniq | awk -v r="$r" '$1 < r' | tail -1)
+    if [ -n "$last" ]; then  # keep only the newest complete snapshot's binaries on /storage
+      cp -p "$OUT"/halos_"$last".*.bin "$HALO_DIR"/ && ls "$HALO_DIR" | grep '^halos_.*\.bin$' | grep -v "^halos_$last\." |
+        sed "s|^|$HALO_DIR/|" | xargs -r rm -f
+    fi
+    sed "s|^ *OUTBASE *=.*|OUTBASE = \"$HALO_DIR\"|" "$OUT/restart.cfg" > "$HALO_DIR/restart.cfg"
+  fi
+}
+
 t0=$(date +%s)
-"$RS" -c "$CFG" > server.log 2>&1 &
+cd "$OUT"
+rm -f auto-rockstar.cfg
+"$RS" -c "$RUNCFG" > "$HALO_DIR/server.log" 2>&1 &
 SPID=$!
 for _ in $(seq 1 600); do [ -f auto-rockstar.cfg ] && break; sleep 0.5; done
-[ -f auto-rockstar.cfg ] || { stamp "server did not write auto-rockstar.cfg"; tail server.log; kill $SPID; exit 1; }
-/usr/bin/time -v "$RS" -c auto-rockstar.cfg > client.log 2> client.time
+[ -f auto-rockstar.cfg ] || { stamp "server did not write auto-rockstar.cfg"; tail "$HALO_DIR/server.log"; kill $SPID; exit 1; }
+cp -p auto-rockstar.cfg "$HALO_DIR"/
+( while kill -0 $SPID 2>/dev/null; do sleep "${RS_SYNC_S:-600}"; sync_out; done ) &
+SYNCPID=$!
+/usr/bin/time -v "$RS" -c auto-rockstar.cfg > "$HALO_DIR/client.log" 2> "$HALO_DIR/client.time"
 wait $SPID; rc=$?
+kill $SYNCPID 2>/dev/null; wait $SYNCPID 2>/dev/null
+ts=$(date +%s); sync_out
+[ "$OUT" != "$HALO_DIR" ] && stamp "copied $(ls "$OUT"/out_*.list 2>/dev/null | wc -l) out_<snap>.list from $OUT in $(( $(date +%s) - ts )) s"
+cd "$HALO_DIR"
 grep -E "Elapsed|Maximum resident" client.time
 n=0; for f in out_*.list; do [ -f "$f" ] && n=$((n+1)); done
+if [ "$OUT" != "$HALO_DIR" ] && [ $n -eq $NS ] && [ $rc -eq 0 ]; then
+  for f in "$OUT"/out_*.list; do cmp -s "$f" "$HALO_DIR/${f##*/}" || { stamp "copy of ${f##*/} differs"; exit 1; }; done
+  rm -rf "$OUT"
+fi
 stamp "Rockstar exit $rc in $(( $(date +%s) - t0 )) s; $n of $NS out_<snap>.list; halos in the last: $(grep -vc '^#' out_$((NS-1)).list 2>/dev/null)"
 [ $rc -eq 0 ] && [ $n -eq $NS ] || { tail -20 server.log; exit 1; }

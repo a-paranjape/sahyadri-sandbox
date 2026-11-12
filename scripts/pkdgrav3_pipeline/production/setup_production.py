@@ -128,19 +128,30 @@ def steps_plan(a_out, a_start, step_da):
     return nst, steps
 
 
+def rockstar_mem(N):
+    """PBS memory for Rockstar: 2.2 x its particle array (32 B per particle) + 8 GB, rounded up to 16 GB.
+    Measured peak 1.75-1.9 x the array at 512^3 (16-64 writers, two z~0 snapshots, pawna job 2536781): particles,
+    their overlap copies (+26% at 16 writers, +40% at 64) and an 8-byte FoF index per particle, plus the previous
+    snapshot's halos. 128^3: 16gb, 512^3: 32gb, 1024^3: 96gb, 2048^3: 624gb (of a 755 GB node)."""
+    gb = 2.2 * 32.0 * float(N)**3 / 1e9 + 8.0
+    return '%dgb' % (16 * int(np.ceil(gb / 16.0)))
+
+
 def resources(N):
     """Default PBS resources by size (edit run.conf to change). Measured: 512^3 sim 25 GB / 80 min on 64 cores for 60
-    steps; Rockstar ~2x its particle array (32 B/particle); .vahc PP_NPROC x ~13 GB at grid 512 (26 GB with PP_FAST=0)."""
+    steps; Rockstar see rockstar_mem (one writer per core: 64 writers 2.9x faster than 16 at 512^3 with the output
+    on the node's disk); .vahc PP_NPROC x ~13 GB at grid 512 (26 GB with PP_FAST=0)."""
+    rsm = rockstar_mem(N)
     if N <= 256:
-        return dict(SIM=(64, '120gb', '24:00:00'), RS=(16, '64gb', '12:00:00'), CT=(2, '16gb', '12:00:00'),
+        return dict(SIM=(64, '120gb', '24:00:00'), RS=(16, rsm, '12:00:00'), CT=(2, '16gb', '12:00:00'),
                     PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=16, PP_NPROC=4)
     if N <= 512:
-        return dict(SIM=(96, '200gb', '72:00:00'), RS=(32, '128gb', '24:00:00'), CT=(2, '32gb', '24:00:00'),
-                    PP=(32, '300gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=32, PP_NPROC=8)
+        return dict(SIM=(96, '200gb', '72:00:00'), RS=(64, rsm, '24:00:00'), CT=(2, '32gb', '24:00:00'),
+                    PP=(32, '300gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=64, PP_NPROC=8)
     # consistent-trees is serial (one process plus a forked writer): 2 cores, so it can share a node.
     # Memory 0.8 GB at 512^3 (6 snapshots), grows with the halos per snapshot: ~8 GB at 1024^3, ~60 GB at 2048^3.
     ct = (2, '32gb', '48:00:00') if N <= 1024 else (2, '128gb', '168:00:00')
-    return dict(SIM=(192, '700gb', '168:00:00'), RS=(64, '400gb', '96:00:00'), CT=ct,
+    return dict(SIM=(192, '700gb', '168:00:00'), RS=(64, rsm, '96:00:00'), CT=ct,
                 PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=64, PP_NPROC=8)
 
 
@@ -357,7 +368,8 @@ FITS_NCPU=%(fi_n)d;  FITS_MEM=%(fi_m)s; FITS_WALL=%(fi_w)s
 # halo finding: Rockstar reads the .pkc files; full configuration in the halo directory
 RS_CFG=%(hdir)s/rockstar_input.cfg
 FORCE_RES=%(fr).8g                       # = pkdgrav3 softening (Mpc/h comoving)
-RS_NUM_BLOCKS=%(rsb)d; RS_WRITERS=%(rsw)d          # informational: the values used are in RS_CFG
+RS_NUM_BLOCKS=%(rsb)d; RS_WRITERS=%(rsw)d          # readers from RS_CFG; writers = RS_NCPU (RS_WRITERS only with RS_WRITERS_FIXED=1)
+RS_LOCAL_OUT=1          # Rockstar writes to the node's disk, catalogs copied here (0: write here directly)
 RS_PKC_SUBSAMPLES=""
 MIN_HALO_OUTPUT_SIZE=30; MIN_HALO_PARTICLES=20; UNBOUND_THRESHOLD=0.5
 
