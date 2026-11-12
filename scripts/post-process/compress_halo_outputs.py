@@ -300,6 +300,7 @@ class TableWriter:
         self.f.write(None, header=cards)
         self.nrows = 0
         self.sums = {n: 0 for n in dtype.names}
+        self.nnan = {n: 0 for n in dtype.names}  # float columns: NaNs counted, the rest summed (.vpot has NaNs)
         self.started = False
 
     def append(self, arr):
@@ -311,7 +312,9 @@ class TableWriter:
             elif arr.dtype[n].kind in 'iu':
                 self.sums[n] += int(arr[n].astype(np.int64).sum())
             else:
-                self.sums[n] += float(arr[n].astype(np.float64).sum())
+                v = arr[n].astype(np.float64)
+                self.nnan[n] += int(np.isnan(v).sum())
+                self.sums[n] += float(np.nansum(v))
         if not self.started:
             self.f.write(arr, extname=self.extname, header=self.cards)
             self.started = True
@@ -353,7 +356,10 @@ def finish(writer, prov_arr, out, args, extra_cards=()):
                 elif col.dtype.kind in 'iu':
                     back = int(col.astype(np.int64).sum())
                 else:
-                    back = float(col.astype(np.float64).sum())
+                    v = col.astype(np.float64)
+                    back = float(np.nansum(v))
+                    if int(np.isnan(v).sum()) != writer.nnan[name]:
+                        back = None
                 if back != s:
                     raise RuntimeError('%s: column %s does not read back identically' % (out, name))
             for h in range(len(f)):
