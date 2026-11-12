@@ -1,0 +1,30 @@
+#!/bin/bash -l
+# Optional stage after fits: halo-halo correlation multipoles (l = 0..4, dipole included) between mass bins in real
+# space, redshift space and with the gravitational-redshift shift of the halo potential
+# (scripts/post-process/halo_xi_multipoles.py; needs the Corrfunc fork with signed mu in the venv:
+# install_corrfunc.sh, guide section 13).
+#   submit_pipeline.sh <run.conf> --stages ximult          (or --stages vahc,fits,ximult)
+# Config (all optional):
+#   XM_SNAPS   snapshots, comma separated (default: the last one, z = 0)
+#   XM_ARGS    options of halo_xi_multipoles.py (default: its defaults: real,rsd,grav,rsd+grav; phi_rs; los z;
+#              lin:0,100,2; 200 mu bins; l = 0..4), e.g. XM_ARGS="--los x,y,z"
+#   XM_TAG     output name tag (default: ximult)
+#   XM_NCPU, XM_MEM, XM_WALL   resources (default 32 cores, 32gb, 6 h; used by submit_pipeline.sh)
+# Output: $HALO_DIR/xcorr/out_<snap>_<tag>.npz. Restart: rerun; existing outputs are skipped.
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+NS=$(grep -c . "$SIM_DIR/snapnames.txt")
+SNAPS=${XM_SNAPS:-$((NS - 1))}
+TAG=${XM_TAG:-ximult}
+"$PY" -c "from Corrfunc.theory.DDsmu import DDsmu" 2>/dev/null ||
+  { stamp "Corrfunc (fork with signed mu) not installed in $PY: see docs/pkdgrav3_pipeline_pawna.md section 13"; exit 1; }
+mkdir -p "$HALO_DIR/xcorr"
+rc=0
+for s in ${SNAPS//,/ }; do
+  out=$HALO_DIR/xcorr/out_${s}_$TAG.npz
+  [ -f "$out" ] && { stamp "skip $out (exists)"; continue; }
+  stamp "snapshot $s -> $out"
+  "$PY" "$PP/halo_xi_multipoles.py" "$HALO_DIR/compressed" "$s" "$out" --threads "${NCPUS:-${XM_NCPU:-32}}" ${XM_ARGS:-} || rc=1
+done
+stamp "ximult stage exit $rc"
+exit $rc
