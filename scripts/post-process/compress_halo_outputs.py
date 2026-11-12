@@ -435,7 +435,9 @@ def convert_halo_snapshot(task):
             if t == 'vahc' and have['vpot']:
                 cols += [('vpot', c) for c in names['vpot'] if c != 'haloID']
         plan[t] = cols
-    sources = sorted({k for cols in plan.values() for k, _ in cols} | ({'vahc'} if 'basic' in todo and have['vahc'] else set()))
+    # .trees always: it gives SCALE and the row check of .vahc/.tens/.vpot, also when only those are converted
+    sources = sorted({k for cols in plan.values() for k, _ in cols} | {'trees'} |
+                     ({'vahc'} if 'basic' in todo and have['vahc'] else set()))
 
     tmpdir = args.tmpdir or args.outdir
     writers = {}
