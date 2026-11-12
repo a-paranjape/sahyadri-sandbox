@@ -2,7 +2,7 @@
 # Optional stage after fits: halo-halo correlation multipoles (l = 0..4, dipole included) between mass bins in real
 # space, redshift space and with the gravitational-redshift shift of the halo potential
 # (scripts/post-process/halo_xi_multipoles.py; needs the Corrfunc fork with signed mu in the venv:
-# install_corrfunc.sh, guide section 13).
+# install_corrfunc.sh, guide section 14).
 #   submit_pipeline.sh <run.conf> --stages ximult          (or --stages vahc,fits,ximult)
 # Config (all optional):
 #   XM_SNAPS   snapshots, comma separated (default: the last one, z = 0)
@@ -17,7 +17,7 @@ NS=$(grep -c . "$SIM_DIR/snapnames.txt")
 SNAPS=${XM_SNAPS:-$((NS - 1))}
 TAG=${XM_TAG:-ximult}
 "$PY" -c "from Corrfunc.theory.DDsmu import DDsmu" 2>/dev/null ||
-  { stamp "Corrfunc (fork with signed mu) not installed in $PY: see docs/pkdgrav3_pipeline_pawna.md section 13"; exit 1; }
+  { stamp "Corrfunc (fork with signed mu) not installed in $PY: see docs/pkdgrav3_pipeline_pawna.md section 14"; exit 1; }
 mkdir -p "$HALO_DIR/xcorr"
 rc=0
 for s in ${SNAPS//,/ }; do

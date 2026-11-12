@@ -205,3 +205,12 @@ Set-up, running (also as the optional pipeline stage `xcorr`), options and outpu
 `docs/pkdgrav3_pipeline_pawna.md` section 12. Results at 256^3: report section "Halo-halo potential
 cross-correlation" (`make_xcorr_figures.py`). z = 0 outputs of both codes on pawna:
 `/storage/shadab/pkdgrav3_io/potcmp/data/compare/pkd256_vs_gadget256_r1/xcorr/`.
+
+## Correlation multipoles in real and redshift space (`scripts/post-process/halo_xi_multipoles.py`)
+
+Multipoles l = 0..4 (dipole included) of the halo cross-correlation between mass bins, 0-100 Mpc/h, in real space,
+redshift space, with the gravitational-redshift shift from the halo potential, and with both (Corrfunc fork with
+signed mu: `adematti/Corrfunc@desi`). Set-up, installation (pawna and Mac), running (stage `ximult`), options and
+output: `docs/pkdgrav3_pipeline_pawna.md` section 13. Results at 256^3: report section "Correlation multipoles in
+real and redshift space" (`make_ximult_figures.py`).
+

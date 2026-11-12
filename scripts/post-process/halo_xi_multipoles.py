@@ -148,7 +148,7 @@ def main():
         from Corrfunc.theory.DDsmu import DDsmu
     except ImportError:
         raise SystemExit('Corrfunc (fork with signed mu) is needed: bash scripts/pkdgrav3_pipeline/install_corrfunc.sh '
-                         '<this python> (docs/pkdgrav3_pipeline_pawna.md section 13)')
+                         '<this python> (docs/pkdgrav3_pipeline_pawna.md section 14)')
     t0 = time.time()
     threads = A.threads or int(os.environ.get('PBS_NCPUS', os.environ.get('NCPUS', os.cpu_count() or 1)))
     spaces_base = [s.strip() for s in A.spaces.split(',') if s.strip()]
