@@ -25,6 +25,7 @@ job_gadget.pbs                                       submit_pipeline.sh compare3
 | `job_compare.pbs`, `compare_potential.py` | the comparison (numbers only: CSV, JSON, NPZ): potential, positions, velocities |
 | `halo_potential_profile.py` | stacked potential around halos in mass bins (stacks only), r in comoving Mpc/h |
 | `compare_halos.py` | mass and Vmax functions, matched halos, VAHC quantities |
+| `compare_vpot.py` | per-halo pipeline potential (`.vpot` columns of `out_*_vahc.fits.gz`) of matched halos |
 | `plot_compare.py` | figures from the comparison output (needs matplotlib; run anywhere) |
 | `submit_compare.sh` | submits everything as one PBS chain |
 
@@ -193,3 +194,6 @@ PP_OVERWRITE=1` (`compare256.conf`; pawna jobs 2536704/2536705 pkdgrav3, 2536706
   chunks vs the whole column; fixed 27a09dc) and froze `locations.fits.gz` with FitsRow = -1 (restart-safe since
   3155b80). After reruns 2536787/2536788 and 2536792/2536793: 661 PASS / 0 FAIL per code, all 94 `_vahc.fits.gz`
   with `HAS_VPOT = True` and `phi_rs` ... `phi_R5Mpch`.
+- Report section "Per-halo potential from the pipeline" (`compare_vpot.py`, `make_vpot_figures.py`): at z = 0
+  pkdgrav3 deeper by a median 3-6 % within rs, 1.3-2 % within Rvir, ~1 % at 5 Mpc/h (above 1e12); the outer ~1 %
+  follows the particle-mean (not median) potential difference, i.e. the deeper halo cores.
