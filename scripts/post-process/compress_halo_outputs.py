@@ -67,7 +67,7 @@ INT64_COLS = {
     'breadth_first_id', 'depth_first_id', 'tree_root_id', 'orig_halo_id', 'snap_idx', 'snap_num',
     'next_coprogenitor_depthfirst_id', 'last_progenitor_depthfirst_id', 'last_mainleaf_depthfirst_id',
     'tidal_id', 'future_merger_mmp_id', 'haloid', 'treerootid', 'forestid', 'fileid', 'offset',
-    'num_halos', 'num_bytes', 'np_rs', 'np_r200b'}
+    'num_halos', 'num_bytes', 'np_rs', 'np_r200b', 'np_r0p5vir', 'np_rvir', 'np_r1p5vir'}
 FLOAT64_COLS = {'scale', 'desc_scale', 'scale_of_last_mm', 'x', 'y', 'z'}
 
 

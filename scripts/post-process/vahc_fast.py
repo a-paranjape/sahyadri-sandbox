@@ -28,6 +28,8 @@ potential phi around each halo, (km/s)^2, with pkdgrav3's constant softened self
 every particle) removed:
   Np_rs, phi_rs        particles within rs (Rockstar's NFW scale radius) of the halo centre and their mean phi
   Np_R200b, phi_R200b  the same within R200b = (3 M200b / (4 pi 200 rho_m))^(1/3) (comoving), from M200b
+  Np_R0p5vir, phi_R0p5vir, Np_Rvir, phi_Rvir, Np_R1p5vir, phi_R1p5vir
+                       the same within 0.5, 1 and 1.5 x Rockstar's Rvir
   phi_<scale>          Gaussian-weighted mean phi at the 7 .vahc scales (2, 4, 6, 8 x R200b by interpolation over
                        the same table of smoothing radii as the tidal eigenvalues; 2, 3, 5 Mpc/h), as
                        [W * sum_i phi_i CIC_i] / [W * sum_i CIC_i] at the halo's cell, both grids built in the
@@ -48,6 +50,12 @@ from addvalue import AddValue
 
 
 RHO_CRIT = 2.77519737e11   # (Msun/h) / (Mpc/h)^3, as Rockstar (universal_constants.h)
+# spheres for .vpot, in column order: (name, radius in Mpc/h from the halo record and Omega_m)
+SPHERES = (('rs', lambda h, Om: h['rs'] / 1000.0),                                            # kpc/h -> Mpc/h
+           ('R200b', lambda h, Om: np.cbrt(3.0 * np.asarray(h['m200b'], np.float64) / (4.0 * np.pi * 200.0 * Om * RHO_CRIT))),
+           ('R0p5vir', lambda h, Om: 0.5 * h['rvir'] / 1000.0),
+           ('Rvir', lambda h, Om: h['rvir'] / 1000.0),
+           ('R1p5vir', lambda h, Om: 1.5 * h['rvir'] / 1000.0))
 
 
 def vpot_lib():
@@ -67,8 +75,8 @@ def vpot_lib():
     lib.deposit_weighted.argtypes = [ctypes.c_long, ctypes.c_int, D, D, D, D, D, ctypes.c_double, ctypes.c_double,
                                      ctypes.c_double]
     lib.sphere_sums.restype = ctypes.c_int
-    lib.sphere_sums.argtypes = [ctypes.c_long, D, D, D, D, ctypes.c_long, D, D, D, D, D, ctypes.c_double,
-                                ctypes.c_int, ctypes.c_int, D, L, D, L]
+    lib.sphere_sums.argtypes = [ctypes.c_long, D, D, D, D, ctypes.c_long, D, D, D, ctypes.c_int, D,
+                                ctypes.c_double, ctypes.c_int, ctypes.c_int, D, L]
     return lib
 
 
@@ -89,7 +97,7 @@ def self_term(pkc):
 def streamed_fields(pkc, ps, threads, halos=None, hpos=None, Om=None, chunk=1 << 25):
     """CIC density contrast of a .pkc snapshot built block by block (bit for bit as run_addvalue.streamed_density),
     and, with halos given and the potential stored, in the same pass: the CIC grid of phi (self term removed) and
-    the sphere sums within rs and R200b. Returns (density, n, vpot) with vpot None or a dict."""
+    the sphere sums within the SPHERES radii. Returns (density, n, vpot) with vpot None or a dict."""
     from concurrent.futures import ThreadPoolExecutor
     from ctypes import c_long, c_int, c_double
     from numpy.ctypeslib import ndpointer
@@ -108,11 +116,10 @@ def streamed_fields(pkc, ps, threads, halos=None, hpos=None, Om=None, chunk=1 <<
         L = float(ps.Lbox)
         nh = halos.size
         hx, hy, hz = (np.ascontiguousarray(hpos[:, i] % L, np.float64) for i in range(3))
-        r_rs = np.ascontiguousarray(halos['rs'] / 1000.0, np.float64)               # kpc/h -> Mpc/h
-        m = np.asarray(halos['m200b'], np.float64)
-        r_200 = np.ascontiguousarray(np.cbrt(3.0 * m / (4.0 * np.pi * 200.0 * Om * RHO_CRIT)), np.float64)
-        s1, s2 = np.zeros(nh), np.zeros(nh)
-        n1, n2 = np.zeros(nh, np.int64), np.zeros(nh, np.int64)
+        nr = len(SPHERES)
+        radii = np.ascontiguousarray(np.stack([f(halos, Om) for _, f in SPHERES], axis=1), np.float64)  # (nh, nr)
+        ssum = np.zeros((nh, nr))
+        scnt = np.zeros((nh, nr), np.int64)
         nc = int(max(1, min(256, L / 0.5)))
         buf, nbuf = [], 0
         tsph = 0.0
@@ -126,8 +133,8 @@ def streamed_fields(pkc, ps, threads, halos=None, hpos=None, Om=None, chunk=1 <<
             P = np.concatenate([b[1] for b in buf])
             buf, nbuf = [], 0
             rc = lib.sphere_sums(X.shape[0], np.ascontiguousarray(X[:, 0]), np.ascontiguousarray(X[:, 1]),
-                                 np.ascontiguousarray(X[:, 2]), P, nh, hx, hy, hz, r_rs, r_200, L, nc,
-                                 max(1, threads), s1, n1, s2, n2)
+                                 np.ascontiguousarray(X[:, 2]), P, nh, hx, hy, hz, nr, radii, L, nc,
+                                 max(1, threads), ssum, scnt)
             if rc:
                 raise MemoryError('sphere_sums: out of memory')
             tsph += time.time() - t
@@ -171,8 +178,7 @@ def streamed_fields(pkc, ps, threads, halos=None, hpos=None, Om=None, chunk=1 <<
         flush()
         with np.errstate(invalid='ignore', divide='ignore'):
             vpot = dict(potgrid=np.reshape(potgrid, (G, G, G), order='F'), nbar=n / float(G)**3, self_term=C,
-                        n_rs=n1, phi_rs=np.where(n1 > 0, s1 / n1, np.nan),
-                        n_r200b=n2, phi_r200b=np.where(n2 > 0, s2 / n2, np.nan), sphere_s=tsph, chunk=chunk)
+                        n_sph=scnt, phi_sph=np.where(scnt > 0, ssum / scnt, np.nan), sphere_s=tsph, chunk=chunk)
     return density, n, vpot
 
 
@@ -429,12 +435,14 @@ class FastAddValue(AddValue):
                 den = V['nbar'] * (1.0 + self._irfft(self.B * K)[idx])
                 mean[:, s, 0] = np.where(den > 0, num / den, np.nan)
                 del K
-        dt = [('ID', 'i8'), ('Np_rs', 'i8'), ('phi_rs', 'f'), ('Np_R200b', 'i8'), ('phi_R200b', 'f')]
+        dt = [('ID', 'i8')]
+        for name, _ in SPHERES:
+            dt += [('Np_' + name, 'i8'), ('phi_' + name, 'f')]
         dt += [('phi_' + s, 'f') for s in self.scale_strings]
         out = np.zeros(self.Nhalo, dtype=dt)
         out['ID'] = self.halos['ID']
-        out['Np_rs'], out['phi_rs'] = V['n_rs'], V['phi_rs']
-        out['Np_R200b'], out['phi_R200b'] = V['n_r200b'], V['phi_r200b']
+        for j, (name, _) in enumerate(SPHERES):
+            out['Np_' + name], out['phi_' + name] = V['n_sph'][:, j], V['phi_sph'][:, j]
         for s, v in zip(self.scale_strings, per_scale(mean)):
             col = np.full(self.Nhalo, np.nan)
             col[allowed] = v[:, 0]
@@ -446,9 +454,9 @@ class FastAddValue(AddValue):
         if kind == 'vpot':
             V = self.vpot
             h = ("# Mean pkdgrav3 particle potential around halos, (km/s)^2, self term %.6g (km/s)^2 removed; "
-                 "Np_*/phi_* within rs and R200b (spheres), phi_<scale> Gaussian-weighted on %d^3 grid (vahc_fast.py)\n"
+                 "Np_*/phi_* within rs, R200b, 0.5/1/1.5 Rvir (spheres), phi_<scale> Gaussian-weighted on %d^3 grid (vahc_fast.py)\n"
                  % (V['self_term'], self.grid))
-            h += '# haloID Np_rs phi_rs Np_R200b phi_R200b ' + ' '.join('phi_' + s for s in self.scale_strings) + '\n'
+            h += '# haloID ' + ''.join('Np_%s phi_%s ' % (nm, nm) for nm, _ in SPHERES) + ' '.join('phi_' + s for s in self.scale_strings) + '\n'
             h += '# self_term_kms2 = %.10g ; R200b from M200b with rho_m = Om * %.9g (Msun/h)/(Mpc/h)^3 ; nan = undefined\n' % (
                 V['self_term'], RHO_CRIT)
             return h

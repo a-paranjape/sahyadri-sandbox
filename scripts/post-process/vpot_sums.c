@@ -3,9 +3,10 @@
  * deposit_weighted: CIC deposit of a weight per particle, with exactly the cell and weight arithmetic of
  *   cic_update.c's update_density (so the potential grid and the density grid are built the same way).
  * sphere_sums: for one chunk of particles, add for every halo the potential sum and the particle count
- *   inside two spheres around its centre (radii r1, r2; periodic box). Particles are put in a cell grid
- *   (counting sort); each halo visits only the cells its larger sphere overlaps. Halos are split over
- *   threads (each halo's sums are written by one thread only, so no locks are needed).
+ *   inside nr spheres around its centre (radii r[h*nr + j], j < nr; periodic box) to s[h*nr + j], cnt[h*nr + j].
+ *   Particles are put in a cell grid (counting sort); each halo visits only the cells its largest sphere
+ *   overlaps, and each particle there is tested against all nr radii. Halos are split over threads (each
+ *   halo's sums are written by one thread only, so no locks are needed).
  * Build: cc -O3 -fopenmp -shared -fPIC -o vpot_sums.so vpot_sums.c
  */
 #include <math.h>
@@ -53,12 +54,12 @@ static inline double wrap(double d, double L)
   return d;
 }
 
-/* returns 0 on success, 1 if memory could not be allocated */
+/* returns 0 on success, 1 if memory could not be allocated or nr is not in 1..16 */
 int sphere_sums(long int np, const double *x, const double *y, const double *z, const double *phi,
                 long int nh, const double *hx, const double *hy, const double *hz,
-                const double *r1, const double *r2, double L, int nc, int nthreads,
-                double *s1, long int *n1, double *s2, long int *n2)
+                int nr, const double *r, double L, int nc, int nthreads, double *s, long int *cnt)
 {
+  if (nr < 1 || nr > 16) return 1;
   long int ncell = (long int)nc * nc * nc, i;
   double inv = nc / L, csize = L / nc;
   long int *start = calloc(ncell + 1, sizeof(long int));
@@ -88,9 +89,15 @@ int sphere_sums(long int np, const double *x, const double *y, const double *z, 
 #endif
 #pragma omp parallel for schedule(dynamic, 256)
   for (long int h = 0; h < nh; h++) {
-    double R = r1[h] > r2[h] ? r1[h] : r2[h];
+    const double *rh = r + h * nr;
+    double R = 0, R2[16], a[16];
+    long int m[16];
+    for (int j = 0; j < nr; j++) {
+      if (rh[j] > R) R = rh[j];
+      R2[j] = rh[j] > 0 ? rh[j] * rh[j] : -1.0;  /* r <= 0 or nan: nothing inside */
+      a[j] = 0; m[j] = 0;
+    }
     if (!(R > 0)) continue;
-    double R1 = r1[h] * r1[h], R2 = r2[h] * r2[h];
     double cx = hx[h], cy = hy[h], cz = hz[h];
     int lo[3], nn[3];
     double cc[3] = {cx, cy, cz};
@@ -100,8 +107,6 @@ int sphere_sums(long int np, const double *x, const double *y, const double *z, 
       if (nn[d] > nc) nn[d] = nc;
       lo[d] = a;
     }
-    double a1 = 0, a2 = 0;
-    long int m1 = 0, m2 = 0;
     for (int ia = 0; ia < nn[0]; ia++) {
       int gx = ((lo[0] + ia) % nc + nc) % nc;
       for (int ib = 0; ib < nn[1]; ib++) {
@@ -112,13 +117,13 @@ int sphere_sums(long int np, const double *x, const double *y, const double *z, 
           for (long int k = start[c]; k < start[c + 1]; k++) {
             double dx = wrap(px[k] - cx, L), dy = wrap(py[k] - cy, L), dz = wrap(pz[k] - cz, L);
             double d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 <= R1) { a1 += pp[k]; m1++; }
-            if (d2 <= R2) { a2 += pp[k]; m2++; }
+            for (int j = 0; j < nr; j++)
+              if (d2 <= R2[j]) { a[j] += pp[k]; m[j]++; }
           }
         }
       }
     }
-    s1[h] += a1; n1[h] += m1; s2[h] += a2; n2[h] += m2;
+    for (int j = 0; j < nr; j++) { s[h * nr + j] += a[j]; cnt[h * nr + j] += m[j]; }
   }
   (void)csize;
   free(start); free(px); free(py); free(pz); free(pp);
