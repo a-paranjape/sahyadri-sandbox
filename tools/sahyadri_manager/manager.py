@@ -580,6 +580,10 @@ class Manager:
             sc = run.ms['scheduled']
             D = derived[run.conf]
             wait = None
+            if D['sim_done']:          # finished meanwhile (e.g. submitted by hand): nothing to submit
+                run.ms['scheduled'] = None
+                run.note('removed from the simulation queue: the simulation has finished')
+                continue
             if any(j['stage'] == 'sim' for j in D['active']):
                 wait = 'a simulation job of this run is still active'
             elif sc.get('not_before') and now() < sc['not_before']:
@@ -660,6 +664,8 @@ class Manager:
             D = run.derive(self.qjobs, self.qtime)
             if D['sim_done']:
                 raise ValueError('the simulation of %s has finished' % run.name)
+            if any(j['stage'] == 'sim' for j in D['active']):
+                raise ValueError('a simulation job of %s is queued or running; not scheduling another' % run.name)
             nb = a.get('not_before')
             if nb not in (None, ''):
                 nb = float(nb) if re.match(r'^[0-9.]+$', str(nb)) else time.mktime(time.strptime(str(nb).replace('T', ' ')[:16], '%Y-%m-%d %H:%M'))
