@@ -158,6 +158,12 @@ SYNCPID=$!
 wait $SPID; rc=$?
 kill $SYNCPID 2>/dev/null; wait $SYNCPID 2>/dev/null
 ts=$(date +%s); sync_out
+# after a successful run the last snapshot is complete too (restart.cfg still names it): keep its binaries,
+# the next batch's merger links need them
+if [ $rc -eq 0 ] && [ "$OUT" != "$HALO_DIR" ] && ls "$OUT"/halos_$LAST.*.bin > /dev/null 2>&1; then
+  cp -p "$OUT"/halos_$LAST.*.bin "$HALO_DIR"/ && ls "$HALO_DIR" | grep '^halos_.*\.bin$' | grep -v "^halos_$LAST\." |
+    sed "s|^|$HALO_DIR/|" | xargs -r rm -f
+fi
 [ "$OUT" != "$HALO_DIR" ] && stamp "copied $(ls "$OUT"/out_*.list 2>/dev/null | wc -l) out_<snap>.list from $OUT in $(( $(date +%s) - ts )) s"
 cd "$HALO_DIR"
 grep -E "Elapsed|Maximum resident" client.time
