@@ -12,6 +12,11 @@ LAST=$(tail -1 "$SIM_DIR/snapnames.txt")
 DEL=; [ "$FITS_DELETE_ASCII" = 1 ] && DEL=--delete-ascii
 WHAT=all; [ -d trees ] || WHAT=halos
 PKC=(--pkc "$PKC_DIR/snap.$LAST"); ls "$PKC_DIR/snap.$LAST".s*.pkc > /dev/null 2>&1 || PKC=()   # Gadget-4 runs: no .pkc
+# a .vpot newer than its vahc table (post-processing stage vpot): that table is written again with the phi_* columns
+for v in out_*.vpot; do
+  [ -e "$v" ] || continue; t=compressed/${v%.vpot}_vahc.fits.gz
+  [ -f "$t" ] && [ "$v" -nt "$t" ] && { stamp "rewriting $t with the columns of $v"; rm -f "$t"; }
+done
 "$PY" "$PP/compress_halo_outputs.py" $WHAT --indir "$HALO_DIR" --nproc "$FITS_NPROC" --tmpdir "$TMP" \
     --rockstar-cfg logs/rockstar.cfg --ctrees-cfg logs/merger_tree.cfg "${PKC[@]}" \
     --meta SIM_STEM="$STEM" --meta SIM_REAL="$REAL" $DEL > "$LOGS/fits.${PBS_JOBID%%.*}.log" 2>&1

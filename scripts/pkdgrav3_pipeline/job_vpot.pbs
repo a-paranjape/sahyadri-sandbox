@@ -1,0 +1,16 @@
+#!/bin/bash -l
+# Post-processing stage vpot (not run by the manager; postprocess.sh vpot): halo potential profiles out_<snap>.vpot
+# (mean particle potential within rs, R200b and at the .vahc scales; vahc_fast.py) for the outputs whose .pkc store
+# the potential (z <= 0.5 in production). Only .vpot is computed (--no-vahc); existing .vpot are skipped.
+# Run stage fits after it: the vahc FITS tables of those outputs are rewritten with the phi_* columns (HAS_VPOT).
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+ls "$HALO_DIR"/out_*.trees > /dev/null 2>&1 || { stamp "no out_<snap>.trees in $HALO_DIR (run stage ctrees first)"; exit 1; }
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+/usr/bin/time -v "$PY" "$PP/run_addvalue.py" "$STEM" --real "$REAL" --grid "$PP_GRID" --down-to 0 --no-vahc --fast --pot \
+    --nproc "$PP_NPROC" 2> "$LOGS/vpot_time.${PBS_JOBID%%.*}.log" | grep -v '^\.\.\.'
+rc=${PIPESTATUS[0]}
+grep -E "Elapsed|Maximum resident" "$LOGS/vpot_time.${PBS_JOBID%%.*}.log"
+stamp "run_addvalue --pot exit $rc; $(ls "$HALO_DIR"/out_*.vpot 2>/dev/null | wc -l) .vpot"
+event vpot_done rc="$rc" nvpot="$(ls "$HALO_DIR"/out_*.vpot 2>/dev/null | wc -l)"
+exit $rc

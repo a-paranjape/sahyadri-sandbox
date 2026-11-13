@@ -559,6 +559,26 @@ case "${1:-all}" in
 esac
 ''' % dict(name=name, now=now, hdir=hdir, pipe=PIPE, sdir=sdir)
         write(os.path.join(sdir, 'submit.sh'), sub, a.force, 0o755)
+        pp = '''#!/bin/bash
+# Post-processing of %(name)s beyond the pipeline (written by setup_production.py %(now)s). Not submitted by the
+# run manager; run it when wanted, after the pipeline (verify) has finished:
+#   ./postprocess.sh vpot    halo potential profiles out_<snap>.vpot (outputs that store the potential, z <= 0.5),
+#                            then the FITS tables of those outputs again with the phi_* columns (stages vpot, fits)
+#   ./postprocess.sh xcorr   halo-halo potential cross-correlation (needs vpot; XC_* in run.conf, job_xcorr.pbs)
+#   ./postprocess.sh all     vpot, fits, xcorr
+#   ./postprocess.sh dry ... print the qsub commands only
+# Products change kept files (FITS) after the archive; the archive is not updated by this script.
+SUB=%(pipe)s/submit_pipeline.sh
+CONF=%(sdir)s/run.conf
+DRY=; [ "${1:-}" = dry ] && { DRY=--dry-run; shift; }
+case "${1:-}" in
+  vpot)  exec "$SUB" "$CONF" --stages vpot,fits $DRY ;;
+  xcorr) exec "$SUB" "$CONF" --stages xcorr $DRY ;;
+  all)   exec "$SUB" "$CONF" --stages vpot,fits,xcorr $DRY ;;
+  *)     sed -n '2,10p' "$0"; exit 1 ;;
+esac
+''' % dict(name=name, now=now, pipe=PIPE, sdir=sdir)
+        write(os.path.join(sdir, 'postprocess.sh'), pp, a.force, 0o755)
         readme = '''%(name)s: Sahyadri pkdgrav3 run (written by setup_production.py %(now)s)
   run.conf          pipeline configuration (paths, resources, halo and post-processing settings)
   p.par             pkdgrav3 parameter file (cosmology, ICs, gravity, outputs, potential, checkpoints)
