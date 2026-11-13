@@ -222,6 +222,7 @@ function trash(name){
   if(!confirm('Move the scratch data of '+name+' to the trash?\n\nThe manager first re-checks that every kept file is in the archive and unchanged. The move can be undone until you purge.')) return;
   act({run:name, action:'approve_trash'});
 }
+function setQueue(site,q,st){ if(confirm('Set queue '+site+':'+q+' to '+st+'?')) act({action:'set_queue', site:site, queue:q, state:st}); }
 function purge(name){
   const t=prompt('Permanently delete the trash of '+name+'?\nThe archive copy stays. Type the run name to confirm:');
   if(t===name) act({run:name, action:'approve_purge'}); else if(t!==null) toast('name did not match; nothing deleted', false);
@@ -233,7 +234,7 @@ function render(){
   const toCome = (S.runs||[]).reduce((a,r)=>a+(r.outstanding||0),0);
   document.getElementById('disk').innerHTML = (toCome?`<span class="muted">running simulations will add <b>${hum(toCome)}</b> · reserve ${S.reserve_gb} GB</span>`:'') + Object.entries(S.disk||{}).map(([p,d])=>`<span title="${h((d.paths||[p]).join('\n'))}">${h(d.site?d.site+' scratch':(d.kind==='SCRATCH'?'scratch':'archive'))} <b>${hum(d.free)}</b> free of ${hum(d.total)}</span><div class="bar" style="width:90px;min-width:90px"><div style="width:${(100*d.used/d.total).toFixed(0)}%;background:${d.used/d.total>0.9?'var(--bad)':'var(--run)'}"></div></div>`).join('');
   const L=S.limits||{};
-  const q=(S.queue||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${h(x.site||'')}</td><td>${h(x.run)}</td><td>${x.restart?'restart':'new'}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`).join('');
+  const q=(S.queue||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${h(x.site||'')}</td><td>${h(x.queue||'')}</td><td>${h(x.run)}</td><td>${x.restart?'restart':'new'}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`).join('');
   const lim=(k,label,w,src,pre)=>`<label class="small">${label} <input name="${(pre||'')+k}" value="${h((src||L)[k])}" style="width:${w||60}px" type="text"></label>`;
   const siteRows=Object.entries(S.sites||{}).map(([n,x])=>`<div class="row" style="margin-top:6px"><b>${h(n)}</b>
      <span class="muted small" title="${h('qsub/qstat on '+x.login+'; files from '+x.data)}">running ${x.sims_running} · waiting in PBS ${x.sims_queued} · qstat ${x.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(x.qtime)}</span><span class="sp"></span>
@@ -243,7 +244,7 @@ function render(){
      <span class="muted small">running ${S.sims_running} · waiting in PBS ${S.sims_queued}</span><span class="sp"></span>
      ${lim('max_sim_running','max running')}${lim('max_sim_queued','max waiting in PBS')}${lim('max_sim_restarts','restarts')}${lim('max_rockstar','Rockstar at once')}${lim('scratch_reserve_gb','reserve GB',70)}
      <button onclick="setLimits()">Save limits</button></div>${siteRows}</div>
-     ${q?`<table style="margin-top:8px"><tr><th>#</th><th>site</th><th>run</th><th></th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${q}</table>`:'<div class="muted small" style="margin-top:6px">no simulations scheduled</div>'}`;
+     ${q?`<table style="margin-top:8px"><tr><th>#</th><th>site</th><th>queue</th><th>run</th><th></th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${q}</table>`:'<div class="muted small" style="margin-top:6px">no simulations scheduled</div>'}`;
   renderTabs();
   document.getElementById('mlog').textContent = (S.log||[]).join('');
 }
@@ -290,6 +291,13 @@ function renderTabs(){
   document.getElementById('summarycard').innerHTML = `<div class="row"><b>Overview</b><span class="muted small">${(S.runs||[]).length} runs registered</span></div>
     <table style="margin-top:8px"><tr><th>site</th><th class="num">upcoming</th><th class="num">simulating</th><th class="num">post-processing</th><th class="num">failed</th><th class="num">archived</th><th class="num">purged</th></tr>${rows}</table>
     ${bud?`<div style="margin-top:12px"><b>Core-hour budgets</b> <span class="muted small">(amgr; refreshed when a pegasus job is submitted)</span><table style="margin-top:4px"><tr><th>site</th><th>budget</th><th class="num">core-h left</th><th>checked</th></tr>${bud}</table></div>`:''}
+    <div style="margin-top:12px"><b>Queues</b> <span class="muted small">${h(S.queues_file||'')} · drain: no new runs, restarts and post-processing go on · closed: nothing submitted</span>
+    ${(S.queue_errors||[]).map(e=>`<div class="small" style="color:var(--bad)">${h(e)}</div>`).join('')}
+    <table style="margin-top:4px"><tr><th>site</th><th>queue</th><th>state</th><th class="num">sims running</th><th class="num">waiting in PBS</th><th class="num">scheduled</th><th class="num">runs</th><th>own limits</th><th></th></tr>${
+      (S.queues||[]).map(x=>`<tr><td>${h(x.site)}</td><td><b>${h(x.queue)}</b></td><td><span class="badge ${x.state==='open'?'b-ok':x.state==='drain'?'b-wait':'b-bad'}">${h(x.state)}</span></td>
+        <td class="num">${x.sims_running}</td><td class="num">${x.sims_waiting}</td><td class="num">${x.scheduled||''}</td><td class="num">${x.runs}</td>
+        <td class="small">${x.max_running!=null?'running ≤ '+x.max_running:''}${x.max_waiting!=null?' waiting ≤ '+x.max_waiting:''}${x.note?' <span class="muted">'+h(x.note)+'</span>':''}</td>
+        <td>${['open','drain','closed'].filter(st=>st!==x.state).map(st=>`<button onclick="setQueue('${h(x.site)}','${h(x.queue)}','${st}')">${st}</button>`).join('')}</td></tr>`).join('')}</table></div>
     <div style="margin-top:12px"><b>Plan file</b> <span class="muted small">${h(S.plan_file||'—')}</span>: ${pl.length} planned runs, ${pl.filter(p=>p.state==='registered').length} set up${plErr?`, <b style="color:var(--bad)">${plErr} with errors</b> (Upcoming)`:''}</div>`;
   // plan card (upcoming)
   const prow=pl.filter(p=>p.state!=='registered').map(p=>`<tr><td>${p.lineno}</td><td>${h(p.name||p.line)}</td><td>${h(p.queue||'')}</td><td>${h(p.priority??'')}</td><td>${p.state==='error'?'<b style="color:var(--bad)">error</b>':h(p.state)}${p.hold?' · hold':''}</td><td class="small">${h(p.msg||'')}</td></tr>`).join('');

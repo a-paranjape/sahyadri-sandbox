@@ -1,0 +1,17 @@
+# PBS queues the run manager may use, read by it before every scheduling pass (its copy: ~/.sahyadri_mgr/queues.txt,
+# made from this template on first start; edit that one, or use the page (Summary) / `manager.py queue SITE QUEUE STATE`).
+#
+# columns:  site  queue  state  [max_running]  [max_waiting]   (- or missing: only the site's limits apply)
+#   state   open     new runs, restarts and post-processing are submitted
+#           drain    no new run starts; restarts of started runs and their post-processing go on
+#           closed   nothing is submitted to this queue (maintenance, budget used up); jobs already in PBS stay
+#   max_running   simulations of this queue running + waiting in PBS at most (besides the site's max_sim_running)
+#   max_waiting   simulations of this queue waiting in PBS at most
+# A run uses the queue it was set up for (PBS_QUEUE in its run.conf; the queue column of planned_runs.txt).
+# A queue not listed here is open.
+#
+# site     queue    state    max_running  max_waiting
+pawna      workq    open     -            -
+pegasus    project  open     -            -
+pegasus    regular  closed   -            -          # user budget: open only when the project budget is short
+pegasus    debug    closed   2            1          # tests only

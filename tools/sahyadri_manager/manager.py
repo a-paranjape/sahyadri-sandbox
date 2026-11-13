@@ -8,6 +8,7 @@
   manager.py list                  registered runs
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
   manager.py unschedule <stem/rN>
+  manager.py queue <site> <queue> open|drain|closed   change a queue's state in the queues file (~/.sahyadri_mgr/queues.txt)
   manager.py limits [max_sim_running=3] [max_sim_queued=1] [max_sim_restarts=5] [max_rockstar=1] [scratch_reserve_gb=2000]
   On the Mac: open_gui.sh  (ssh tunnel to the socket, opens http://localhost:8765)
 
@@ -72,8 +73,10 @@ PBS = '/opt/pbs/bin'
 DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000,
                    max_sim_running=3, max_sim_queued=1, max_sim_restarts=5, max_pulls=1,
                    local_codes='/user/shadab/sahyadri_prod/codes',
-                   # planned runs (production/planned_runs.txt): set up, registered and scheduled by the manager
-                   plan_file=os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'production', 'planned_runs.txt'),
+                   # planned runs: set up, registered and scheduled by the manager; queues: which PBS queues take
+                   # jobs (open | drain | closed) and their own limits. Both in the manager's directory (edited there,
+                   # outside the git checkout), first copied from the templates in production/
+                   plan_file=os.path.join(HOME, 'planned_runs.txt'), queues_file=os.path.join(HOME, 'queues.txt'),
                    plan_s=300, local_python='/user/shadab/sahyadri_prod/codes/venv/bin/python',
                    scratch_root='/user/shadab/sahyadri_scratch',
                    sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
@@ -270,6 +273,58 @@ def read_plan(path):
         except ValueError as e:
             out.append(dict(line=line, lineno=i, error=str(e)))
     return out
+
+
+TEMPLATES = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'production')
+QSTATES = ('open', 'drain', 'closed')
+DEFAULT_QUEUE = {LOCAL: 'workq', 'pegasus': 'project'}
+
+
+def read_queues(path):
+    """queues.txt -> ({(site, queue): dict(state, max_running, max_waiting, lineno)}, [errors]). Columns:
+    site queue state [max_running|-] [max_waiting|-] [# comment]. A queue not listed is open, without limits of its own."""
+    out, errs = {}, []
+    if not path or not os.path.isfile(path):
+        return out, errs
+    for i, raw in enumerate(open(path), 1):
+        line = raw.split('#', 1)[0].strip()
+        if not line:
+            continue
+        f = line.split()
+        try:
+            if len(f) < 3 or f[2] not in QSTATES:
+                raise ValueError('needs: site queue open|drain|closed [max_running] [max_waiting]')
+            lim = [None if x == '-' else int(x) for x in (f[3:5] + ['-', '-'])[:2]]
+            out[(f[0], f[1])] = dict(state=f[2], max_running=lim[0], max_waiting=lim[1], lineno=i,
+                                     note=raw.split('#', 1)[1].strip() if '#' in raw else '')
+        except ValueError as e:
+            errs.append('line %d: %s (%s)' % (i, e, line))
+    return out, errs
+
+
+def set_queue_state(path, site, q, state):
+    """Rewrite the state column of site/queue in queues.txt (appends a line when the queue is not listed)."""
+    if state not in QSTATES:
+        raise ValueError('state must be one of %s' % ', '.join(QSTATES))
+    lines = open(path).read().splitlines(True) if os.path.isfile(path) else []
+    done = False
+    for i, raw in enumerate(lines):
+        body, hsh, com = raw.rstrip('\n').partition('#')
+        f = body.split()
+        if len(f) >= 3 and f[0] == site and f[1] == q:
+            f[2] = state
+            lines[i] = '  '.join('%-8s' % x for x in f) + ('  #' + com if hsh else '') + '\n'
+            done = True
+    if not done:
+        lines.append('%-8s  %-8s  %-8s\n' % (site, q, state))
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as fh:
+        fh.writelines(lines)
+    os.replace(tmp, path)
+
+
+def run_queue(run):
+    return run.E.get('PBS_QUEUE') or DEFAULT_QUEUE.get(run.site, 'workq')
 
 
 def site_cfg(cfg, site):
@@ -657,6 +712,12 @@ class Manager:
         os.makedirs(HOME, mode=0o700, exist_ok=True)
         os.chmod(HOME, 0o700)
         self.cfg = load_cfg()
+        for k, t in (('plan_file', 'planned_runs.txt'), ('queues_file', 'queues.txt')):
+            p = self.cfg.get(k)
+            if p and not os.path.exists(p) and os.path.dirname(p) == HOME:
+                shutil.copy(os.path.join(TEMPLATES, t), p)
+                log('%s: copied the template %s' % (p, t))
+        self.queues, self.queue_errors, self.queues_mtime = {}, [], None
         self.q = queue.Queue()
         self.runs = {}
         self.qjobs, self.qtime, self.qok = {}, 0.0, None
@@ -946,6 +1007,7 @@ class Manager:
         active_rs = {}             # per site
         derived = {}
         self.waiting = {}          # per site: our jobs submitted but not started (PBS queue limits)
+        self.load_queues()
         for run in self.runs.values():
             D = self.derive(run)
             derived[run.conf] = D
@@ -973,6 +1035,21 @@ class Manager:
                 run.note('manager error, automation stopped: %s' % e)
                 log(traceback.format_exc())
         return derived
+
+    def load_queues(self):
+        p = self.cfg.get('queues_file')
+        try:
+            m = os.path.getmtime(p) if p else None
+        except OSError:
+            m = None
+        if m != self.queues_mtime:
+            self.queues, self.queue_errors = read_queues(p)
+            self.queues_mtime = m
+            log('queues: %s%s' % (', '.join('%s:%s %s' % (k[0], k[1], v['state']) for k, v in sorted(self.queues.items()))
+                                  or 'none listed (all open)', ('; ERRORS: ' + '; '.join(self.queue_errors)) if self.queue_errors else ''))
+
+    def qinfo(self, run):
+        return self.queues.get((run.site, run_queue(run))) or dict(state='open', max_running=None, max_waiting=None)
 
     def policy(self, run, D, active_rs):
         """Submit what is due for this run; returns the number of Rockstar jobs submitted."""
@@ -1013,6 +1090,8 @@ class Manager:
                     return 0
                 self.recheck_at = min(self.recheck_at or 1e30, first_seen + self.cfg['lost_grace_s'] + 5)
         if D['active'] and any(j['stage'] in ('ctrees', 'vahc', 'fits', 'verify', 'archive') for j in D['active']):
+            return 0
+        if self.qinfo(run)['state'] == 'closed':     # nothing new into a closed queue (drain: post-processing goes on)
             return 0
         n_out = len(run.outs)
         rs_done = set(D['rs_done'])
@@ -1088,10 +1167,10 @@ class Manager:
     def took(self, site, n=1):
         self.waiting[site] = self.waiting.get(site, 0) + n
 
-    def sim_counts(self, derived, site=LOCAL):
+    def sim_counts(self, derived, site=LOCAL, q=None):
         running = queued = 0
         for run in self.runs.values():
-            if run.site != site:
+            if run.site != site or (q is not None and run_queue(run) != q):
                 continue
             for j in derived[run.conf]['active']:
                 if j['stage'] == 'sim':
@@ -1119,6 +1198,7 @@ class Manager:
             sc = run.ms['scheduled']
             D = derived[run.conf]
             wait = None
+            qn, qi = run_queue(run), self.qinfo(run)
             if D['sim_done']:          # finished meanwhile (e.g. submitted by hand): nothing to submit
                 run.ms['scheduled'] = None
                 run.note('removed from the simulation queue: the simulation has finished')
@@ -1130,6 +1210,14 @@ class Manager:
                 self.recheck_at = min(self.recheck_at or 1e30, sc['not_before'] + 1)
             elif blocked:
                 wait = blocked
+            elif qi['state'] == 'closed':
+                wait = 'queue %s is closed (queues file)' % qn
+            elif qi['state'] == 'drain' and not sc.get('restart'):
+                wait = 'queue %s is draining: only restarts of started runs (queues file)' % qn
+            elif qi['max_running'] is not None and sum(self.sim_counts(derived, site, qn)) >= qi['max_running']:
+                wait = 'queue %s: %d of its max_running %d' % (qn, sum(self.sim_counts(derived, site, qn)), qi['max_running'])
+            elif qi['max_waiting'] is not None and self.sim_counts(derived, site, qn)[1] >= qi['max_waiting']:
+                wait = 'queue %s: %d waiting in PBS (max_waiting %d)' % (qn, self.sim_counts(derived, site, qn)[1], qi['max_waiting'])
             elif not self.pbs_room(site):
                 blocked = wait = 'site PBS queue limit: %d of our jobs waiting (max_pbs_queued %s)' % (
                     self.waiting.get(site, 0), site_cfg(self.cfg, site).get('max_pbs_queued'))
@@ -1157,7 +1245,7 @@ class Manager:
                     wait = 'submission failed: %s' % e
                     run.ms['failed'] = dict(stage='sim', msg=str(e), t=now())
                     run.note('scheduled submission failed: %s' % e)
-            self.queue_view.append(dict(run=run.name, site=site, priority=sc.get('priority', 0), t=sc.get('t'), restart=sc.get('restart'),
+            self.queue_view.append(dict(run=run.name, site=site, queue=qn, priority=sc.get('priority', 0), t=sc.get('t'), restart=sc.get('restart'),
                                         not_before=sc.get('not_before'), wait=wait))
 
     def acked(self, run, j):
@@ -1171,6 +1259,11 @@ class Manager:
         if act == 'refresh':
             self.next_hb = 0
             return 'refreshing'
+        if act == 'set_queue':
+            set_queue_state(self.cfg['queues_file'], a['site'], a['queue'], a['state'])
+            self.load_queues()
+            self.next_hb = 0
+            return '%s:%s %s' % (a['site'], a['queue'], a['state'])
         if act == 'set_limits':
             changed = []
             for site, S in self.cfg['sites'].items():
@@ -1524,10 +1617,24 @@ class Manager:
             self.snapshot = dict(t=now(), runs=runs, disk=self.disk, reserve_gb=self.cfg.get('scratch_reserve_gb'),
                                  limits={k: self.cfg.get(k) for k in LIMIT_KEYS}, sims_running=sr, sims_queued=sq,
                                  sites=site_info, local_site=LOCAL, budgets=BUDGETS.view(), plan=self.plan_view,
-                                 plan_file=self.cfg.get('plan_file'),
+                                 plan_file=self.cfg.get('plan_file'), queues_file=self.cfg.get('queues_file'),
+                                 queue_errors=self.queue_errors, queues=self.queues_view(derived),
                                  queue=getattr(self, 'queue_view', []), qtime=self.qtime, qok=self.qok,
                                  next_heartbeat=self.next_hb, heartbeat_s=self.cfg['heartbeat_s'],
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
+
+    def queues_view(self, derived):
+        keys = set(self.queues) | {(r.site, run_queue(r)) for r in self.runs.values()}
+        out = []
+        for site, qn in sorted(keys):
+            qi = self.queues.get((site, qn)) or dict(state='open', max_running=None, max_waiting=None, note='not listed')
+            r_, w_ = self.sim_counts(derived, site, qn) if derived else (0, 0)
+            nrun = sum(1 for r in self.runs.values() if r.site == site and run_queue(r) == qn)
+            out.append(dict(site=site, queue=qn, state=qi['state'], max_running=qi['max_running'],
+                            max_waiting=qi['max_waiting'], note=qi.get('note', ''), sims_running=r_, sims_waiting=w_,
+                            runs=nrun, scheduled=sum(1 for x in getattr(self, 'queue_view', [])
+                                                     if x['site'] == site and x.get('queue') == qn)))
+        return out
 
     def verify_summary(self, run, D):
         f = os.path.join(run.P['state'], 'verify.json')
@@ -1795,6 +1902,10 @@ def main():
         if '--at' in sys.argv:
             a['not_before'] = sys.argv[sys.argv.index('--at') + 1]
         sys.exit(call(a))
+    elif cmd == 'queue':
+        if len(sys.argv) != 5:
+            sys.exit('usage: manager.py queue <site> <queue> open|drain|closed')
+        sys.exit(call(dict(action='set_queue', site=sys.argv[2], queue=sys.argv[3], state=sys.argv[4])))
     elif cmd == 'limits':
         a = dict(action='set_limits')
         a.update(kv.split('=', 1) for kv in sys.argv[2:])

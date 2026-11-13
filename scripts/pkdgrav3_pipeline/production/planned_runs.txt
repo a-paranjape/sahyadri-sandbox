@@ -1,4 +1,6 @@
-# Planned Sahyadri runs, read by the run manager (tools/sahyadri_manager, cfg plan_file) every few minutes.
+# Planned Sahyadri runs, read by the run manager (tools/sahyadri_manager) every few minutes. Template: the manager's
+# copy is ~/.sahyadri_mgr/planned_runs.txt (made from this file on first start); edit that one. Which queues take jobs,
+# and their own limits: ~/.sahyadri_mgr/queues.txt (template queues.txt here).
 # For each line not yet set up, the manager runs setup_production.py on the site (pawna locally, pegasus over ssh),
 # registers the run and puts its simulation in the queue with this priority (lower first). Runs then start as the
 # limits, scratch space and (pegasus) core-hour budget allow. Editing a line's priority re-prioritises a run that is
