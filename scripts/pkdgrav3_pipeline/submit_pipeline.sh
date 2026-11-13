@@ -65,7 +65,8 @@ for st in sim rockstar ctrees vahc vpot fits xcorr verify archive; do
   if [ "$st" = rockstar ] && [ -n "$RSSNAPS" ]; then V="$V,RS_SNAP_FIRST=${RSSNAPS%-*},RS_SNAP_LAST=${RSSNAPS#*-}"; N="rs${RSSNAPS%-*}_$REAL"; fi
   # shellcheck disable=SC2206
   RL=(-l ${R// -l / -l })      # "select=... -l place=..." -> two -l options
-  cmd=("$QSUB" -N "$N" -q "${PBS_QUEUE:-workq}" "${RL[@]}" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
+  PROJ=(); [ -n "${PBS_PROJECT:-}" ] && PROJ=(-P "$PBS_PROJECT")   # pegasus project queue: the project's budget
+  cmd=("$QSUB" -N "$N" -q "${PBS_QUEUE:-workq}" "${PROJ[@]}" "${RL[@]}" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
        -v "$V" "$HERE/job_$st.pbs")
   if [ -n "$DRY" ]; then echo "${cmd[*]}"; prev="<$st>"; continue; fi
   id=$("${cmd[@]}")

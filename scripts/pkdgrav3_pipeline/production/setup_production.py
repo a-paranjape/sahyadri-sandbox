@@ -175,6 +175,10 @@ SITES = dict(
     pegasus=dict(root='/data/project/hpc2502016/shadab/sahyadri_scratch', archive='/storage/shadab/sahyadri_sims',
                  codes=PEG_HOME + '/codes', pkd=PEG_HOME + '/pkdgrav3_io', queue='project'),
 )
+# pegasus queues (qstat -Qf, 13 Nov 2026): project (-P PEGASUS_PROJECT, the project's budget; 96 h used here),
+# regular (user budget, 48 h at most), debug (4 h, tests); budgets in core-hours (amgr checkbalance)
+PEGASUS_PROJECT = 'hpc2502016'
+PEGASUS_WALL = dict(project='96:00:00', regular='48:00:00', debug='04:00:00')
 
 
 def resources_pegasus(N, queue):
@@ -194,9 +198,9 @@ def resources_pegasus(N, queue):
         if int(rsm[:-2]) > 480:
             print('NOTE: Rockstar needs ~%s at %d^3, more than one pegasus node (480 GB usable): multi-node Rockstar is '
                   'not set up' % (rsm, N))
-    if queue == 'debug':
-        for k in ('SIM', 'RS', 'CT', 'PP', 'FITS'):
-            r[k] = (r[k][0], r[k][1], min(r[k][2], '04:00:00')) + tuple(r[k][3:])
+    cap = PEGASUS_WALL.get(queue, '96:00:00')
+    for k in ('SIM', 'RS', 'CT', 'PP', 'FITS'):
+        r[k] = (r[k][0], r[k][1], min(r[k][2], cap)) + tuple(r[k][3:])
     return r
 
 
@@ -222,6 +226,8 @@ def site_block(a, R):
         'SITE=%s                 # computed on %s; archived on pawna (the manager pulls the kept files)' % (a.site, a.site),
         'REMOTE_ARCHIVE=1        # verify also writes KEPT_FILES.json (checksums for the pull)',
         'PBS_QUEUE=%s' % a.queue,
+        'PBS_PROJECT=%s           # qsub -P: charged to this project\'s budget (empty: the user\'s budget)' % (
+            PEGASUS_PROJECT if a.queue == 'project' else ''),
         'SIM_NODES=%d; SIM_MPIPROCS=2; SIM_PLACE=%s   # SIM_NCPU cores per node; 2 MPI ranks per node' % (
             R['SIM'][3], 'scatter:excl' if R['SIM'][3] > 1 else 'free'),
         'SIM_ENV=%s/pkdgrav3/tools/pegasus/env_pegasus.sh   # pkdgrav3 run-time environment (conda MPI)' % a.pkd_io_root,
