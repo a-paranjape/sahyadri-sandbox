@@ -4,6 +4,9 @@ Runs the pkdgrav3 → Rockstar → consistent-trees → vahc → FITS pipeline f
 archives the kept data to `/storage` and deletes the working copy only after you approve it. A web page shows
 the progress and has the controls.
 
+All files that control what the manager does (settings, plan file, queues file, per-run files): see
+[CONTROL_FILES.md](CONTROL_FILES.md).
+
 Compute nodes on pawna cannot submit, release or alter PBS jobs (`qsub: Bad UID for job execution`,
 `qrls: Unauthorized Request`, tested 12 Nov 2026). The manager therefore runs on the head node, where it submits
 every job.
