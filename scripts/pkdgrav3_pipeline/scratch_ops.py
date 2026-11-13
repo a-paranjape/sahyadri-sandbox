@@ -42,7 +42,11 @@ def du(top):
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
-    cmd, E = sys.argv[1], retention.load_conf(sys.argv[2])
+    cmd, conf = sys.argv[1], sys.argv[2]
+    if cmd in ('undo', 'purge') and not os.path.isfile(conf):
+        # the run's directory (with its run.conf) is in the trash: the copy there, <trash dir>/sim/run.conf
+        conf = os.path.join(sys.argv[3], 'sim', os.path.basename(conf))
+    E = retention.load_conf(conf)
     P = retention.paths(E)
     out = dict(ok=True)
     if cmd == 'stat':
