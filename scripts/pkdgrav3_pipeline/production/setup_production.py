@@ -271,6 +271,11 @@ def main():
     ap.add_argument('--pot-zmax', type=float, default=0.5, help='store the potential at z <= this')
     ap.add_argument('--pot-step', type=float, default=100.0, help='potential step [(km/s)^2]')
     ap.add_argument('--check-interval', type=int, default=250, help='steps between checkpoints')
+    ap.add_argument('--sim-nodes', type=int, default=None,
+                    help='pegasus: nodes of the simulation (default: 1 up to 512^3, 3 above); memory per node then '
+                         '1.5 x the expected peak (747 GiB at 2048^3, scaled as N^3) / nodes, at most 480 GB')
+    ap.add_argument('--rs-batch', type=int, choices=(0, 1), default=1,
+                    help='1: Rockstar in batches while the simulation runs; 0: one Rockstar job after it')
     ap.add_argument('--force', action='store_true', help='overwrite existing configuration files')
     ap.add_argument('--schedule', nargs='?', const=0, type=int, default=None, metavar='PRIORITY',
                     help='register with the run manager and queue the simulations (priority, default 0)')
@@ -332,10 +337,18 @@ def setup_cosmo(a, cosmo):
     force_res = L * soft_box
     k, T, s8_start, s8 = ic_spectrum(c)
     res = resources(N) if a.site == 'pawna' else resources_pegasus(N, a.queue)
+    if a.sim_nodes:
+        if a.site == 'pawna':
+            sys.exit('--sim-nodes: pawna simulations run on one node')
+        peak_gb = 747 * 1.0737 * (N / 2048.) ** 3          # measured 747 GiB at 2048^3 (one node)
+        mem = int(min(480, max(100, 1.5 * peak_gb / a.sim_nodes)))
+        res['SIM'] = (res['SIM'][0], '%dgb' % mem, res['SIM'][2], a.sim_nodes)
     wall_h = int(res['SIM'][2].split(':')[0])
     # pkdgrav3 stops this long before the PBS wall time: the staging drain must still copy the last checkpoint
     # (48 B/particle; ~52 GB at 1024^3, ~35 min at the ~25 MB/s of /storage) and snapshot to NFS
     margin = 60 if N <= 512 else (120 if N <= 1024 else 240)
+    if a.site != 'pawna':   # no staging: checkpoints go straight to Lustre (~412 GB at 2048^3, minutes)
+        margin = min(margin, 90)
     now = datetime.datetime.now().isoformat(timespec='seconds')
 
     cdir = os.path.join(a.root, 'sims', sim, cname)
@@ -489,7 +502,7 @@ KEEP_CHECKPOINT=0                 # 1: also the newest checkpoint
 ARCHIVE_FILE_MODE=0444; ARCHIVE_DIR_MODE=0555   # read-only for everyone once checked (0440/0550: group only)
 
 # manager (tools/sahyadri_manager): Rockstar in batches while the simulation runs
-RS_BATCH=1              # 0: one Rockstar job after the simulation
+RS_BATCH=%(rs_batch)d              # 0: one Rockstar job after the simulation
 RS_BATCH_MIN=10         # snapshots per batch while the simulation runs (the last batch takes what is left)
 
 STEM=%(stem)s
@@ -543,7 +556,7 @@ FITS_DELETE_ASCII=0     # keep 0 with the manager: verify reads the ASCII catalo
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
            sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2],
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
-           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
+           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
            rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'])
         write(os.path.join(sdir, 'run.conf'), conf, a.force)
         sub = '''#!/bin/bash

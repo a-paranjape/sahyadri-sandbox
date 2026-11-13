@@ -949,7 +949,8 @@ class Manager:
         conf = os.path.join(root, 'sims', P['stem'], 'r%d' % P['real'], 'run.conf')
         args = ['--site', P['site'], '--queue', P['queue'], '--cosmo', P['cosmo'], '--N', str(P['N']), '--L', '%g' % P['L'],
                 '--real', str(P['real']), '--root', root]
-        for k, flag in (('archive', '--archive'), ('keep_full_z', '--keep-full-z'), ('keep_pct', '--keep-pct')):
+        for k, flag in (('archive', '--archive'), ('keep_full_z', '--keep-full-z'), ('keep_pct', '--keep-pct'),
+                        ('nodes', '--sim-nodes'), ('rs_batch', '--rs-batch')):
             if k in o:
                 args += [flag, str(o[k])]
         if remote:
