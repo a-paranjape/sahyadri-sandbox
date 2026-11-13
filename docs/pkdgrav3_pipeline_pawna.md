@@ -702,12 +702,21 @@ Two lessons from the tests are built into these checks:
 The plot `<halo dir>/pk/pk_summary.png` has three panels: the matter P(k) at a few redshifts with CLASS linear
 and halofit and the 1/n̄ level; the ratio to the reference against k; and the halo bias b_hm(k) at the last output. It is shown on the manager page and kept in the archive.
 
-Tested on two 64^3 runs, `Sahyadri_L100N64/default64` r1 and r2, 12 Nov 2026:
+### 13.3 Tests (12–13 Nov 2026)
 
-- Full chain on both, through verify and archive.
-- r2: Rockstar batches 0–9, 10–30 and 31–100 submitted while the simulation was running.
-- Archive read-back: 0 mismatches.
-- Deletion: refused when a kept file changed after the archive. Move to trash, undo, move again and purge all
-  worked on r1.
-- Clocks: the compute nodes run about 3 min and `/storage` about 15 min behind the head node. All ordering uses PBS
+The full write-up, with stage times, the 14 problems found and fixed, and the open items, is in
+`docs/reports/sim_manager.pdf`. Stage times below come from the `start`/`end` event lines each job writes on its
+own node.
+
+- **64³, L100, r1–r9:** the full chain on every run, through verify and archive (read-back: 0 mismatches). Also
+  tested: Rockstar batches during the simulation, three simulations with `max_rockstar=1`, the space-check refusal,
+  the queue limits, restarts at the wall time (r9: five jobs), and deletion (refusal after a changed file, trash,
+  undo, purge).
+- **128³, L200, r1–r2, `PP_GRID=512`:** all stages passed. vahc took 73–89 min (the 512³ grid sets the cost,
+  about 200 s per output, so `PP_GRID=256` would do for small runs). The archives are 0.37 GB, 668–674 files.
+- **512³, L200, r1, 96 cores:** simulation 4.4 h (2126 steps). Rockstar ran in 11 batches of up to 10 snapshots,
+  3.4–6.3 min each, and kept pace with the simulation. ctrees 53 min, vahc 52 min, fits 29 min, verify 6 min. The
+  archive is 23.3 GB, 778 files, written in 18 min (21 MB/s including read-back). Scratch use was 178.2 GB against
+  an estimate of ≤ 180.9 GB. Start to archived took 7.2 h. P(k): G = 0.987–0.999. The IC table agrees with CLASS to 0.11 %.
+- Clocks: the compute nodes run 1.5–3 min and `/storage` about 15 min behind the head node. All ordering uses PBS
   job IDs or file times from the same server.
