@@ -1,0 +1,17 @@
+# Planned Sahyadri runs, read by the run manager (tools/sahyadri_manager, cfg plan_file) every few minutes.
+# For each line not yet set up, the manager runs setup_production.py on the site (pawna locally, pegasus over ssh),
+# registers the run and puts its simulation in the queue with this priority (lower first). Runs then start as the
+# limits, scratch space and (pegasus) core-hour budget allow. Editing a line's priority re-prioritises a run that is
+# still waiting; removing a line does not touch a run that was set up (unschedule or remove it in the page).
+#
+# columns:  site     queue    cosmology  N     L      realisations  priority  [options]
+#   site      pawna | pegasus
+#   queue     pawna: workq;  pegasus: project (project budget hpc2502016, 96 h jobs) | regular (user budget, 48 h)
+#             | debug (tests, 4 h)
+#   cosmology a name in cosmologies/ (default, var_As_m, var_Om_p, ...)
+#   realisations  1 | 1,3 | 1-5
+#   options   hold                 set up and register, paused (start from the page)
+#             not_before=YYYY-MM-DDTHH:MM   keep_full_z="0 0.5 1"   keep_pct=1   root=DIR   archive=DIR
+# Runs above 512^3 need approval: add them here only once approved.
+#
+# site     queue    cosmology  N     L    reals  priority  options

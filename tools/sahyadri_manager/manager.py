@@ -71,11 +71,22 @@ PBS = '/opt/pbs/bin'
 # (checkpoint, not all outputs) is scheduled again to restart, at most max_sim_restarts times
 DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000,
                    max_sim_running=3, max_sim_queued=1, max_sim_restarts=5, max_pulls=1,
-                   local_codes='/storage/shadab/pipeline_test/codes',
+                   local_codes='/user/shadab/sahyadri_prod/codes',
+                   # planned runs (production/planned_runs.txt): set up, registered and scheduled by the manager
+                   plan_file=os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'production', 'planned_runs.txt'),
+                   plan_s=300, local_python='/user/shadab/sahyadri_prod/codes/venv/bin/python',
+                   scratch_root='/user/shadab/sahyadri_scratch',
                    sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
+                                           scratch_root='/data/project/hpc2502016/shadab/sahyadri_scratch',
+                                           python='/mnt/home/project/calam.shadab/sahyadri_pipeline/codes/venv/bin/python',
+                                           sandbox='/mnt/home/project/calam.shadab/sahyadri_pipeline/sahyadri-sandbox',
                                            mirror='/user/shadab/sahyadri_mirror/pegasus', sync_s=120,
                                            max_sim_running=2, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
-                                           scratch_reserve_gb=2000, max_pbs_queued=6)))
+                                           scratch_reserve_gb=2000, max_pbs_queued=6,
+                                           # core-hour budgets (amgr): queue PBS_PROJECT set -> the project's, else
+                                           # the user's; a job is submitted only if cores x requested wall time fits
+                                           # in the balance minus budget_reserve_coreh
+                                           budget=dict(user='calam.shadab', reserve_coreh=2000))))
 LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s')
 # max_pbs_queued: our jobs waiting in the site's PBS at most (pegasus queued_jobs_threshold: project 6, debug 2 per
 # user); with it, the post-processing stages are submitted one at a time, each after the previous one finished
@@ -141,6 +152,124 @@ def ssh(host, cmd, timeout=300, check=False):
     if check and r.returncode != 0:
         raise RuntimeError('ssh %s %r: rc %d: %s' % (host, cmd[:200], r.returncode, (r.stderr or r.stdout)[-500:]))
     return r
+
+
+class BudgetWait(Exception):
+    """Not enough core hours left on the site's budget for this submission (wait, not a failure)."""
+
+
+def hours(wall):
+    h, m, sec = (list(map(int, str(wall).split(':'))) + [0, 0])[:3]
+    return h + m / 60.0 + sec / 3600.0
+
+
+def job_coreh(E, stage):
+    """Core hours PBS reserves for one job of `stage` (cores x requested wall time), from the run config."""
+    n = lambda k, d: int(float(E.get(k) or d))     # noqa: E731
+    if stage == 'sim':
+        return n('SIM_NODES', 1) * n('SIM_NCPU', 1) * hours(E.get('SIM_WALL', '0'))
+    pre = dict(rockstar='RS', ctrees='CT', vahc='PP', vpot='PP', fits='FITS', verify='VF', xcorr='XC', archive='AR')[stage]
+    dflt = dict(VF=(8, '12:00:00'), XC=(16, '02:00:00'), AR=(2, '72:00:00')).get(pre, (1, '0'))
+    return n(pre + '_NCPU', dflt[0]) * hours(E.get(pre + '_WALL') or dflt[1])
+
+
+class Budgets:
+    """amgr balances of the sites' budgets (core hours), cached; debited locally by what was just submitted."""
+    TTL = 300
+
+    def __init__(self):
+        self.cache = {}           # (site, kind, name, period) -> [t, balance]
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def which(cfg, run):
+        B = cfg['sites'][run.site].get('budget')
+        if not B:
+            return None
+        proj = run.E.get('PBS_PROJECT') or ''
+        t = time.localtime()
+        period = '%d.h%d' % (t.tm_year, 1 if t.tm_mon <= 6 else 2)
+        return (run.site, 'project', proj, period) if proj else (run.site, 'user', B['user'], '')
+
+    def balance(self, cfg, key, fresh=False):
+        with self.lock:
+            c = self.cache.get(key)
+            if c and not fresh and now() - c[0] < self.TTL:
+                return c[1]
+        site, kind, name, period = key
+        cmd = 'amgr login >/dev/null 2>&1; amgr checkbalance %s -n %s%s' % (kind, shlex.quote(name),
+                                                                           ' -p %s' % period if period else '')
+        r = ssh(cfg['sites'][site]['login'], cmd, timeout=120)
+        m = re.search(r"'cost':\s*([-0-9.eE+]+)", r.stdout)
+        if not m:
+            raise RuntimeError('amgr balance %s: %s %s' % (key, r.stdout.strip()[-200:], r.stderr.strip()[-200:]))
+        with self.lock:
+            self.cache[key] = [now(), float(m.group(1))]
+        return float(m.group(1))
+
+    def check(self, cfg, run, stages):
+        key = self.which(cfg, run)
+        if key is None:
+            return
+        need = sum(job_coreh(run.E, st) for st in stages.split(','))
+        reserve = float(cfg['sites'][run.site]['budget'].get('reserve_coreh', 0))
+        left = self.balance(cfg, key)
+        if left - reserve < need:
+            left = self.balance(cfg, key, fresh=True)
+        if left - reserve < need:
+            raise BudgetWait('%s budget %s%s: %.0f core-h left, reserve %.0f, this submission (%s) reserves %.0f'
+                             % (run.site, key[2], ' ' + key[3] if key[3] else '', left, reserve, stages, need))
+        with self.lock:
+            self.cache[key][1] -= need
+
+    def view(self):
+        with self.lock:
+            return [dict(site=k[0], kind=k[1], name=k[2], period=k[3], coreh=v[1], t=v[0]) for k, v in self.cache.items()]
+
+
+BUDGETS = Budgets()
+
+
+def fmt_l(L):
+    L = float(L)
+    return ('%d' % L) if L.is_integer() else ('%g' % L).replace('.', 'p')
+
+
+def reals_of(spec):
+    out = []
+    for part in str(spec).split(','):
+        a, _, b = part.partition('-')
+        out += list(range(int(a), int(b or a) + 1))
+    return out
+
+
+def read_plan(path):
+    """planned_runs.txt -> [dict(site, queue, cosmo, N, L, real, priority, opts, line, lineno, name)]; malformed lines
+    come back with 'error'."""
+    out = []
+    if not os.path.isfile(path):
+        return out
+    for i, raw in enumerate(open(path), 1):
+        line = raw.split('#', 1)[0].strip()
+        if not line:
+            continue
+        try:
+            f = shlex.split(line)
+            if len(f) < 7:
+                raise ValueError('needs 7 columns: site queue cosmology N L realisations priority [options]')
+            site, queue, cosmo, N, L, reals, prio = f[:7]
+            opts = {}
+            for o in f[7:]:
+                k, _, v = o.partition('=')
+                opts[k] = v if _ else True
+            for r in reals_of(reals):
+                stem = 'Sahyadri_L%sN%d/%s%d' % (fmt_l(L), int(N), cosmo, int(N))
+                out.append(dict(site=site, queue=queue, cosmo=cosmo, N=int(N), L=float(L), real=r, priority=int(prio),
+                                opts=opts, line=line, lineno=i, stem=stem,
+                                name=('' if site == LOCAL else site + ':') + '%s/r%d' % (stem, r)))
+        except ValueError as e:
+            out.append(dict(line=line, lineno=i, error=str(e)))
+    return out
 
 
 def site_cfg(cfg, site):
@@ -455,6 +584,7 @@ class Run:
         if self.remote and stages == 'archive':
             return self.start_pull(what)
         if self.remote:     # qsub on the site's login node, with the run's own run.conf there
+            BUDGETS.check(cfg or Run.CFG, self, stages)
             sub = os.path.join(self.E['REMOTE_SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'submit_pipeline.sh')
             line = ' '.join(shlex.quote(x) for x in ['bash', sub, self.E['REMOTE_CONF'], '--stages', stages] + list(extra))
             r = ssh((cfg or Run.CFG)['sites'][self.site]['login'], 'PATH=/opt/pbs/bin:$PATH ' + line)
@@ -513,6 +643,8 @@ class Manager:
         self.qsite = {}            # other sites: name -> (jobs, qtime, ok)
         self.site_disk = {}        # other sites: SCRATCH -> dict(total, used, free, ...)
         self.waiting = {}
+        self.plan_view = []        # planned runs and their state (page)
+        self.plan_errors = {}      # (lineno, line, real) -> message of the last failed set-up (not retried until the line changes)
         self.next_hb = 0.0
         self.recheck_at = None
         self.watch_proc = None
@@ -622,6 +754,100 @@ class Manager:
             self.q.put(('wake',))
             time.sleep(min([int(self.cfg['sites'][x].get('sync_s', 120)) for x in self.sites()] or [120]))
 
+    def ask(self, action, timeout=900):
+        """Run an action in the main loop (from another thread) and wait for it."""
+        box = dict(ev=threading.Event())
+        self.q.put(('action', action, box))
+        if not box['ev'].wait(timeout):
+            raise RuntimeError('timeout: %s' % action)
+        if not box['ok']:
+            raise RuntimeError(box['result'])
+        return box['result']
+
+    def plan_loop(self):
+        while True:
+            try:
+                self.plan_sync()
+            except Exception as e:  # noqa: BLE001
+                log('plan: %s' % e)
+                log(traceback.format_exc())
+            time.sleep(int(self.cfg.get('plan_s', 300)))
+
+    def plan_setup(self, P):
+        """Set up the run of plan entry P on its site (setup_production.py), unless its run.conf exists; returns the conf
+        path (on that site)."""
+        o = P['opts']
+        remote = P['site'] != LOCAL
+        S = self.cfg['sites'][P['site']] if remote else self.cfg
+        root = o.get('root') or S['scratch_root']
+        conf = os.path.join(root, 'sims', P['stem'], 'r%d' % P['real'], 'run.conf')
+        args = ['--site', P['site'], '--queue', P['queue'], '--cosmo', P['cosmo'], '--N', str(P['N']), '--L', '%g' % P['L'],
+                '--real', str(P['real']), '--root', root]
+        for k, flag in (('archive', '--archive'), ('keep_full_z', '--keep-full-z'), ('keep_pct', '--keep-pct')):
+            if k in o:
+                args += [flag, str(o[k])]
+        if remote:
+            py, sb = S['python'], S['sandbox']
+            setup = os.path.join(sb, 'scripts', 'pkdgrav3_pipeline', 'production', 'setup_production.py')
+            cmd = '[ -f %s ] && echo EXISTS || %s' % (shlex.quote(conf), ' '.join(shlex.quote(x) for x in [py, setup] + args))
+            r = ssh(S['login'], cmd, timeout=1800)
+            out, rc = r.stdout + r.stderr, r.returncode
+        else:
+            if os.path.isfile(conf):
+                return conf, 'exists'
+            setup = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'production', 'setup_production.py')
+            r = subprocess.run([self.cfg['local_python'], setup] + args, capture_output=True, text=True, timeout=1800)
+            out, rc = r.stdout + r.stderr, r.returncode
+        if 'EXISTS' in out.split():
+            return conf, 'exists'
+        if rc != 0:
+            raise RuntimeError('setup_production.py on %s failed (rc %d): %s' % (P['site'], rc, out.strip()[-400:]))
+        return conf, 'set up'
+
+    def plan_sync(self):
+        """Set up, register and schedule what the plan file lists and the manager does not know yet."""
+        path = self.cfg.get('plan_file')
+        entries = read_plan(path) if path else []
+        view = []
+        for P in entries:
+            if 'error' in P:
+                view.append(dict(line=P['line'], lineno=P['lineno'], state='error', msg=P['error']))
+                continue
+            key = (P['lineno'], P['line'], P['real'])
+            run = next((r for r in self.runs.values() if r.name == P['name']), None)
+            v = dict(line=P['line'], lineno=P['lineno'], name=P['name'], site=P['site'], queue=P['queue'], priority=P['priority'],
+                     hold=bool(P['opts'].get('hold')))
+            if run is None and key in self.plan_errors:
+                v.update(state='error', msg=self.plan_errors[key])
+            elif run is None:
+                if P['site'] != LOCAL and P['site'] not in self.cfg['sites']:
+                    v.update(state='error', msg='unknown site %s' % P['site'])
+                    view.append(v)
+                    continue
+                try:
+                    conf, how = self.plan_setup(P)
+                    log('plan line %d: %s %s (%s)' % (P['lineno'], P['name'], how, conf))
+                    self.ask(dict(action='add_run', conf=('%s:%s' % (P['site'], conf)) if P['site'] != LOCAL else conf,
+                                  paused=bool(P['opts'].get('hold'))))
+                    if not P['opts'].get('hold'):
+                        self.ask(dict(action='schedule', run=P['name'], priority=P['priority'],
+                                      not_before=P['opts'].get('not_before') or ''))
+                    v.update(state='registered', msg=how)
+                except Exception as e:  # noqa: BLE001
+                    self.plan_errors[key] = str(e)
+                    log('plan line %d (%s): %s' % (P['lineno'], P['name'], e))
+                    v.update(state='error', msg=str(e))
+            else:
+                v.update(state='registered')
+                sc = run.ms.get('scheduled')
+                if sc and int(sc.get('priority', 0)) != P['priority']:
+                    try:
+                        self.ask(dict(action='set_priority', run=run.name, priority=P['priority']))
+                    except Exception as e:  # noqa: BLE001
+                        log('plan: priority of %s: %s' % (run.name, e))
+            view.append(v)
+        self.plan_view = view
+
     def remote_ops(self, run, *args, timeout=3600):
         """scratch_ops.py on the run's site -> its JSON answer."""
         S = self.cfg['sites'][run.site]
@@ -714,6 +940,12 @@ class Manager:
             D = derived[run.conf]
             try:
                 active_rs[run.site] = active_rs.get(run.site, 0) + self.policy(run, D, active_rs.get(run.site, 0))
+                run.budget_wait = None
+            except BudgetWait as e:
+                if getattr(run, 'budget_wait', None) != str(e).split(':')[0]:
+                    run.note('waiting for core hours: %s' % e)
+                run.budget_wait = str(e).split(':')[0]
+                run.budget_msg = str(e)
             except Exception as e:  # noqa: BLE001
                 run.ms['failed'] = dict(stage='manager', msg=str(e), t=now())
                 run.note('manager error, automation stopped: %s' % e)
@@ -897,6 +1129,8 @@ class Manager:
                     run.save()
                     queued += 1
                     continue
+                except BudgetWait as e:
+                    wait = 'core hours: %s' % e
                 except Exception as e:  # noqa: BLE001
                     wait = 'submission failed: %s' % e
                     run.ms['failed'] = dict(stage='sim', msg=str(e), t=now())
@@ -979,6 +1213,12 @@ class Manager:
             run.note('scheduled (priority %s%s%s)' % (run.ms['scheduled']['priority'], ', not before %s' % iso(nb) if nb else '',
                                                      ', restart from checkpoint' if run.ms['scheduled']['restart'] else ''))
             return 'scheduled %s' % run.name
+        if act == 'set_priority':
+            if not run.ms.get('scheduled'):
+                raise ValueError('%s is not in the simulation queue' % run.name)
+            run.ms['scheduled']['priority'] = int(a['priority'])
+            run.note('priority set to %s (plan file)' % a['priority'])
+            return 'priority %s' % a['priority']
         if act == 'unschedule':
             run.ms['scheduled'] = None
             run.note('removed from the simulation queue')
@@ -1237,6 +1477,7 @@ class Manager:
                 verify=self.verify_summary(run, D), archive=D['archive'], fits=D['fits'],
                 trash=run.ms.get('trash'), purged=run.ms.get('purged'), scheduled=run.ms.get('scheduled'),
                 restarts=run.ms.get('restarts', 0), actions=run.ms.get('actions', [])[-30:],
+                budget_msg=getattr(run, 'budget_msg', None) if getattr(run, 'budget_wait', None) else None,
                 keep=dict(full=pl['full_z'] if pl else [], pct=pl['subsample_pct'] if pl else None,
                           tables=pl['tables'] if pl else []),
                 outputs=[[o[0], o[1], o[3]] for o in run.outs], scratch_bytes=run.scratch_bytes,
@@ -1257,7 +1498,8 @@ class Manager:
                                        login=self.cfg['sites'][site].get('login'), data=self.cfg['sites'][site].get('data'))
             self.snapshot = dict(t=now(), runs=runs, disk=self.disk, reserve_gb=self.cfg.get('scratch_reserve_gb'),
                                  limits={k: self.cfg.get(k) for k in LIMIT_KEYS}, sims_running=sr, sims_queued=sq,
-                                 sites=site_info, local_site=LOCAL,
+                                 sites=site_info, local_site=LOCAL, budgets=BUDGETS.view(), plan=self.plan_view,
+                                 plan_file=self.cfg.get('plan_file'),
                                  queue=getattr(self, 'queue_view', []), qtime=self.qtime, qok=self.qok,
                                  next_heartbeat=self.next_hb, heartbeat_s=self.cfg['heartbeat_s'],
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
@@ -1323,6 +1565,7 @@ class Manager:
         os.chmod(SOCK, 0o600)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         threading.Thread(target=self.sync_loop, daemon=True).start()
+        threading.Thread(target=self.plan_loop, daemon=True).start()
         log('manager on %s, page on %s, %d runs' % (socket.gethostname(), SOCK, len(self.runs)))
         signal.signal(signal.SIGTERM, _sigterm)
         derived = {}

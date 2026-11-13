@@ -52,6 +52,12 @@ pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; 
 input[type=text] { font: inherit; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--ink); width: min(620px, 100%); }
 #toast { position: fixed; bottom: 16px; right: 16px; max-width: 520px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; display: none; box-shadow: 0 4px 18px rgba(0,0,0,.15); }
 @media (max-width: 720px) { .stages { grid-template-columns: repeat(4, 1fr); } }
+.tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 14px; font-weight: 600; color: var(--muted); }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--run); }
+.tabs .n { font-weight: 400; color: var(--muted); margin-left: 4px; }
+section[data-tab] { display: none; } section[data-tab].on { display: block; }
+.num { font-variant-numeric: tabular-nums; text-align: right; }
 </style>
 </head>
 <body>
@@ -63,13 +69,22 @@ input[type=text] { font: inherit; padding: 4px 8px; border: 1px solid var(--line
   <button onclick="act({action:'refresh'})" title="qstat and disk now">Check now</button>
 </header>
 <main>
-  <div class="card" id="queuecard"></div>
-  <div id="runs"></div>
+  <nav class="tabs" id="tabs"></nav>
+  <section data-tab="summary">
+    <div class="card" id="summarycard"></div>
+    <div class="card" id="queuecard"></div>
+    <details class="card" open><summary>Manager log</summary><pre id="mlog"></pre></details>
+  </section>
+  <section data-tab="active"><div id="runs-active"></div></section>
+  <section data-tab="finished"><div id="runs-finished"></div></section>
+  <section data-tab="upcoming">
+  <div class="card" id="plancard"></div>
+  <div id="runs-upcoming"></div>
   <div class="card">
     <div class="row"><b>Add a run</b><span class="muted small">path of its run.conf on pawna (added paused)</span></div>
     <div class="row" style="margin-top:6px"><input type="text" id="newconf" placeholder="/user/shadab/sahyadri_scratch/sims/.../r1/run.conf"><button onclick="addRun()">Add</button></div>
   </div>
-  <details class="card"><summary>Manager log</summary><pre id="mlog"></pre></details>
+  </section>
 </main>
 <div id="toast"></div>
 <script>
@@ -160,6 +175,7 @@ function renderRun(r, idx){
     <div class="row"><b style="font-size:15px">${h(r.name)}</b>${r.site&&r.site!==S.local_site?`<span class="badge b-wait" title="${h(r.remote_conf||'')}">${h(r.site)}</span>`:''}${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)} of ≤${hum(r.scratch_estimate)}${r.outstanding?' (+'+hum(r.outstanding)+' to come)':''}</span><span class="sp"></span>${ctl}</div>
     ${r.err?`<div class="fail">config: ${h(r.err)}</div>`:''}
     ${fail}
+    ${r.budget_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">waiting for core hours: ${h(r.budget_msg)}</div>`:''}
     ${simline}
     <div class="snaps">${snaps}</div>
     <div class="legend small muted">snapshots:<span style="background:var(--off)"></span>planned<span style="background:var(--ready)"></span>written<span style="background:var(--done)"></span>halos found<span style="outline:2px solid var(--full)"></span>kept in full</div>
@@ -228,8 +244,47 @@ function render(){
      ${lim('max_sim_running','max running')}${lim('max_sim_queued','max waiting in PBS')}${lim('max_sim_restarts','restarts')}${lim('max_rockstar','Rockstar at once')}${lim('scratch_reserve_gb','reserve GB',70)}
      <button onclick="setLimits()">Save limits</button></div>${siteRows}</div>
      ${q?`<table style="margin-top:8px"><tr><th>#</th><th>site</th><th>run</th><th></th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${q}</table>`:'<div class="muted small" style="margin-top:6px">no simulations scheduled</div>'}`;
-  document.getElementById('runs').innerHTML = S.runs.length ? S.runs.map(renderRun).join('') : '<div class="card muted">No runs registered yet.</div>';
+  renderTabs();
   document.getElementById('mlog').textContent = (S.log||[]).join('');
+}
+const TABS=[['summary','Summary'],['active','Active'],['upcoming','Upcoming'],['finished','Finished']];
+let TAB = (location.hash||'').slice(1) || 'summary';
+function cat(r){
+  if(['archived','purged','in trash'].includes(r.phase)) return 'finished';
+  if(['not started','scheduled'].includes(r.phase) && !(r.jobs||[]).length) return 'upcoming';
+  return 'active';
+}
+function setTab(t){ TAB=t; history.replaceState(null,'','#'+t); render(); }
+function renderTabs(){
+  const groups={active:[],upcoming:[],finished:[]};
+  (S.runs||[]).forEach((r,i)=>groups[cat(r)].push([r,i]));
+  const planPending=(S.plan||[]).filter(p=>p.state!=='registered').length;
+  const n={summary:'', active:groups.active.length, upcoming:groups.upcoming.length+planPending, finished:groups.finished.length};
+  document.getElementById('tabs').innerHTML = TABS.map(([k,l])=>`<button class="${k===TAB?'on':''}" onclick="setTab('${k}')">${l}${n[k]!==''?`<span class="n">${n[k]}</span>`:''}</button>`).join('');
+  document.querySelectorAll('section[data-tab]').forEach(sct=>sct.classList.toggle('on', sct.dataset.tab===TAB));
+  const cards=(list,empty)=>list.length?list.map(([r,i])=>renderRun(r,i)).join(''):`<div class="card muted">${empty}</div>`;
+  document.getElementById('runs-active').innerHTML = cards(groups.active, 'No run is simulating or post-processing.');
+  document.getElementById('runs-upcoming').innerHTML = cards(groups.upcoming, 'No registered run is waiting to start.');
+  const fin=groups.finished.filter(([r])=>r.phase!=='purged'), purged=groups.finished.filter(([r])=>r.phase==='purged');
+  document.getElementById('runs-finished').innerHTML = cards(fin, 'No archived run with data in scratch.') +
+    (purged.length?`<div class="card"><b>Purged</b> <span class="muted small">archived; scratch data deleted</span><table style="margin-top:6px"><tr><th>run</th><th>site</th><th>archive</th><th>purged</th></tr>${
+      purged.map(([r])=>`<tr><td>${h(r.name)}</td><td>${h(r.site)}</td><td class="small">${h(r.archive_root||'')}</td><td>${r.purged?when(r.purged.t):''}</td></tr>`).join('')}</table></div>`:'');
+  // summary
+  const sites=[...new Set((S.runs||[]).map(r=>r.site))].sort();
+  const cnt=(site,f)=>(S.runs||[]).filter(r=>r.site===site&&f(r)).length;
+  const rows=sites.map(st=>`<tr><td><b>${h(st)}</b></td>${[
+      r=>cat(r)==='upcoming', r=>r.phase==='simulation'||r.phase==='waiting to restart', r=>['rockstar','post','ctrees','vahc','fits','verify','archive'].includes(r.phase),
+      r=>r.phase==='failed', r=>r.phase==='archived'||r.phase==='in trash', r=>r.phase==='purged'].map(f=>`<td class="num">${cnt(st,f)||''}</td>`).join('')}</tr>`).join('');
+  const bud=(S.budgets||[]).map(b=>`<tr><td>${h(b.site)}</td><td>${h(b.kind)} ${h(b.name)} ${h(b.period||'')}</td><td class="num"><b>${Math.round(b.coreh).toLocaleString()}</b></td><td class="small muted">${ago(b.t)}</td></tr>`).join('');
+  const pl=S.plan||[], plErr=pl.filter(p=>p.state==='error').length;
+  document.getElementById('summarycard').innerHTML = `<div class="row"><b>Overview</b><span class="muted small">${(S.runs||[]).length} runs registered</span></div>
+    <table style="margin-top:8px"><tr><th>site</th><th class="num">upcoming</th><th class="num">simulating</th><th class="num">post-processing</th><th class="num">failed</th><th class="num">archived</th><th class="num">purged</th></tr>${rows}</table>
+    ${bud?`<div style="margin-top:12px"><b>Core-hour budgets</b> <span class="muted small">(amgr; refreshed when a pegasus job is submitted)</span><table style="margin-top:4px"><tr><th>site</th><th>budget</th><th class="num">core-h left</th><th>checked</th></tr>${bud}</table></div>`:''}
+    <div style="margin-top:12px"><b>Plan file</b> <span class="muted small">${h(S.plan_file||'—')}</span>: ${pl.length} planned runs, ${pl.filter(p=>p.state==='registered').length} set up${plErr?`, <b style="color:var(--bad)">${plErr} with errors</b> (Upcoming)`:''}</div>`;
+  // plan card (upcoming)
+  const prow=pl.filter(p=>p.state!=='registered').map(p=>`<tr><td>${p.lineno}</td><td>${h(p.name||p.line)}</td><td>${h(p.queue||'')}</td><td>${h(p.priority??'')}</td><td>${p.state==='error'?'<b style="color:var(--bad)">error</b>':h(p.state)}${p.hold?' · hold':''}</td><td class="small">${h(p.msg||'')}</td></tr>`).join('');
+  document.getElementById('plancard').innerHTML = `<div class="row"><b>Planned runs not yet set up</b><span class="muted small">${h(S.plan_file||'')} (read every few minutes)</span></div>
+    ${prow?`<table style="margin-top:6px"><tr><th>line</th><th>run</th><th>queue</th><th>priority</th><th>state</th><th></th></tr>${prow}</table>`:'<div class="muted small" style="margin-top:6px">every planned run is set up</div>'}`;
 }
 async function load(){ try { const r=await fetch('/api/state'); S=await r.json(); render(); } catch(e){ document.getElementById('hdr').textContent='manager not reachable: '+e; } }
 load(); setInterval(load, 15000);
