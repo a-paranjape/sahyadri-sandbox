@@ -157,7 +157,7 @@ function renderRun(r, idx){
   const acts=(r.actions||[]).slice().reverse().map(a=>`<tr><td class="muted">${when(a[0])}</td><td>${h(a[1])}</td></tr>`).join('');
   const D=(k,title,body)=>`<details data-k="${id+k}" ${openDetails.has(id+k)?'open':''}><summary>${title}</summary>${body}</details>`;
   return `<div class="card">
-    <div class="row"><b style="font-size:15px">${h(r.name)}</b>${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)} of ≤${hum(r.scratch_estimate)}${r.outstanding?' (+'+hum(r.outstanding)+' to come)':''}</span><span class="sp"></span>${ctl}</div>
+    <div class="row"><b style="font-size:15px">${h(r.name)}</b>${r.site&&r.site!==S.local_site?`<span class="badge b-wait" title="${h(r.remote_conf||'')}">${h(r.site)}</span>`:''}${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)} of ≤${hum(r.scratch_estimate)}${r.outstanding?' (+'+hum(r.outstanding)+' to come)':''}</span><span class="sp"></span>${ctl}</div>
     ${r.err?`<div class="fail">config: ${h(r.err)}</div>`:''}
     ${fail}
     ${simline}
@@ -171,7 +171,7 @@ function renderRun(r, idx){
     ${D('c','Delete scratch data', cleanup)}
     ${D('e','Events', `<table>${evs}</table>`)}
     ${D('m','Manager actions', `<table>${acts}</table>`)}
-    <div class="small muted" style="margin-top:6px">${h(r.conf)}</div>
+    <div class="small muted" style="margin-top:6px">${h(r.remote_conf ? r.site+":"+r.remote_conf+"  (mirror here: "+r.conf+")" : r.conf)}</div>
   </div>`;
 }
 function schedule(name){
@@ -215,16 +215,19 @@ function render(){
   document.querySelectorAll('details[data-k]').forEach(d=>{ if(d.open) openDetails.add(d.dataset.k); else openDetails.delete(d.dataset.k); });
   document.getElementById('hdr').innerHTML = `${h(S.host)} · qstat ${S.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(S.qtime)} · next check ${ago(S.next_heartbeat)} · page ${new Date().toLocaleTimeString()}`;
   const toCome = (S.runs||[]).reduce((a,r)=>a+(r.outstanding||0),0);
-  document.getElementById('disk').innerHTML = (toCome?`<span class="muted">running simulations will add <b>${hum(toCome)}</b> · reserve ${S.reserve_gb} GB</span>`:'') + Object.entries(S.disk||{}).map(([p,d])=>`<span title="${h((d.paths||[p]).join('\n'))}">${h(d.kind==='SCRATCH'?'scratch':'archive')} <b>${hum(d.free)}</b> free of ${hum(d.total)}</span><div class="bar" style="width:90px;min-width:90px"><div style="width:${(100*d.used/d.total).toFixed(0)}%;background:${d.used/d.total>0.9?'var(--bad)':'var(--run)'}"></div></div>`).join('');
+  document.getElementById('disk').innerHTML = (toCome?`<span class="muted">running simulations will add <b>${hum(toCome)}</b> · reserve ${S.reserve_gb} GB</span>`:'') + Object.entries(S.disk||{}).map(([p,d])=>`<span title="${h((d.paths||[p]).join('\n'))}">${h(d.site?d.site+' scratch':(d.kind==='SCRATCH'?'scratch':'archive'))} <b>${hum(d.free)}</b> free of ${hum(d.total)}</span><div class="bar" style="width:90px;min-width:90px"><div style="width:${(100*d.used/d.total).toFixed(0)}%;background:${d.used/d.total>0.9?'var(--bad)':'var(--run)'}"></div></div>`).join('');
   const L=S.limits||{};
-  const q=(S.queue||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${h(x.run)}</td><td>${x.restart?'restart':'new'}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`).join('');
-  const lim=(k,label,w)=>`<label class="small">${label} <input name="${k}" value="${h(L[k])}" style="width:${w||60}px" type="text"></label>`;
+  const q=(S.queue||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${h(x.site||'')}</td><td>${h(x.run)}</td><td>${x.restart?'restart':'new'}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`).join('');
+  const lim=(k,label,w,src,pre)=>`<label class="small">${label} <input name="${(pre||'')+k}" value="${h((src||L)[k])}" style="width:${w||60}px" type="text"></label>`;
+  const siteRows=Object.entries(S.sites||{}).map(([n,x])=>`<div class="row" style="margin-top:6px"><b>${h(n)}</b>
+     <span class="muted small" title="${h('qsub/qstat on '+x.login+'; files from '+x.data)}">running ${x.sims_running} · waiting in PBS ${x.sims_queued} · qstat ${x.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(x.qtime)}</span><span class="sp"></span>
+     ${lim('max_sim_running','max running',50,x.limits,n+'.')}${lim('max_sim_queued','max waiting',50,x.limits,n+'.')}${lim('max_sim_restarts','restarts',50,x.limits,n+'.')}${lim('max_rockstar','Rockstar',50,x.limits,n+'.')}${lim('scratch_reserve_gb','reserve GB',60,x.limits,n+'.')}</div>`).join('');
   const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#limits');
-  if(!editing) document.getElementById('queuecard').innerHTML = `<div class="row"><b>Simulation queue</b>
+  if(!editing) document.getElementById('queuecard').innerHTML = `<div id="limits"><div class="row"><b>Simulation queue</b> <b>${h(S.local_site||'')}</b>
      <span class="muted small">running ${S.sims_running} · waiting in PBS ${S.sims_queued}</span><span class="sp"></span>
-     <span id="limits" class="row">${lim('max_sim_running','max running')}${lim('max_sim_queued','max waiting in PBS')}${lim('max_sim_restarts','restarts')}${lim('max_rockstar','Rockstar at once')}${lim('scratch_reserve_gb','reserve GB',70)}</span>
-     <button onclick="setLimits()">Save limits</button></div>
-     ${q?`<table style="margin-top:8px"><tr><th>#</th><th>run</th><th></th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${q}</table>`:'<div class="muted small" style="margin-top:6px">no simulations scheduled</div>'}`;
+     ${lim('max_sim_running','max running')}${lim('max_sim_queued','max waiting in PBS')}${lim('max_sim_restarts','restarts')}${lim('max_rockstar','Rockstar at once')}${lim('scratch_reserve_gb','reserve GB',70)}
+     <button onclick="setLimits()">Save limits</button></div>${siteRows}</div>
+     ${q?`<table style="margin-top:8px"><tr><th>#</th><th>site</th><th>run</th><th></th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${q}</table>`:'<div class="muted small" style="margin-top:6px">no simulations scheduled</div>'}`;
   document.getElementById('runs').innerHTML = S.runs.length ? S.runs.map(renderRun).join('') : '<div class="card muted">No runs registered yet.</div>';
   document.getElementById('mlog').textContent = (S.log||[]).join('');
 }

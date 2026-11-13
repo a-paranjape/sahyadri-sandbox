@@ -3,6 +3,7 @@
 
   manager.py serve                 the manager (in `screen`; start_manager.sh); page on ~/.sahyadri_mgr/gui.sock
   manager.py add <run.conf> [--paused]   register a run (the running manager picks it up at once)
+  manager.py add <site>:<run.conf>       register a run computed on another site (pegasus): conf path there
   manager.py remove <stem/rN>      forget a run (nothing is deleted)
   manager.py list                  registered runs
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
@@ -25,6 +26,17 @@ manager.json written here; nothing is lost when the manager stops, it catches up
   * a failed job stops the run's automation (shown in red; retry from the page)
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to
     <SCRATCH>/.trash/ (instant, can be undone), then purge; both re-check the archive manifest first
+
+Runs on another site (cfg sites.<name>, e.g. pegasus; run.conf written there by setup_production.py --site pegasus):
+  * the manager keeps a mirror of the run's small files (state/ with the events, output_steps.txt, snapnames.txt,
+    the pkdgrav3 and job logs, the P(k) plot) under sites.<name>.mirror, refreshed with rsync over ssh from the
+    site's data node every sites.<name>.sync_s seconds; the mirror config (confs/ there) is the run's run.conf with
+    SCRATCH, LOGS, SANDBOX and CODES pointing to pawna (REMOTE_* keep the site's paths)
+  * qsub/qstat over ssh on the site's login node; its own limits (max_sim_running, max_sim_queued, max_sim_restarts,
+    max_rockstar, scratch_reserve_gb) under sites.<name>
+  * archive: after verify (which there also writes KEPT_FILES.json, the checksums), a process on this host pulls the
+    kept files from the data node into ARCHIVE (archive_run.py with PULL_HOST; pawna's compute nodes cannot reach
+    it), at most max_pulls at a time; trash/undo/purge on the site with scratch_ops.py over ssh
 """
 import glob
 import http.server
@@ -32,6 +44,7 @@ import json
 import os
 import queue
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -57,8 +70,17 @@ PBS = '/opt/pbs/bin'
 # waiting-in-PBS < max_sim_queued (and it fits in scratch); a simulation that stops cleanly at its wall time
 # (checkpoint, not all outputs) is scheduled again to restart, at most max_sim_restarts times
 DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000,
-                   max_sim_running=3, max_sim_queued=1, max_sim_restarts=5)
+                   max_sim_running=3, max_sim_queued=1, max_sim_restarts=5, max_pulls=1,
+                   local_codes='/storage/shadab/pipeline_test/codes',
+                   sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
+                                           mirror='/user/shadab/sahyadri_mirror/pegasus', sync_s=120,
+                                           max_sim_running=2, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
+                                           scratch_reserve_gb=2000)))
 LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s')
+SITE_LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb')
+LOCAL = 'pawna'
+SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=30', '-o', 'ServerAliveInterval=30',
+            '-o', 'ControlMaster=auto', '-o', 'ControlPersist=600']
 
 
 def scratch_estimate(E, n_out):
@@ -95,13 +117,82 @@ def log(msg):
 
 
 def load_cfg():
-    c = dict(DEFAULT_CFG)
+    c = json.loads(json.dumps(DEFAULT_CFG))
     if os.path.isfile(CONFIG):
         try:
-            c.update(json.load(open(CONFIG)))
+            u = json.load(open(CONFIG))
+            sites = u.pop('sites', {})
+            c.update(u)
+            for k, v in sites.items():          # site settings merged over the defaults
+                c['sites'].setdefault(k, {}).update(v)
         except ValueError as e:
             log('config.json unreadable (%s); using defaults' % e)
     return c
+
+
+def ssh(host, cmd, timeout=300, check=False):
+    """Run `cmd` (a shell string) on `host`; one shared connection per host (ControlPath in HOME)."""
+    r = subprocess.run(['ssh'] + SSH_OPTS + ['-o', 'ControlPath=%s/ssh-%%r@%%h' % HOME, host, cmd],
+                       capture_output=True, text=True, timeout=timeout)
+    if check and r.returncode != 0:
+        raise RuntimeError('ssh %s %r: rc %d: %s' % (host, cmd[:200], r.returncode, (r.stderr or r.stdout)[-500:]))
+    return r
+
+
+def site_cfg(cfg, site):
+    """Limits of a site: the top-level ones for this host (pawna), sites.<name> for the others."""
+    if site == LOCAL:
+        return cfg
+    return cfg['sites'][site]
+
+
+def mirror_conf(cfg, site, remote_conf):
+    """Fetch a remote run.conf and write its mirror config here; returns the mirror config's path."""
+    S = cfg['sites'][site]
+    text = ssh(S['login'], 'cat %s' % shlex.quote(remote_conf), check=True).stdout
+    tmp = os.path.join(HOME, 'tmp_remote.conf')
+    with open(tmp, 'w') as f:
+        f.write(text)
+    R = retention.load_conf(tmp)
+    os.remove(tmp)
+    stem, real = R['STEM'], R['REAL']
+    mroot = S['mirror']
+    path = os.path.join(mroot, 'confs', '%s_r%s.conf' % (stem.replace('/', '__'), real))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    over = '\n'.join([
+        '', '# ---- mirror on %s of a run computed on %s (written by manager.py %s); the lines above are %s:%s' % (
+            socket.gethostname(), site, iso(), site, remote_conf),
+        'SITE=%s' % site, 'REMOTE_CONF=%s' % remote_conf, 'REMOTE_SCRATCH=%s' % R['SCRATCH'],
+        'REMOTE_SANDBOX=%s' % R['SANDBOX'], 'REMOTE_CODES=%s' % R['CODES'], 'REMOTE_LOGS=%s' % R.get('LOGS', ''),
+        'PULL_HOST=%s' % S['data'],
+        'SCRATCH=%s' % mroot, 'LOGS=%s/sims/%s/r%s/logs' % (mroot, stem, real),
+        'SANDBOX=%s' % REPO, 'CODES=%s' % cfg.get('local_codes', ''), ''])
+    with open(path + '.tmp', 'w') as f:
+        f.write(text.rstrip('\n') + '\n' + over)
+    os.replace(path + '.tmp', path)
+    return path
+
+
+def sync_site(cfg, site, runs, timeout=1800):
+    """rsync the small files of the site's runs into its mirror (from the data node). rc 23/24 (some files absent,
+    e.g. before the simulation starts) is normal."""
+    S = cfg['sites'][site]
+    if not runs:
+        return 0
+    srcs = []
+    for run in runs:
+        rs = run.E['REMOTE_SCRATCH'].rstrip('/')
+        st, r = run.E['STEM'], run.E['REAL']
+        for rel in ('state/%s/r%s' % (st, r), 'sims/%s/r%s/output_steps.txt' % (st, r), 'sims/%s/r%s/snapnames.txt' % (st, r),
+                    'sims/%s/r%s/run.*.log' % (st, r), 'sims/%s/r%s/logs' % (st, r), 'halos/%s/r%s/pk' % (st, r)):
+            srcs.append('%s/./%s' % (rs, rel))
+    os.makedirs(S['mirror'], exist_ok=True)
+    cmd = (['rsync', '-rtR', '--partial', '-e', 'ssh ' + ' '.join(SSH_OPTS + ['-o', 'ControlPath=%s/ssh-%%r@%%h' % HOME])]
+           + ['%s:%s' % (S['data'], srcs[0])] + [':%s' % x for x in srcs[1:]] + [S['mirror'].rstrip('/') + '/'])
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if r.returncode not in (0, 23, 24):
+        log('sync %s: rsync rc %d: %s' % (site, r.returncode, r.stderr.strip()[-300:]))
+    return r.returncode
 
 
 def save_cfg(c):
@@ -120,8 +211,9 @@ def atomic_json(path, obj):
 
 
 def jobnum(j):
+    """PBS job number; local processes (archive pulls) are 'L<epoch>'."""
     try:
-        return int(str(j).split('.')[0])
+        return int(str(j).split('.')[0].lstrip('L'))
     except ValueError:
         return -1
 
@@ -132,6 +224,8 @@ def short(job):
 
 # ====================================================================================================== one run
 class Run:
+    CFG = None          # the manager's configuration (sites), set by Manager.load_runs
+
     def __init__(self, conf, paused=False):
         self.conf = os.path.abspath(conf)
         self.ev = []
@@ -160,6 +254,8 @@ class Run:
         else:
             raise FileNotFoundError('%s (and no saved copy)' % self.conf)
         self.P = retention.paths(self.E)
+        self.site = self.E.get('SITE') or LOCAL
+        self.remote = self.site != LOCAL and bool(self.E.get('REMOTE_CONF'))
         self.name = '%s/r%s' % (self.E['STEM'], self.E['REAL'])
         self.outs = retention.planned_outputs(self.E, self.P)
         self.step_index = {o[1]: o[0] for o in self.outs}
@@ -239,8 +335,16 @@ class Run:
                 j['rc'] = e['rc']
             elif e['ev'] == 'rockstar_done':
                 j['first'], j['last'], j['ok'] = e['first'], e['last'], int(e.get('ok', 0))
+        pids = {s['job']: s['pid'] for s in self.ms['submitted'] if s.get('pid')}
         for jid, j in J.items():
             q = qjobs.get(jid)
+            if jid in pids and 'end' not in j:     # a process on this host (archive pull of a remote run)
+                try:
+                    os.kill(pids[jid], 0)
+                    j['status'] = 'running'
+                except OSError:
+                    j['status'] = 'gone'
+                continue
             if 'end' in j:
                 j['status'] = 'done' if j['rc'] == 0 else 'failed'
             elif q:
@@ -283,6 +387,7 @@ class Run:
                                and int(e.get('ndone', 0)) < int(e.get('nout', 0))}
         D['verify'] = ok_after('verify_done')
         D['archive'] = ok_after('archive_done')
+        D['kept'] = ok_after('kept_sums')
         D['fits'] = ok_after('fits_done')
         D['sim_info'] = self.sim_progress()
         return D
@@ -341,11 +446,18 @@ class Run:
         return 'simulation'
 
     # ------------------------------------------------------------------ submission
-    def submit(self, stages, extra=(), what=None):
-        sub = os.path.join(self.E['SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'submit_pipeline.sh')
-        cmd = ['bash', sub, self.conf, '--stages', stages] + list(extra)
-        env = dict(os.environ, PATH=PBS + ':' + os.environ.get('PATH', ''))
-        r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
+    def submit(self, stages, extra=(), what=None, cfg=None):
+        if self.remote and stages == 'archive':
+            return self.start_pull(what)
+        if self.remote:     # qsub on the site's login node, with the run's own run.conf there
+            sub = os.path.join(self.E['REMOTE_SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'submit_pipeline.sh')
+            line = ' '.join(shlex.quote(x) for x in ['bash', sub, self.E['REMOTE_CONF'], '--stages', stages] + list(extra))
+            r = ssh((cfg or Run.CFG)['sites'][self.site]['login'], 'PATH=/opt/pbs/bin:$PATH ' + line)
+        else:
+            sub = os.path.join(self.E['SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'submit_pipeline.sh')
+            cmd = ['bash', sub, self.conf, '--stages', stages] + list(extra)
+            env = dict(os.environ, PATH=PBS + ':' + os.environ.get('PATH', ''))
+            r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
         ids = []
         for line in r.stdout.splitlines():
             m = re.match(r'^(\w+) (\d+)\.\S+ \(', line)
@@ -362,6 +474,23 @@ class Run:
         self.note('submitted %s' % ', '.join('%s %s' % x for x in ids) + (' (%s)' % what if what else ''))
         return ids
 
+    def start_pull(self, what=None):
+        """Archive of a remote run: job_archive.pbs as a process on this host (archive_run.py pulls from PULL_HOST)."""
+        jid = 'L%d' % int(now())
+        pipe = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline')
+        env = dict(os.environ, CONF=self.conf, PIPE_ENV=os.path.join(pipe, 'pipeline_env.sh'), STAGE='archive',
+                   PBS_JOBID=jid, PATH=PBS + ':' + os.environ.get('PATH', ''))
+        p = subprocess.Popen(['bash', os.path.join(pipe, 'job_archive.pbs')], env=env, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        rec = dict(job=jid, stage='archive', t=now(), pid=p.pid)
+        if what:
+            rec.update(what)
+        self.ms['submitted'].append(rec)
+        self.save()
+        self.note('archive pull %s started on %s (pid %d) from %s' % (jid, socket.gethostname(), p.pid, self.E['PULL_HOST']))
+        threading.Thread(target=p.wait, daemon=True).start()     # reap it
+        return [('archive', jid)]
+
 
 # ====================================================================================================== manager
 class Manager:
@@ -372,6 +501,8 @@ class Manager:
         self.q = queue.Queue()
         self.runs = {}
         self.qjobs, self.qtime, self.qok = {}, 0.0, None
+        self.qsite = {}            # other sites: name -> (jobs, qtime, ok)
+        self.site_disk = {}        # other sites: SCRATCH -> dict(total, used, free, ...)
         self.next_hb = 0.0
         self.recheck_at = None
         self.watch_proc = None
@@ -384,6 +515,7 @@ class Manager:
     # ------------------------------------------------------------------ runs
     def load_runs(self):
         self.cfg = load_cfg()
+        Run.CFG = self.cfg
         want = {r['conf']: r for r in self.cfg['runs']}
         for conf in list(self.runs):
             if conf not in want:
@@ -417,6 +549,84 @@ class Manager:
             self.q.put(('file', line.strip()))
         self.q.put(('watch_ended', proc))
 
+    def derive(self, run):
+        if run.remote:
+            jobs, qt, _ok = self.qsite.get(run.site, ({}, 0.0, None))
+            return run.derive(jobs, qt)
+        return run.derive(self.qjobs, self.qtime)
+
+    def sites(self):
+        return sorted({r.site for r in self.runs.values() if r.remote})
+
+    def refresh_qstat_site(self, site):
+        """qstat of our jobs on another site's login node."""
+        S = self.cfg['sites'][site]
+        r = ssh(S['login'], 'ids=$(/opt/pbs/bin/qselect -u $USER); if [ -n "$ids" ]; then /opt/pbs/bin/qstat -f -F json $ids; '
+                            'else echo "{}"; fi', timeout=180)
+        try:
+            data = json.loads(r.stdout.replace('\\\'', "'")) if r.stdout.strip() else {}
+        except ValueError as e:
+            log('qstat %s: %s (%s)' % (site, e, r.stderr.strip()[:200]))
+            self.qsite[site] = self.qsite.get(site, ({}, 0.0, None))[:2] + (False,)
+            return
+        if r.returncode != 0 and not data:
+            log('qstat %s failed: %s' % (site, r.stderr.strip()[:200]))
+            self.qsite[site] = self.qsite.get(site, ({}, 0.0, None))[:2] + (False,)
+            return
+        jobs = {}
+        for jid, j in (data.get('Jobs') or {}).items():
+            jobs[short(jid)] = dict(state=j.get('job_state'), name=j.get('Job_Name'),
+                                    node=(j.get('exec_host') or '').split('/')[0] or None, queue_time=j.get('qtime'))
+        self.qsite[site] = (jobs, now(), True)
+
+    def refresh_site_disk(self, site):
+        """Free space of the site's scratch and the bytes of each of its runs (scratch_ops.py usage over ssh)."""
+        runs = [r for r in self.runs.values() if r.remote and r.site == site]
+        if not runs:
+            return
+        S = self.cfg['sites'][site]
+        cmd = '; '.join('%s %s usage %s 2>/dev/null || echo "{}"' % (
+            shlex.quote(os.path.join(r.E['REMOTE_CODES'], 'venv', 'bin', 'python')),
+            shlex.quote(os.path.join(r.E['REMOTE_SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'scratch_ops.py')),
+            shlex.quote(r.E['REMOTE_CONF'])) for r in runs)
+        out = ssh(S['login'], cmd, timeout=1800).stdout.splitlines()
+        for run, line in zip(runs, out):
+            try:
+                u = json.loads(line)
+            except ValueError:
+                continue
+            if 'bytes' in u:
+                run.scratch_bytes = u['bytes']
+                self.site_disk[run.E['REMOTE_SCRATCH']] = dict(total=u['total'], used=u['used'], free=u['free'],
+                                                               kind='SCRATCH', site=site, paths=[run.E['REMOTE_SCRATCH']])
+
+    def sync_loop(self):
+        """Mirror of the remote runs' small files, every sync_s; the mirror's state dirs are watched (inotify)."""
+        while True:
+            for site in self.sites():
+                runs = [r for r in self.runs.values() if r.remote and r.site == site and not r.ms.get('purged')]
+                try:
+                    sync_site(self.cfg, site, runs)
+                except Exception as e:  # noqa: BLE001
+                    log('sync %s: %s' % (site, e))
+            self.q.put(('wake',))
+            time.sleep(min([int(self.cfg['sites'][x].get('sync_s', 120)) for x in self.sites()] or [120]))
+
+    def remote_ops(self, run, *args, timeout=3600):
+        """scratch_ops.py on the run's site -> its JSON answer."""
+        S = self.cfg['sites'][run.site]
+        cmd = ' '.join(shlex.quote(x) for x in [os.path.join(run.E['REMOTE_CODES'], 'venv', 'bin', 'python'),
+                                                 os.path.join(run.E['REMOTE_SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'scratch_ops.py'),
+                                                 args[0], run.E['REMOTE_CONF']] + [str(x) for x in args[1:]])
+        r = ssh(S['login'], cmd, timeout=timeout)
+        try:
+            out = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            raise RuntimeError('scratch_ops %s on %s: rc %d %s %s' % (args[0], run.site, r.returncode, r.stdout[-300:], r.stderr[-300:]))
+        if not out.get('ok'):
+            raise ValueError(out.get('error', 'scratch_ops %s failed' % args[0]))
+        return out
+
     # ------------------------------------------------------------------ PBS
     def refresh_qstat(self):
         r = subprocess.run([PBS + '/qstat', '-f', '-F', 'json'], capture_output=True, text=True, timeout=120)
@@ -444,7 +654,7 @@ class Manager:
     def refresh_disk(self):
         d, seen = {}, {}           # one entry per file system and kind (several scratch roots may share one)
         for run in self.runs.values():
-            for k in ('SCRATCH', 'ARCHIVE'):
+            for k in (('ARCHIVE',) if run.remote else ('SCRATCH', 'ARCHIVE')):
                 p = run.E.get(k)
                 if p and p not in d and os.path.isdir(p):
                     key = (os.stat(p).st_dev, k)
@@ -454,6 +664,8 @@ class Manager:
                         continue
                     u = shutil.disk_usage(p)
                     d[p] = seen[key] = dict(total=u.total, used=u.used, free=u.free, kind=k, paths=[p])
+            if run.remote:
+                continue
             tot = 0
             for top in (run.P['sim'], run.P['halo']):
                 for dp, _ds, fs in os.walk(top):
@@ -463,16 +675,22 @@ class Manager:
                         except OSError:
                             pass
             run.scratch_bytes = tot
+        for site in self.sites():
+            try:
+                self.refresh_site_disk(site)
+            except Exception as e:  # noqa: BLE001
+                log('disk %s: %s' % (site, e))
+        d.update(self.site_disk)
         self.disk = d
 
     # ------------------------------------------------------------------ policy
     def tick(self):
-        active_rs = 0
+        active_rs = {}             # per site
         derived = {}
         for run in self.runs.values():
-            D = run.derive(self.qjobs, self.qtime)
+            D = self.derive(run)
             derived[run.conf] = D
-            active_rs += sum(1 for j in D['active'] if j['stage'] == 'rockstar')
+            active_rs[run.site] = active_rs.get(run.site, 0) + sum(1 for j in D['active'] if j['stage'] == 'rockstar')
         self.schedule_sims(derived)
         # Rockstar turn order over the runs: the one whose next snapshot has waited longest goes first
         def waiting(run):
@@ -482,7 +700,7 @@ class Manager:
         for run in sorted(self.runs.values(), key=waiting):
             D = derived[run.conf]
             try:
-                active_rs += self.policy(run, D, active_rs)
+                active_rs[run.site] = active_rs.get(run.site, 0) + self.policy(run, D, active_rs.get(run.site, 0))
             except Exception as e:  # noqa: BLE001
                 run.ms['failed'] = dict(stage='manager', msg=str(e), t=now())
                 run.note('manager error, automation stopped: %s' % e)
@@ -494,20 +712,22 @@ class Manager:
         if run.busy or run.err or run.ms.get('paused') or run.ms.get('failed') or run.ms.get('trash') or run.ms.get('purged'):
             return 0
         E = run.E
+        SC = site_cfg(self.cfg, run.site)
+        qtime = self.qsite.get(run.site, ({}, 0.0))[1] if run.remote else self.qtime
         # failures and vanished jobs
         for j in D['jobs']:
             if (j['status'] == 'failed' and j['stage'] == 'sim' and j['job'] in D['sim_clean_stop']
                     and not self.acked(run, j)):
                 n = int(run.ms.get('restarts', 0))
                 run.ms.setdefault('acked', []).append(j['job'])
-                if n >= int(self.cfg.get('max_sim_restarts', 5)):
+                if n >= int(SC.get('max_sim_restarts', 5)):
                     run.ms['failed'] = dict(stage='sim', job=j['job'], rc=j.get('rc'), log=j.get('log'), t=now(),
                                             msg='stopped at its wall time again after %d restarts (max_sim_restarts)' % n)
                     run.note('simulation job %s stopped at its wall time; %d restarts done, not restarting' % (j['job'], n))
                     return 0
                 run.ms['scheduled'] = dict(t=now(), priority=-1, restart=True, after=j['job'])
                 run.note('simulation job %s stopped cleanly before the last output (wall time); scheduled to restart '
-                         'from the newest checkpoint (restart %d of at most %d)' % (j['job'], n + 1, self.cfg.get('max_sim_restarts', 5)))
+                         'from the newest checkpoint (restart %d of at most %d)' % (j['job'], n + 1, SC.get('max_sim_restarts', 5)))
                 continue
             if j['status'] == 'failed' and not self.acked(run, j):
                 run.ms['failed'] = dict(stage=j['stage'], job=j['job'], rc=j.get('rc'), log=j.get('log'), t=now(),
@@ -518,7 +738,7 @@ class Manager:
                 g = run.ms.setdefault('gone', {})
                 first_seen = g.setdefault(j['job'], now())
                 run.save()
-                if now() - first_seen > self.cfg['lost_grace_s'] and self.qtime > first_seen:
+                if now() - first_seen > self.cfg['lost_grace_s'] and (qtime > first_seen or j['job'].startswith('L')):
                     run.ms['failed'] = dict(stage=j['stage'], job=j['job'], rc=None, t=now(),
                                             msg='job vanished from PBS without an end event (killed, node failure?)',
                                             first=j.get('first'), last=j.get('last'))
@@ -543,13 +763,13 @@ class Manager:
                 if k == 0:
                     return 0
                 if k >= nmin or D['sim_done']:          # after the simulation: whatever is left
-                    if active_rs >= self.cfg['max_rockstar']:
+                    if active_rs >= int(SC.get('max_rockstar', 1)):
                         return 0
                     last = first + k - 1
                     run.submit('rockstar', ['--rs-snaps', '%d-%d' % (first, last)], dict(first=first, last=last))
                     return 1
                 return 0
-            if D['sim_done'] and active_rs < self.cfg['max_rockstar'] and not D['last'].get('rockstar'):
+            if D['sim_done'] and active_rs < int(SC.get('max_rockstar', 1)) and not D['last'].get('rockstar'):
                 run.submit('rockstar', [], dict(first=0, last=n_out - 1))
                 return 1
             return 0
@@ -564,13 +784,26 @@ class Manager:
         v = D['verify']
         if lv and lv['status'] == 'done' and v and int(v.get('ok', 0)) == 1 and E.get('ARCHIVE'):
             la = D['last'].get('archive')   # one archive job per passed verify (PBS ids increase; node clocks differ)
-            if la is None or jobnum(la['job']) < jobnum(lv['job']):
+            if run.remote:
+                # pulled here after the checksums of that verify job (KEPT_FILES.json in the mirror)
+                k = D['kept']
+                kf = os.path.join(run.P['state'], 'KEPT_FILES.json')
+                done_for = {s.get('after_verify') for s in run.ms['submitted'] if s['stage'] == 'archive'}
+                if (k and k['job'] == lv['job'] and int(k.get('ok', 0)) == 1 and os.path.isfile(kf)
+                        and lv['job'] not in done_for):
+                    pulls = sum(1 for r in self.runs.values() for j in self.derive(r)['active']
+                                if j['job'].startswith('L'))
+                    if pulls < int(self.cfg.get('max_pulls', 1)):
+                        run.submit('archive', [], dict(after_verify=lv['job']))
+            elif la is None or jobnum(la['job']) < jobnum(lv['job']):
                 run.submit('archive', [], dict(after_verify=lv['job']))
         return 0
 
-    def sim_counts(self, derived):
+    def sim_counts(self, derived, site=LOCAL):
         running = queued = 0
         for run in self.runs.values():
+            if run.site != site:
+                continue
             for j in derived[run.conf]['active']:
                 if j['stage'] == 'sim':
                     if j['status'] in ('running', 'exiting'):
@@ -580,13 +813,18 @@ class Manager:
         return running, queued
 
     def schedule_sims(self, derived):
-        """Submit scheduled simulations within max_sim_running / max_sim_queued, by priority then age."""
-        running, queued = self.sim_counts(derived)
-        cand = [r for r in self.runs.values() if r.ms.get('scheduled') and not (r.busy or r.err or r.ms.get('paused')
-                                                                               or r.ms.get('failed') or r.ms.get('trash'))]
-        cand.sort(key=lambda r: (r.ms['scheduled'].get('priority', 0), r.ms['scheduled'].get('t', 0)))
-        mr, mq = int(self.cfg.get('max_sim_running', 3)), int(self.cfg.get('max_sim_queued', 1))
+        """Submit scheduled simulations within each site's max_sim_running / max_sim_queued, by priority then age."""
         self.queue_view = []
+        for site in [LOCAL] + self.sites():
+            self.schedule_site(derived, site)
+
+    def schedule_site(self, derived, site):
+        running, queued = self.sim_counts(derived, site)
+        cand = [r for r in self.runs.values() if r.site == site and r.ms.get('scheduled')
+                and not (r.busy or r.err or r.ms.get('paused') or r.ms.get('failed') or r.ms.get('trash'))]
+        cand.sort(key=lambda r: (r.ms['scheduled'].get('priority', 0), r.ms['scheduled'].get('t', 0)))
+        SC = site_cfg(self.cfg, site)
+        mr, mq = int(SC.get('max_sim_running', 3)), int(SC.get('max_sim_queued', 1))
         blocked = None
         for run in cand:
             sc = run.ms['scheduled']
@@ -624,7 +862,7 @@ class Manager:
                     wait = 'submission failed: %s' % e
                     run.ms['failed'] = dict(stage='sim', msg=str(e), t=now())
                     run.note('scheduled submission failed: %s' % e)
-            self.queue_view.append(dict(run=run.name, priority=sc.get('priority', 0), t=sc.get('t'), restart=sc.get('restart'),
+            self.queue_view.append(dict(run=run.name, site=site, priority=sc.get('priority', 0), t=sc.get('t'), restart=sc.get('restart'),
                                         not_before=sc.get('not_before'), wait=wait))
 
     def acked(self, run, j):
@@ -640,6 +878,16 @@ class Manager:
             return 'refreshing'
         if act == 'set_limits':
             changed = []
+            for site, S in self.cfg['sites'].items():
+                for k in SITE_LIMIT_KEYS:
+                    key = '%s.%s' % (site, k)
+                    if a.get(key) not in (None, ''):
+                        v = int(float(a[key]))
+                        if v < (0 if k in ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb') else 1):
+                            raise ValueError('%s must be >= 0/1' % key)
+                        if S.get(k) != v:
+                            S[k] = v
+                            changed.append('%s=%d' % (key, v))
             for k in LIMIT_KEYS:
                 if a.get(k) not in (None, ''):
                     v = int(float(a[k]))
@@ -673,7 +921,7 @@ class Manager:
             run.read_events()
             return 'reloaded %s' % run.conf
         if act == 'schedule':
-            D = run.derive(self.qjobs, self.qtime)
+            D = self.derive(run)
             if D['sim_done']:
                 raise ValueError('the simulation of %s has finished' % run.name)
             if any(j['stage'] == 'sim' for j in D['active']):
@@ -683,7 +931,10 @@ class Manager:
                 nb = float(nb) if re.match(r'^[0-9.]+$', str(nb)) else time.mktime(time.strptime(str(nb).replace('T', ' ')[:16], '%Y-%m-%d %H:%M'))
             else:
                 nb = None
-            restart = bool(D['last'].get('sim')) and bool(glob.glob(os.path.join(run.P['sim'], 'checkpoints', '*.chk')))
+            if run.remote:     # checkpoints are not mirrored: a simulation that stopped at its wall time
+                restart = bool(D['sim_clean_stop'])
+            else:
+                restart = bool(D['last'].get('sim')) and bool(glob.glob(os.path.join(run.P['sim'], 'checkpoints', '*.chk')))
             run.ms['scheduled'] = dict(t=now(), priority=int(a.get('priority') or 0), not_before=nb,
                                        restart=bool(a.get('restart', restart)))
             run.note('scheduled (priority %s%s%s)' % (run.ms['scheduled']['priority'], ', not before %s' % iso(nb) if nb else '',
@@ -694,7 +945,7 @@ class Manager:
             run.note('removed from the simulation queue')
             return 'unscheduled %s' % run.name
         if act == 'submit_sim':
-            D = run.derive(self.qjobs, self.qtime)
+            D = self.derive(run)
             if any(j['stage'] == 'sim' for j in D['active']):
                 raise ValueError('a simulation job of this run is already queued or running')
             if not a.get('restart'):
@@ -745,7 +996,7 @@ class Manager:
 
     def outstanding(self, run, D=None):
         """Bytes a run still adds to SCRATCH: its estimate minus what it uses now, while its simulation is not done."""
-        D = D or run.derive(self.qjobs, self.qtime)
+        D = D or self.derive(run)
         if D['sim_done'] or run.ms.get('trash') or run.ms.get('purged') or not D['last'].get('sim'):
             return 0
         used = run.scratch_bytes if run.scratch_bytes is not None else 0
@@ -753,11 +1004,21 @@ class Manager:
 
     def space_check(self, run):
         """(ok, message): does a new simulation of `run` fit in SCRATCH next to the running ones and the reserve?"""
-        root = run.E['SCRATCH']
-        free = shutil.disk_usage(root).free
+        if run.remote:
+            root = run.E['REMOTE_SCRATCH']
+            if root not in self.site_disk:
+                self.refresh_site_disk(run.site)
+            if root not in self.site_disk:
+                return False, 'free space of %s:%s unknown (scratch_ops.py usage failed)' % (run.site, root)
+            free = self.site_disk[root]['free']
+            others = sum(self.outstanding(r) for r in self.runs.values()
+                         if r is not run and r.remote and r.E['REMOTE_SCRATCH'] == root)
+        else:
+            root = run.E['SCRATCH']
+            free = shutil.disk_usage(root).free
+            others = sum(self.outstanding(r) for r in self.runs.values() if r is not run and not r.remote and r.E['SCRATCH'] == root)
         need = scratch_estimate(run.E, len(run.outs))
-        others = sum(self.outstanding(r) for r in self.runs.values() if r is not run and r.E['SCRATCH'] == root)
-        reserve = int(float(self.cfg.get('scratch_reserve_gb', 2000)) * 1e9)
+        reserve = int(float(site_cfg(self.cfg, run.site).get('scratch_reserve_gb', 2000)) * 1e9)
         left = free - need - others - reserve
         msg = ('scratch %s: %s free; this run needs up to %s, running simulations %s more, reserve %s -> %s %s'
                % (root, retention.human(free), retention.human(need), retention.human(others), retention.human(reserve),
@@ -765,6 +1026,13 @@ class Manager:
         return left >= 0, msg
 
     def add_run(self, conf, paused=True):
+        site, _, rconf = conf.partition(':') if re.match(r'^[A-Za-z]\w*:/', conf) else ('', '', '')
+        if site:
+            if site not in self.cfg['sites']:
+                raise ValueError('unknown site %s (config sites: %s)' % (site, ', '.join(self.cfg['sites'])))
+            conf = mirror_conf(self.cfg, site, rconf)
+            E = retention.load_conf(conf)
+            sync_site(self.cfg, site, [type('R', (), dict(E=E))()])     # output_steps.txt etc. before Run() reads them
         conf = os.path.abspath(conf)
         if not os.path.isfile(conf):
             raise ValueError('no file %s' % conf)
@@ -779,14 +1047,19 @@ class Manager:
     def cleanup_check(self, run):
         """(ok, message): may the run's scratch data be moved to the trash?"""
         E, P = run.E, run.P
-        D = run.derive(self.qjobs, self.qtime)
+        D = self.derive(run)
         if D['active']:
             return False, 'jobs of this run are queued or running: %s' % ', '.join(j['job'] for j in D['active'])
         v, a = D['verify'], D['archive']
         vf, mf = os.path.join(P['state'], 'verify.json'), os.path.join(P['state'], 'MANIFEST.json')
-        # order by file times (one file server), not by event times (node clocks differ by minutes)
-        if not (v and int(v.get('ok', 0)) and a and int(a.get('ok', 0)) and os.path.isfile(vf) and os.path.isfile(mf)
-                and os.path.getmtime(mf) > os.path.getmtime(vf)):
+        # order by file times (one file server), not by event times (node clocks differ by minutes); a remote run:
+        # the manifest must be of the newest verify (its time is in both)
+        if run.remote:
+            fresh = (os.path.isfile(vf) and os.path.isfile(mf)
+                     and json.load(open(mf)).get('verify', {}).get('time') == json.load(open(vf)).get('time'))
+        else:
+            fresh = os.path.isfile(vf) and os.path.isfile(mf) and os.path.getmtime(mf) > os.path.getmtime(vf)
+        if not (v and int(v.get('ok', 0)) and a and int(a.get('ok', 0)) and fresh):
             return False, 'needs a passed verify followed by a passed archive'
         if not E.get('ARCHIVE'):
             return False, 'ARCHIVE not set'
@@ -804,22 +1077,29 @@ class Manager:
                 nbad += 1
                 msgs.append('archive copy wrong or missing: %s' % r['path'])
         # every file the retention plan keeps now must be in the manifest, unchanged
-        for cat, _s, src, rel in retention.kept_files(E):
-            if cat in ('log', 'events') or rel.endswith('verify.json'):
-                continue
+        if run.remote:      # listed on the run's site
+            now_files = {rel: tuple(v) for rel, v in self.remote_ops(run, 'stat')['files'].items()}
+        else:
+            now_files = {}
+            for cat, _s, src, rel in retention.kept_files(E):
+                if cat in ('log', 'events') or rel.endswith('verify.json'):
+                    continue
+                st = os.stat(src)
+                now_files[rel] = (st.st_size, st.st_mtime)
+        for rel, (size, mtime) in now_files.items():
             r = rows.get(rel)
-            st = os.stat(src)
             if r is None:
                 nbad += 1
                 msgs.append('kept file not in the manifest: %s' % rel)
-            elif r['size'] != st.st_size or abs(r['mtime'] - st.st_mtime) > 1e-6:
+            elif r['size'] != size or abs(r['mtime'] - mtime) > 1e-6:
                 nbad += 1
                 msgs.append('kept file changed after the archive: %s' % rel)
         if nbad:
             return False, '%d problem(s): %s' % (nbad, '; '.join(msgs[:10]))
         size = run.scratch_bytes
+        scr = ('%s:%s' % (run.site, E['REMOTE_SCRATCH'])) if run.remote else E['SCRATCH']
         return True, ('OK: %d files in the archive (%s), checked; scratch %s/%s and %s/%s (%s) can go to the trash'
-                      % (len(M['files']), retention.human(M['bytes']), E['SCRATCH'], P['rel']['sim'], E['SCRATCH'],
+                      % (len(M['files']), retention.human(M['bytes']), scr, P['rel']['sim'], scr,
                          P['rel']['halo'], retention.human(size) if size is not None else '?'))
 
     def _guard(self, run, path, under):
@@ -835,6 +1115,11 @@ class Manager:
         if not ok:
             raise ValueError('not moved: ' + msg)
         E, P = run.E, run.P
+        if run.remote:
+            out = self.remote_ops(run, 'trash', time.strftime('%Y%m%dT%H%M%S'))
+            run.ms['trash'] = dict(dir=out['dir'], moved=out['moved'], t=now(), check=msg, site=run.site)
+            run.note('moved to trash on %s: %s: %s' % (run.site, out['dir'], ', '.join(m[0] for m in out['moved'])))
+            return 'moved to %s:%s (undo possible until purged)' % (run.site, out['dir'])
         tdir = os.path.join(E['SCRATCH'], '.trash', '%s_r%s_%s' % (E['STEM'].replace('/', '_'), E['REAL'],
                                                                   time.strftime('%Y%m%dT%H%M%S')))
         os.makedirs(tdir)
@@ -853,6 +1138,11 @@ class Manager:
         T = run.ms.get('trash')
         if not T or run.ms.get('purged'):
             raise ValueError('nothing in the trash')
+        if run.remote:
+            self.remote_ops(run, 'undo', T['dir'])
+            run.ms['trash'] = None
+            run.note('trash undone on %s: data back in place' % run.site)
+            return 'restored'
         for src, dst in T['moved']:
             if os.path.exists(src):
                 raise ValueError('%s exists again; not moving back' % src)
@@ -881,8 +1171,13 @@ class Manager:
             dst = os.path.join(E['ARCHIVE'], r['path'])
             if not os.path.isfile(dst) or os.path.getsize(dst) != r['size']:
                 raise ValueError('archive copy wrong or missing: %s; not purging' % r['path'])
-        tdir = self._guard(run, T['dir'], os.path.join(E['SCRATCH'], '.trash'))
         t0 = now()
+        if run.remote:
+            tdir = self.remote_ops(run, 'purge', T['dir'], timeout=7200)['dir']
+            run.ms['purged'] = dict(t=now(), dir=tdir, seconds=round(now() - t0, 1), site=run.site)
+            run.note('purged %s:%s' % (run.site, tdir))
+            return 'purged %s:%s' % (run.site, tdir)
+        tdir = self._guard(run, T['dir'], os.path.join(E['SCRATCH'], '.trash'))
         shutil.rmtree(tdir)
         run.ms['purged'] = dict(t=now(), dir=tdir, seconds=round(now() - t0, 1))
         run.note('purged %s' % tdir)
@@ -892,10 +1187,10 @@ class Manager:
     def build_snapshot(self, derived):
         runs = []
         for run in self.runs.values():
-            D = derived.get(run.conf) or run.derive(self.qjobs, self.qtime)
+            D = derived.get(run.conf) or self.derive(run)
             pl = run.plan
             runs.append(dict(
-                name=run.name, conf=run.conf, phase=run.phase(D), paused=run.ms.get('paused'), failed=run.ms.get('failed'), busy=run.busy,
+                name=run.name, conf=run.conf, site=run.site, remote_conf=run.E.get('REMOTE_CONF'), phase=run.phase(D), paused=run.ms.get('paused'), failed=run.ms.get('failed'), busy=run.busy,
                 err=run.err, n_out=D['n_out'], ready=D['ready'], rs_done=D['rs_done'], sim_done=D['sim_done'],
                 sim=D['sim_info'], jobs=D['jobs'][-40:], active=D['active'],
                 verify=self.verify_summary(run, D), archive=D['archive'], fits=D['fits'],
@@ -905,15 +1200,23 @@ class Manager:
                           tables=pl['tables'] if pl else []),
                 outputs=[[o[0], o[1], o[3]] for o in run.outs], scratch_bytes=run.scratch_bytes,
                 scratch_estimate=scratch_estimate(run.E, len(run.outs)), outstanding=self.outstanding(run, D),
-                scratch=run.E.get('SCRATCH'), archive_root=run.E.get('ARCHIVE'), npart=run.E.get('NPART'),
+                scratch=run.E.get('REMOTE_SCRATCH') or run.E.get('SCRATCH'), archive_root=run.E.get('ARCHIVE'), npart=run.E.get('NPART'),
                 rs_batch=run.E.get('RS_BATCH', '0'), rs_batch_min=run.E.get('RS_BATCH_MIN', '10'),
                 events=[dict(t=e['t'], stage=e['stage'], job=e['job'], ev=e['ev'],
                              info={k: v for k, v in e.items() if k not in ('t', 'time', 'run', 'stage', 'job', 'host', 'ev', 'conf')})
                         for e in run.ev[-60:]]))
         with self.lock:
             sr, sq = self.sim_counts(derived) if derived else (0, 0)
+            site_info = {}
+            for site in self.sites():
+                jobs, qt, qok = self.qsite.get(site, ({}, 0.0, None))
+                r_, q_ = self.sim_counts(derived, site) if derived else (0, 0)
+                site_info[site] = dict(limits={k: self.cfg['sites'][site].get(k) for k in SITE_LIMIT_KEYS},
+                                       sims_running=r_, sims_queued=q_, qtime=qt, qok=qok,
+                                       login=self.cfg['sites'][site].get('login'), data=self.cfg['sites'][site].get('data'))
             self.snapshot = dict(t=now(), runs=runs, disk=self.disk, reserve_gb=self.cfg.get('scratch_reserve_gb'),
                                  limits={k: self.cfg.get(k) for k in LIMIT_KEYS}, sims_running=sr, sims_queued=sq,
+                                 sites=site_info, local_site=LOCAL,
                                  queue=getattr(self, 'queue_view', []), qtime=self.qtime, qok=self.qok,
                                  next_heartbeat=self.next_hb, heartbeat_s=self.cfg['heartbeat_s'],
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
@@ -978,6 +1281,7 @@ class Manager:
         srv.mgr = self
         os.chmod(SOCK, 0o600)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
+        threading.Thread(target=self.sync_loop, daemon=True).start()
         log('manager on %s, page on %s, %d runs' % (socket.gethostname(), SOCK, len(self.runs)))
         signal.signal(signal.SIGTERM, _sigterm)
         derived = {}
@@ -1024,6 +1328,11 @@ class Manager:
                 if t >= self.next_hb or (self.recheck_at and t >= self.recheck_at):
                     self.recheck_at = None
                     self.refresh_qstat()
+                    for site in self.sites():
+                        try:
+                            self.refresh_qstat_site(site)
+                        except Exception as e:  # noqa: BLE001
+                            log('qstat %s: %s' % (site, e))
                     if not getattr(self, '_disk_busy', False):    # statfs/walks on NFS: in the background
                         self._disk_busy = True
                         threading.Thread(target=self._disk_bg, daemon=True).start()
@@ -1058,6 +1367,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def local_path(self, p):
+        """A path on another site (events, verify.json) -> its copy in the manager's mirror."""
+        for r in self.server.mgr.runs.values():
+            rs = r.E.get('REMOTE_SCRATCH')
+            if r.remote and rs and p.startswith(rs.rstrip('/') + '/'):
+                return r.E['SCRATCH'].rstrip('/') + p[len(rs.rstrip('/')):]
+        return p
+
     def _send(self, code, body, ctype='application/json'):
         b = body if isinstance(body, bytes) else body.encode()
         self.send_response(code)
@@ -1077,7 +1394,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith('/api/file?'):
             # an image of a registered run (the P(k) summary plot)
             from urllib.parse import parse_qs, urlparse
-            p = parse_qs(urlparse(self.path).query).get('path', [''])[0]
+            p = self.local_path(parse_qs(urlparse(self.path).query).get('path', [''])[0])
             rp = os.path.realpath(p)
             okroots = [r.E['SCRATCH'] for r in mgr.runs.values()] + [r.E.get('ARCHIVE') for r in mgr.runs.values()]
             if (not rp.endswith('.png') or not os.path.isfile(rp)
@@ -1088,7 +1405,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith('/api/log?'):
             # tail of a job log (only files below a registered run's directories)
             from urllib.parse import parse_qs, urlparse
-            p = parse_qs(urlparse(self.path).query).get('path', [''])[0]
+            p = self.local_path(parse_qs(urlparse(self.path).query).get('path', [''])[0])
             okroots = [r.E['SCRATCH'] for r in mgr.runs.values()] + [os.path.dirname(r.E.get('LOGS', '/x')) for r in mgr.runs.values()]
             rp = os.path.realpath(p)
             if not any(rp.startswith(os.path.realpath(x) + '/') for x in okroots if x) or not os.path.isfile(rp):
@@ -1139,6 +1456,8 @@ def main():
     cmd = sys.argv[1]
     if cmd == 'serve':
         Manager().serve()
+    elif cmd == 'add' and re.match(r'^[A-Za-z]\w*:/', sys.argv[2]):
+        sys.exit(call(dict(action='add_run', conf=sys.argv[2], paused='--paused' in sys.argv)))
     elif cmd == 'add':
         conf = os.path.abspath(sys.argv[2])
         Run(conf)
