@@ -12,7 +12,7 @@
 #                     (public). If it cannot be fetched (no network to GitHub), the same source is made from
 #                     upstream 36ce9ee plus the older overlay kept here in code/Rockstar/.
 #   $CODES/ctrees     consistent-trees 7c20add + Sahyadri changes (w0-wa/curvature background), make
-#   $CODES/venv       Python 3 venv (own packages) + numpy scipy pandas h5py fitsio zstandard
+#   $CODES/venv       Python 3 venv (own packages) + numpy scipy pandas h5py fitsio zstandard matplotlib classy
 #   $CODES/lib        cic_update.so, ngp_update.so, vpot_sums.so, halo_pair_sums.so for post-process (SAHYADRI_LIBDIR)
 # Rerunning rebuilds everything (the clones are kept).
 set -eu
@@ -57,8 +57,8 @@ echo "== Python venv"
 # self-contained (no system site packages): pawna's system scipy is built for numpy < 1.25
 [ -x "$CODES/venv/bin/python" ] || python3 -m venv "$CODES/venv"
 "$CODES/venv/bin/python" -m pip install -q --upgrade pip
-"$CODES/venv/bin/python" -m pip install -q numpy scipy pandas "h5py<3.12" fitsio zstandard
-"$CODES/venv/bin/python" -c "import numpy, scipy, pandas, h5py, fitsio, zstandard; print('python', numpy.__version__, scipy.__version__, pandas.__version__, fitsio.__version__)"
+"$CODES/venv/bin/python" -m pip install -q numpy scipy pandas "h5py<3.12" fitsio zstandard matplotlib "classy==3.4.2"
+"$CODES/venv/bin/python" -c "import numpy, scipy, pandas, h5py, fitsio, zstandard, matplotlib, classy; print('python', numpy.__version__, scipy.__version__, pandas.__version__, fitsio.__version__, 'classy', classy.__version__)"
 
 echo "== post-process C helpers"
 for f in cic_update ngp_update; do cc -O2 -shared -fPIC -o "$CODES/lib/$f.so" "$SB/scripts/post-process/$f.c"; done

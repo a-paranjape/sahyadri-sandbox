@@ -12,7 +12,9 @@ set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
 mkdir -p "$SIM_DIR" "$PKC_DIR" && cd "$SIM_DIR" || exit 1
 export PKD_IO_ROOT
-source "$PKD_IO_ROOT/pkdgrav3/bench/phase0/env_pawna.sh"
+# pkdgrav3's run-time environment: pawna (default) or SIM_ENV from run.conf (pegasus: tools/pegasus/env_pegasus.sh,
+# conda MPI; it sets mpirun_pegasus_args for launches on several nodes)
+source "${SIM_ENV:-$PKD_IO_ROOT/pkdgrav3/bench/phase0/env_pawna.sh}"
 (cd "$PKD_IO_ROOT/pkdgrav3" && git log -1 --format="pkdgrav3 source %h %s")
 if [ -n "$PKD_PAR" ]; then
   [ -f "$PKD_PAR" ] || { stamp "PKD_PAR=$PKD_PAR not found"; exit 1; }
@@ -31,6 +33,9 @@ if [ -n "${RESTART:-}" ]; then
   stamp "restart from $CHK"
 fi
 NTH=${PBS_NCPUS:-$SIM_NCPU}
+# MPI ranks: SIM_MPIPROCS per node on SIM_NODES nodes (pegasus); NTH threads per rank
+NRANK=$(( ${SIM_NODES:-1} * ${SIM_MPIPROCS:-1} ))
+[ "$NRANK" -gt 1 ] && NTH=$(( SIM_NCPU / ${SIM_MPIPROCS:-1} ))
 J=${PBS_JOBID%%.*}; J=${J:-$$}
 # events for the manager: snap_ready step=<step> when all files of an output are in $PKC_DIR (staged: the drain's
 # "drained snap.<step>" line; otherwise pkdgrav3's snap.<step>.done marker, looked for every SIM_WATCH_S seconds)
@@ -76,8 +81,15 @@ else
     PAR=restart.$J.par
     printf 'import PKDGRAV\nPKDGRAV.restore("%s")\n' "$CHK" > "$PAR"
   fi
-  stamp "pkdgrav3 with $NTH threads, parameter file $PAR (snapshots straight to $PKC_DIR)"
-  /usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
+  if [ "$NRANK" -gt 1 ]; then
+    stamp "pkdgrav3: $NRANK MPI ranks (${SIM_MPIPROCS:-1} per node on $(sort -u "$PBS_NODEFILE" | tr '\n' ' ')) x $NTH threads, parameter file $PAR (snapshots straight to $PKC_DIR)"
+    # shellcheck disable=SC2086
+    /usr/bin/time -v mpirun --hostfile "$PBS_NODEFILE" --bind-to none ${mpirun_pegasus_args:-} ${PYTHONPATH:+-x PYTHONPATH} -np "$NRANK" \
+        --map-by ppr:${SIM_MPIPROCS:-1}:node ${SIM_MPI_EXTRA:-} "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
+  else
+    stamp "pkdgrav3 with $NTH threads, parameter file $PAR (snapshots straight to $PKC_DIR)"
+    /usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
+  fi
   rc=$?
 fi
 ln -sf run.$J.log run.log

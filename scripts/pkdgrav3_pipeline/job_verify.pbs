@@ -7,4 +7,11 @@ source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/p
 "$PY" "$PIPE/verify_run.py" "$CONF" --threads "${PBS_NCPUS:-${VF_NCPU:-8}}"
 rc=$?
 event verify_done rc="$rc" ok="$([ $rc = 0 ] && echo 1 || echo 0)" report="$STATE_DIR/verify.json"
+# archived on another site (REMOTE_ARCHIVE=1, e.g. a pegasus run archived on pawna): the checksums of the kept files,
+# against which the pulled copies are checked (archive_run.py --source-sums -> $STATE_DIR/KEPT_FILES.json)
+if [ $rc = 0 ] && [ "${REMOTE_ARCHIVE:-0}" = 1 ]; then
+  "$PY" "$PIPE/archive_run.py" "$CONF" --source-sums
+  rc=$?
+  event kept_sums rc="$rc" ok="$([ $rc = 0 ] && echo 1 || echo 0)" file="$STATE_DIR/KEPT_FILES.json"
+fi
 exit $rc

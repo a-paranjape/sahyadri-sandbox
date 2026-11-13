@@ -166,6 +166,40 @@ def resources(N):
                 PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=64, PP_NPROC=8)
 
 
+PEG_HOME = '/mnt/home/project/calam.shadab/sahyadri_pipeline'
+# per site: defaults of --root, --archive, --codes, --pkd-io-root, --queue. A run of another site than pawna is archived
+# on pawna (REMOTE_ARCHIVE=1): the manager on pawna pulls its kept files from the site's data node.
+SITES = dict(
+    pawna=dict(root='/user/{user}/sahyadri_scratch', archive='/storage/{user}/sahyadri_sims',
+               codes='/storage/shadab/pipeline_test/codes', pkd='/storage/shadab/pkdgrav3_io', queue='workq'),
+    pegasus=dict(root='/data/project/hpc2502016/shadab/sahyadri_scratch', archive='/storage/shadab/sahyadri_sims',
+                 codes=PEG_HOME + '/codes', pkd=PEG_HOME + '/pkdgrav3_io', queue='project'),
+)
+
+
+def resources_pegasus(N, queue):
+    """pegasus: 32-core nodes (385 GB Skylake hpc001-060; 514 GB Ice Lake / Sapphire Rapids hpc061-100, debug queue
+    on hpc081+), no node-local staging. Simulation with 2 MPI ranks per node (16 threads each), as pkdgrav3's pegasus
+    tests; 3 nodes from 1024^3. Wall times: 96 h (project queue), at most 4 h in the debug queue."""
+    rsm = rockstar_mem(N)
+    if N <= 256:
+        r = dict(SIM=(32, '100gb', '24:00:00', 1), RS=(16, rsm, '12:00:00'), CT=(2, '16gb', '12:00:00'),
+                 PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=16, PP_NPROC=4)
+    elif N <= 512:
+        r = dict(SIM=(32, '400gb', '96:00:00', 1), RS=(32, rsm, '24:00:00'), CT=(2, '32gb', '24:00:00'),
+                 PP=(32, '300gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=32, PP_NPROC=8)
+    else:
+        r = dict(SIM=(32, '480gb', '96:00:00', 3), RS=(32, rsm, '96:00:00'), CT=(2, '128gb', '96:00:00'),
+                 PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=8)
+        if int(rsm[:-2]) > 480:
+            print('NOTE: Rockstar needs ~%s at %d^3, more than one pegasus node (480 GB usable): multi-node Rockstar is '
+                  'not set up' % (rsm, N))
+    if queue == 'debug':
+        for k in ('SIM', 'RS', 'CT', 'PP', 'FITS'):
+            r[k] = (r[k][0], r[k][1], min(r[k][2], '04:00:00')) + tuple(r[k][3:])
+    return r
+
+
 def fmt_l(L):
     return ('%d' % L) if float(L).is_integer() else ('%g' % L).replace('.', 'p')
 
@@ -176,6 +210,23 @@ def write(path, text, force, mode=0o644):
     with open(path, 'w') as f:
         f.write(text)
     os.chmod(path, mode)
+
+
+def site_block(a, R):
+    """run.conf lines that depend on the site."""
+    if a.site == 'pawna':
+        return ('PBS_QUEUE=%s\n'
+                'SIM_STAGING=1           # snapshots and checkpoints written to the node\'s SSD, copied to NFS during the run'
+                % a.queue)
+    return '\n'.join([
+        'SITE=%s                 # computed on %s; archived on pawna (the manager pulls the kept files)' % (a.site, a.site),
+        'REMOTE_ARCHIVE=1        # verify also writes KEPT_FILES.json (checksums for the pull)',
+        'PBS_QUEUE=%s' % a.queue,
+        'SIM_NODES=%d; SIM_MPIPROCS=2; SIM_PLACE=%s   # SIM_NCPU cores per node; 2 MPI ranks per node' % (
+            R['SIM'][3], 'scatter:excl' if R['SIM'][3] > 1 else 'free'),
+        'SIM_ENV=%s/pkdgrav3/tools/pegasus/env_pegasus.sh   # pkdgrav3 run-time environment (conda MPI)' % a.pkd_io_root,
+        'SIM_STAGING=0           # snapshots and checkpoints written straight to SCRATCH (Lustre)']
+                     + (['VF_WALL=04:00:00; XC_WALL=02:00:00   # debug queue: at most 4 h'] if a.queue == 'debug' else []))
 
 
 def schedule_run(conf, name, priority):
@@ -192,10 +243,12 @@ def schedule_run(conf, name, priority):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--root', default='/user/%s/sahyadri_scratch' % os.environ.get('USER', 'shadab'),
-                    help='working area (SCRATCH) while the run is computed')
-    ap.add_argument('--archive', default='/storage/%s/sahyadri_sims' % os.environ.get('USER', 'shadab'),
-                    help="long-term copy of the kept data ('' = no archive stage)")
+    ap.add_argument('--site', default='pawna', choices=sorted(SITES),
+                    help='where the run is computed (pegasus: run this script on pegasus; the archive stays on pawna)')
+    ap.add_argument('--queue', default=None, help='PBS queue (default: workq on pawna, project on pegasus)')
+    ap.add_argument('--root', default=None, help='working area (SCRATCH) while the run is computed (site default)')
+    ap.add_argument('--archive', default=None,
+                    help="long-term copy of the kept data, on pawna ('' = no archive stage; site default)")
     ap.add_argument('--keep-full-z', default='0 0.5 1 2 3 5 7', help='full snapshots kept: outputs nearest these z')
     ap.add_argument('--keep-pct', type=float, default=1, help='percent of the particles kept of the other snapshots')
     ap.add_argument('--L', type=float, default=200.0, help='box size [Mpc/h]')
@@ -203,9 +256,8 @@ def main():
     ap.add_argument('--cosmo', default='default',
                     help="cosmologies/<name>.cosmo; several: comma separated and/or shell patterns ('var_*'), or 'all'")
     ap.add_argument('--real', default='1', help='realisations, e.g. 1 or 1,2 or 1-5 (seeds: config/sims/seeds.txt)')
-    ap.add_argument('--codes', default='/storage/shadab/pipeline_test/codes',
-                    help='Rockstar, consistent-trees, venv (setup_pawna.sh)')
-    ap.add_argument('--pkd-io-root', default='/storage/shadab/pkdgrav3_io', help='pkdgrav3 build')
+    ap.add_argument('--codes', default=None, help='Rockstar, consistent-trees, venv (setup_pawna.sh; site default)')
+    ap.add_argument('--pkd-io-root', default=None, help='pkdgrav3 build (site default)')
     ap.add_argument('--outputs', default=os.path.join(HERE, 'sahyadri_outputs_a.txt'))
     ap.add_argument('--step-da', type=float, default=(1 - 1 / 13.) / 2000,
                     help='top-level step size in a (default: that of the 256^3 reference run)')
@@ -217,6 +269,14 @@ def main():
     ap.add_argument('--schedule', nargs='?', const=0, type=int, default=None, metavar='PRIORITY',
                     help='register with the run manager and queue the simulations (priority, default 0)')
     a = ap.parse_args()
+    S = SITES[a.site]
+    user = os.environ.get('USER', 'shadab')
+    for k, sk in (('root', 'root'), ('archive', 'archive'), ('codes', 'codes'), ('pkd_io_root', 'pkd'), ('queue', 'queue')):
+        if getattr(a, k) is None:
+            setattr(a, k, S[sk].format(user=user))
+    if a.site != 'pawna' and a.schedule is not None:
+        sys.exit('--schedule registers with the manager on pawna; for a %s run register it there: '
+                 'manager.py add %s:<run.conf> (printed below)' % (a.site, a.site))
     sys.path.insert(0, PIPE)
     import retention
     try:   # the kept percentage must be a sum of the leading subsample files
@@ -265,7 +325,7 @@ def setup_cosmo(a, cosmo):
     soft_box = a.soft_frac / N
     force_res = L * soft_box
     k, T, s8_start, s8 = ic_spectrum(c)
-    res = resources(N)
+    res = resources(N) if a.site == 'pawna' else resources_pegasus(N, a.queue)
     wall_h = int(res['SIM'][2].split(':')[0])
     # pkdgrav3 stops this long before the PBS wall time: the staging drain must still copy the last checkpoint
     # (48 B/particle; ~52 GB at 1024^3, ~35 min at the ~25 MB/s of /storage) and snapshot to NFS
@@ -437,7 +497,7 @@ SUBSAMPLES="%(sub)s"
 
 # resources (one pawna node: 192 cores, 755 GB; workq maximum wall time 168 h)
 SIM_NCPU=%(sim_n)d;  SIM_MEM=%(sim_m)s;  SIM_WALL=%(sim_w)s    # iWallRunTime in p.par = SIM_WALL - %(margin)d min
-SIM_STAGING=1           # snapshots and checkpoints written to the node's SSD, copied to NFS during the run
+%(site_block)s
 SIM_KEEPCHK=2           # keep the newest 2 complete checkpoints in checkpoints/ (0 = all)
 RS_NCPU=%(rs_n)d;    RS_MEM=%(rs_m)s;   RS_WALL=%(rs_w)s
 CT_NCPU=%(ct_n)d;    CT_MEM=%(ct_m)s;   CT_WALL=%(ct_w)s
@@ -477,7 +537,7 @@ FITS_DELETE_ASCII=0     # keep 0 with the manager: verify reads the ASCII catalo
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
            sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2],
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
-           margin=margin, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
+           site_block=site_block(a, R), margin=margin, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
            rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'])
         write(os.path.join(sdir, 'run.conf'), conf, a.force)
         sub = '''#!/bin/bash
@@ -516,6 +576,9 @@ Guide: %(sandbox)s/docs/pkdgrav3_pipeline_pawna.md, section "Production runs"
         print('  r%d (seed %d): %s\n        halos: %s' % (r, seed, sdir, hdir))
         if a.schedule is not None:
             schedule_run(os.path.join(sdir, 'run.conf'), name, a.schedule)
+        elif a.site != 'pawna':
+            print('        register on pawna: tools/sahyadri_manager/manager.py add %s:%s/run.conf; then schedule %s'
+                  % (a.site, sdir, name))
     print('''
 Nothing was submitted. Check (and edit if needed) for each realisation:
   r<R>/run.conf  r<R>/p.par  halos/.../r<R>/rockstar_input.cfg   (and %s/cosmology.txt)

@@ -12,7 +12,16 @@ Steps (restartable: files already copied and checked are skipped):
   5. read-only: files ARCHIVE_FILE_MODE (0444), the run's directories ARCHIVE_DIR_MODE (0555), manifest last
      (shared directories, e.g. sims/<stem>/ with cosmology.txt, keep their mode; their files become read-only)
 
-usage: archive_run.py <run.conf> [--dry-run] [--no-lock]
+Runs computed on another site (REMOTE_ARCHIVE=1 in run.conf, e.g. pegasus), archived on pawna:
+  archive_run.py <run.conf> --source-sums   on the computing site, at the end of the verify job: step 1, then size,
+                                            mtime and SHA-256 of every kept file -> <state>/KEPT_FILES.json
+  archive_run.py <mirror run.conf>          on pawna, when the config sets PULL_HOST (user@data node) and
+                                            REMOTE_SCRATCH (the manager writes such a config): the files of
+                                            KEPT_FILES.json pulled with rsync over ssh from PULL_HOST into ARCHIVE,
+                                            each read back (O_DIRECT) and compared with the source's SHA-256; logs and
+                                            event files (still growing after the sums) are compared by rsync only;
+                                            then steps 4-5 as above
+usage: archive_run.py <run.conf> [--dry-run] [--no-lock] [--source-sums]
 """
 import hashlib
 import json
@@ -76,7 +85,18 @@ def main():
     scratch, archive = os.path.realpath(E['SCRATCH']), os.path.realpath(E['ARCHIVE'])
     if scratch == archive or archive.startswith(scratch + '/') or scratch.startswith(archive + '/'):
         sys.exit('SCRATCH (%s) and ARCHIVE (%s) must be separate trees' % (scratch, archive))
+    if '--source-sums' in sys.argv:
+        return source_sums(E)
+    if E.get('PULL_HOST'):
+        return pull(E, dry)
     pl = retention.plan(E)
+    P = pl['paths']
+    V, files = checked_files(E, pl)
+    return copy_local(E, pl, P, V, files, dry)
+
+
+def checked_files(E, pl):
+    """verify.json passed and no kept file changed after it -> (verify report, kept files)."""
     P = pl['paths']
     vf = os.path.join(P['state'], 'verify.json')
     if not os.path.isfile(vf):
@@ -91,6 +111,10 @@ def main():
             if cat not in ('log', 'events', 'meta') and os.path.getmtime(src) > vt]
     if late:
         sys.exit('%d kept files changed after verify (%s): run verify again' % (len(late), ', '.join(late[:5])))
+    return V, files
+
+
+def copy_local(E, pl, P, V, files, dry):
     adir = os.path.join(E['ARCHIVE'], P['rel']['state'])
     man_path = os.path.join(adir, 'MANIFEST.json')
     if os.path.isfile(man_path) and not os.access(adir, os.W_OK):
@@ -157,6 +181,11 @@ def main():
                                                                   nback / 1e6 / max(t2 - t1, 1e-3), bad))
     if bad:
         sys.exit(1)
+    return finish(E, P, V, rows, adir, man_path, partial)
+
+
+def finish(E, P, V, rows, adir, man_path, partial, source=None):
+    """Manifest, SHA256SUMS, read-only modes (steps 4-5)."""
     # ---------------------------------------------------------------- manifest
     by = {}
     for r in rows:
@@ -167,6 +196,8 @@ def main():
              verify=dict(time=V['time'], job=V.get('job'), checks={k: c['ok'] for k, c in V['checks'].items()}),
              retention=V['retention'], totals=by, bytes=sum(r['size'] for r in rows), complete=True,
              sandbox=git_head(), files=rows)
+    if source:
+        M.update(source)
     os.makedirs(adir, exist_ok=True)
     with open(os.path.join(adir, 'SHA256SUMS.part'), 'w') as f:
         for r in rows:
@@ -201,8 +232,115 @@ def main():
                     break
                 d = os.path.dirname(d)
         print('read-only: files %o, directories %o (%s); parent directories readable' % (fm, dm, ', '.join(own)))
-    os.remove(partial)
+    if os.path.exists(partial):
+        os.remove(partial)
     return 0
+
+
+LIVE = ('log', 'events', 'meta')     # still written after verify (its own log and events): no source checksum check
+
+
+def source_sums(E):
+    """On the computing site, after verify: KEPT_FILES.json with size, mtime, SHA-256 of every kept file."""
+    pl = retention.plan(E)
+    P = pl['paths']
+    V, files = checked_files(E, pl)
+    t0 = time.time()
+    rows = []
+    for cat, snap, src, rel in files:
+        st = os.stat(src)
+        rows.append(dict(path=rel, cat=cat, snap=snap, size=st.st_size, mtime=st.st_mtime, sha256=sha_file(src)))
+    out = dict(run='%s/r%s' % (E['STEM'], E['REAL']), scratch=E['SCRATCH'], host=os.uname()[1], time=time.strftime('%Y-%m-%dT%H:%M:%S'),
+               verify_time=V['time'], bytes=sum(r['size'] for r in rows), files=rows)
+    f = os.path.join(P['state'], 'KEPT_FILES.json')
+    with open(f + '.part', 'w') as fh:
+        json.dump(out, fh, indent=1)
+    os.replace(f + '.part', f)
+    print('%s: %d kept files, %s, checksummed in %.0f s' % (f, len(rows), retention.human(out['bytes']), time.time() - t0))
+    return 0
+
+
+def pull(E, dry):
+    """On pawna: the kept files of a run computed elsewhere, from PULL_HOST:REMOTE_SCRATCH into ARCHIVE."""
+    P = retention.paths(E)       # the manager's mirror of the run's state (SCRATCH = mirror)
+    host, rscr = E['PULL_HOST'], E['REMOTE_SCRATCH'].rstrip('/')
+    vf, kf = os.path.join(P['state'], 'verify.json'), os.path.join(P['state'], 'KEPT_FILES.json')
+    if not os.path.isfile(vf) or not json.load(open(vf)).get('ok'):
+        sys.exit('no passed verify.json in %s' % P['state'])
+    V = json.load(open(vf))
+    if not os.path.isfile(kf):
+        sys.exit('no %s (written by the verify job on the computing site)' % kf)
+    K = json.load(open(kf))
+    if K.get('verify_time') != V.get('time'):
+        sys.exit('KEPT_FILES.json (verify %s) is not from the newest verify (%s)' % (K.get('verify_time'), V.get('time')))
+    adir = os.path.join(E['ARCHIVE'], P['rel']['state'])
+    man_path = os.path.join(adir, 'MANIFEST.json')
+    if os.path.isfile(man_path) and not os.access(adir, os.W_OK):
+        M = json.load(open(man_path))
+        if M.get('complete'):
+            print('already archived and locked: %s (%d files)' % (man_path, len(M['files'])))
+            return 0
+    partial = os.path.join(P['state'], 'archive_partial.json')
+    done = json.load(open(partial)) if os.path.isfile(partial) else {}
+    print('%s r%s: %d files, %s from %s:%s -> %s' % (E['STEM'], E['REAL'], len(K['files']), retention.human(K['bytes']),
+                                                      host, rscr, E['ARCHIVE']))
+    if dry:
+        return 0
+    rows, todo, existing = [], [], []
+    for r in K['files']:
+        dst = os.path.join(E['ARCHIVE'], r['path'])
+        prev = done.get(r['path'])
+        if prev and prev.get('src_mtime') == r['mtime'] and prev.get('sha256_dst') == prev['sha256'] and os.path.isfile(dst):
+            rows.append(prev)
+        elif os.path.exists(dst) and not os.access(dst, os.W_OK):
+            existing.append(r)        # already archived by another run (shared cosmology files): must be identical
+        else:
+            todo.append(r)
+    t0 = time.time()
+    if todo:
+        lst = os.path.join(P['state'], 'pull_files.txt')
+        with open(lst, 'w') as f:
+            f.write(''.join(r['path'] + '\n' for r in todo))
+        os.makedirs(E['ARCHIVE'], exist_ok=True)
+        # -t times, -p permissions of the source (made read-only below), whole files (-W: no delta against old copies)
+        cmd = ['rsync', '-tpW', '--partial', '--files-from=' + lst, '-e',
+               'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10', '%s:%s/' % (host, rscr),
+               E['ARCHIVE'].rstrip('/') + '/']
+        print(' '.join(cmd), flush=True)
+        for attempt in range(1, 6):
+            rc = subprocess.run(cmd).returncode
+            if rc == 0:
+                break
+            print('rsync exit %d (attempt %d); retrying in 60 s' % (rc, attempt), flush=True)
+            time.sleep(60)
+        else:
+            sys.exit('rsync failed %d times' % attempt)
+    nb = sum(r['size'] for r in todo)
+    t1 = time.time()
+    print('pulled %s in %.0f s (%.2f MB/s)' % (retention.human(nb), t1 - t0, nb / 1e6 / max(t1 - t0, 1e-3)), flush=True)
+    bad = 0
+    for r in todo + existing:
+        dst = os.path.join(E['ARCHIVE'], r['path'])
+        hd, direct = sha_direct(dst)
+        row = dict(path=r['path'], cat=r['cat'], snap=r['snap'], size=os.path.getsize(dst), mtime=r['mtime'],
+                   src_mtime=r['mtime'], sha256=r['sha256'], sha256_dst=hd, direct=direct)
+        if r in existing:
+            row['existing'] = True
+        if r['cat'] in LIVE and r not in existing:
+            row.update(sha256=hd, live=True, mtime=os.path.getmtime(dst))   # grew after the sums; rsync checked it
+        elif hd != r['sha256'] or row['size'] != r['size']:
+            bad += 1
+            print('MISMATCH %s: source %s (%d B), archive %s (%d B)' % (r['path'], r['sha256'], r['size'], hd, row['size']))
+            continue
+        rows.append(row)
+        done[r['path']] = row
+    json.dump(done, open(partial, 'w'))
+    t2 = time.time()
+    print('read back %s in %.0f s, %d mismatches' % (retention.human(nb), t2 - t1, bad))
+    if bad:
+        sys.exit(1)
+    return finish(E, P, V, rows, adir, man_path, partial,
+                  source=dict(scratch=rscr, source_host=host, kept_files_time=K['time'], pulled_seconds=round(t1 - t0, 1)))
 
 
 def git_head():

@@ -39,7 +39,14 @@ prev=$AFTER
 for st in sim rockstar ctrees vahc fits xcorr verify archive; do
   case ",$STAGES," in *",$st,"*) ;; *) continue ;; esac
   case $st in
-    sim)      R="select=1:ncpus=$SIM_NCPU:mem=$SIM_MEM";   W=$SIM_WALL ;;
+    sim)      # SIM_NODES > 1 or SIM_MPIPROCS > 1 (pegasus): pkdgrav3 with MPI ranks over the nodes (job_sim.pbs)
+              if [ "${SIM_NODES:-1}" -gt 1 ] || [ "${SIM_MPIPROCS:-1}" -gt 1 ]; then
+                R="select=${SIM_NODES:-1}:ncpus=$SIM_NCPU:mpiprocs=${SIM_MPIPROCS:-1}:mem=$SIM_MEM"
+                [ -n "${SIM_PLACE:-}" ] && R="$R -l place=$SIM_PLACE"
+              else
+                R="select=1:ncpus=$SIM_NCPU:mem=$SIM_MEM"
+              fi
+              W=$SIM_WALL ;;
     rockstar) R="select=1:ncpus=$RS_NCPU:mem=$RS_MEM";     W=$RS_WALL ;;
     ctrees)   R="select=1:ncpus=$CT_NCPU:mem=$CT_MEM";     W=$CT_WALL ;;
     vahc)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
@@ -54,7 +61,9 @@ for st in sim rockstar ctrees vahc fits xcorr verify archive; do
   [ "$st" = sim ] && [ -n "$RESTART" ] && V="$V,RESTART=$RESTART"
   N="${st}_$REAL"
   if [ "$st" = rockstar ] && [ -n "$RSSNAPS" ]; then V="$V,RS_SNAP_FIRST=${RSSNAPS%-*},RS_SNAP_LAST=${RSSNAPS#*-}"; N="rs${RSSNAPS%-*}_$REAL"; fi
-  cmd=("$QSUB" -N "$N" -q workq -l "$R" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
+  # shellcheck disable=SC2206
+  RL=(-l ${R// -l / -l })      # "select=... -l place=..." -> two -l options
+  cmd=("$QSUB" -N "$N" -q "${PBS_QUEUE:-workq}" "${RL[@]}" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
        -v "$V" "$HERE/job_$st.pbs")
   if [ -n "$DRY" ]; then echo "${cmd[*]}"; prev="<$st>"; continue; fi
   id=$("${cmd[@]}")
