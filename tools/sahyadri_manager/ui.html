@@ -254,6 +254,16 @@ function cat(r){
   if(['not started','scheduled'].includes(r.phase) && !(r.jobs||[]).length) return 'upcoming';
   return 'active';
 }
+function renderFinished(r, i){
+  const A=r.archive||{}, nm=h(r.name);
+  const btn = r.phase==='in trash'
+    ? `<button onclick="act({run:'${nm}',action:'undo_trash'})">Undo (move back)</button><button class="danger" onclick="purge('${nm}')">Purge permanently…</button>`
+    : `<button onclick="act({run:'${nm}',action:'check_trash'})">Check</button><button class="danger" onclick="trash('${nm}')">Move scratch data to the trash…</button>`;
+  return `<div class="card"><div class="row"><b>${nm}</b>${r.site&&r.site!==S.local_site?`<span class="badge b-wait">${h(r.site)}</span>`:''}${phaseBadge(r)}
+    <span class="muted small">${h(r.npart)}³ · archive ${A.manifest?h(A.manifest.replace(/\/state\/.*$/,'')):h(r.archive_root||'')} · archived ${A.t?when(A.t):'—'} · scratch ${hum(r.scratch_bytes)}</span>
+    <span class="sp"></span>${btn}</div>
+    <details data-k="f${i}" ${openDetails.has('f'+i)?'open':''}><summary>details</summary>${renderRun(r, i)}</details></div>`;
+}
 function setTab(t){ TAB=t; history.replaceState(null,'','#'+t); render(); }
 function renderTabs(){
   const groups={active:[],upcoming:[],finished:[]};
@@ -266,7 +276,7 @@ function renderTabs(){
   document.getElementById('runs-active').innerHTML = cards(groups.active, 'No run is simulating or post-processing.');
   document.getElementById('runs-upcoming').innerHTML = cards(groups.upcoming, 'No registered run is waiting to start.');
   const fin=groups.finished.filter(([r])=>r.phase!=='purged'), purged=groups.finished.filter(([r])=>r.phase==='purged');
-  document.getElementById('runs-finished').innerHTML = cards(fin, 'No archived run with data in scratch.') +
+  document.getElementById('runs-finished').innerHTML = (fin.length?fin.map(([r,i])=>renderFinished(r,i)).join(''):'<div class="card muted">No archived run with data in scratch.</div>') +
     (purged.length?`<div class="card"><b>Purged</b> <span class="muted small">archived; scratch data deleted</span><table style="margin-top:6px"><tr><th>run</th><th>site</th><th>archive</th><th>purged</th></tr>${
       purged.map(([r])=>`<tr><td>${h(r.name)}</td><td>${h(r.site)}</td><td class="small">${h(r.archive_root||'')}</td><td>${r.purged?when(r.purged.t):''}</td></tr>`).join('')}</table></div>`:'');
   // summary
