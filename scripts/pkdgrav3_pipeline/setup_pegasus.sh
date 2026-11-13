@@ -15,4 +15,5 @@ unset PYTHONHOME                    # set by env_pegasus.sh for pkdgrav3's embed
 export PIP_CACHE_DIR=${PIP_CACHE_DIR:-/data/project/hpc2502016/shadab/cache/pip}
 # HDF5 from the conda env, found at run time through the rpath (Rockstar jobs do not load the env)
 export HDF5_INC=$CONDA_PREFIX/include HDF5_LIB="$CONDA_PREFIX/lib -Wl,-rpath,$CONDA_PREFIX/lib"
+export ZSTD_INC=$CONDA_PREFIX/include ZSTD_LIB="$CONDA_PREFIX/lib -Wl,-rpath,$CONDA_PREFIX/lib"   # shared libzstd only
 exec bash "$(dirname "$(readlink -f "$0")")/setup_pawna.sh" "$CODES" "$PKD_IO_ROOT"

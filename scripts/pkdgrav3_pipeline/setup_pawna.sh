@@ -20,9 +20,10 @@ CODES=${1:?usage: setup_pawna.sh <CODES dir> [PKD_IO_ROOT]}
 PKD_IO_ROOT=${2:-/storage/$USER/pkdgrav3_io}
 SB=$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)     # this repository
 mkdir -p "$CODES/lib"; CODES=$(cd "$CODES" && pwd)
-ZSRC=$PKD_IO_ROOT/build_snapcomp/_deps/snapcomp_zstd_src-src/lib
-ZBLD=$PKD_IO_ROOT/build_snapcomp/_deps/snapcomp_zstd_src-build/lib
-[ -f "$ZSRC/zstd.h" ] && [ -f "$ZBLD/libzstd.a" ] || { echo "zstd not found under $PKD_IO_ROOT/build_snapcomp (build pkdgrav3 first)"; exit 1; }
+# zstd: the one pkdgrav3's snapcomp build fetched (pawna), or ZSTD_INC / ZSTD_LIB (pegasus: the conda env's)
+ZSRC=${ZSTD_INC:-$PKD_IO_ROOT/build_snapcomp/_deps/snapcomp_zstd_src-src/lib}
+ZBLD=${ZSTD_LIB:-$PKD_IO_ROOT/build_snapcomp/_deps/snapcomp_zstd_src-build/lib}
+[ -f "$ZSRC/zstd.h" ] && ls "${ZBLD%% *}"/libzstd.* >/dev/null 2>&1 || { echo "zstd not found ($ZSRC, $ZBLD; build pkdgrav3 first)"; exit 1; }
 overlay() {  # copy the repository's changed files (not the .bak originals) over an upstream checkout
   (cd "$1" && find . -type f ! -name '*.bak' -print0 | xargs -0 -I{} cp --parents {} "$2")
 }
