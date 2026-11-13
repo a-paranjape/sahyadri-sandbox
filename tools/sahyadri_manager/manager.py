@@ -306,6 +306,22 @@ def mirror_conf(cfg, site, remote_conf):
     return path
 
 
+def refresh_mirror_conf(path, cfg):
+    """The local part of a mirror config (after the '# ---- mirror' line): SANDBOX and CODES of this manager's install,
+    so archive pulls run the code the manager runs (configs written by an older install pointed elsewhere)."""
+    text = open(path).read()
+    i = text.find('\n# ---- mirror')
+    if i < 0:
+        return
+    head, tail = text[:i], text[i:]
+    new = re.sub(r'(?m)^SANDBOX=.*$', 'SANDBOX=%s' % REPO, tail)
+    new = re.sub(r'(?m)^CODES=.*$', 'CODES=%s' % cfg.get('local_codes', ''), new)
+    if new != tail:
+        with open(path + '.tmp', 'w') as f:
+            f.write(head + new)
+        os.replace(path + '.tmp', path)
+
+
 def sync_site(cfg, site, runs, timeout=1800):
     """rsync the small files of the site's runs into its mirror (from the data node). rc 23/24 (some files absent,
     e.g. before the simulation starts) is normal."""
@@ -665,6 +681,8 @@ class Manager:
         for conf, r in want.items():
             if conf not in self.runs:
                 try:
+                    if os.path.dirname(os.path.dirname(conf)).endswith(tuple(S['mirror'] for S in self.cfg['sites'].values())):
+                        refresh_mirror_conf(conf, self.cfg)
                     run = Run(conf, paused=r.get('paused', False))
                     self.runs[conf] = run
                     run.read_events()
