@@ -59,6 +59,23 @@ snap_watch() {
 snap_watch < /dev/null > /dev/null 2>&1 &
 SNAPWATCH_PID=$!
 event sim_info nth="$NTH" staging="${SIM_STAGING:-0}" restart="${CHK:-}"
+# restart: the planned outputs already complete in $PKC_DIR (written by earlier jobs) are announced now, so the manager
+# can run Rockstar on them while this job continues (checked as at the end: all files, header/trailer, pkcreader)
+if [ -n "$CHK" ] && [ -f output_steps.txt ]; then
+  "$PY" - "$PP" "$PKC_DIR" $(awk '!/^#/ {print $1}' output_steps.txt) <<'PYEOF' | while read -r s; do event snap_ready step="$s" checked=1 earlier=1; done
+import sys, glob
+sys.path.insert(0, sys.argv[1])
+from pkcreader import PkcSnapshot
+d = sys.argv[2]
+for s in sys.argv[3:]:
+    if glob.glob('%s/snap.%s.s*.pkc' % (d, s)):
+        try:
+            PkcSnapshot('%s/snap.%s' % (d, s)); print(s)
+        except Exception:
+            pass
+PYEOF
+  stamp "restart: $(grep -c '"earlier": 1' "$EVFILE" 2>/dev/null) earlier outputs announced"
+fi
 ln -sf run.$J.log run.log      # now, so that run.log follows the running simulation
 if [ "${SIM_STAGING:-0}" = 1 ]; then
   # pkdgrav3's staged I/O (tools/staging/run_staged.pbs): snapshots and checkpoints are written to the node's
