@@ -792,3 +792,42 @@ tools/sahyadri_manager/manager.py limits pegasus.max_sim_running=2 pegasus.max_s
 The pegasus queues allow per user: `debug` 2 running jobs, 128 cores, 4 h; `project` 4 running jobs, 2048 cores;
 `regular` 4 jobs, 1280 cores, 48 h (`qstat -Qf`, 13 Nov 2026). Rockstar at 2048³ needs about 624 GB, more
 than one pegasus node, and Rockstar across several nodes is not set up yet.
+
+### 13.6 Production install, planned runs, budgets
+
+**Install.** One script installs everything a site needs, in a new directory; production runs use only these:
+```bash
+# pawna (head node): /user/$USER/sahyadri_prod/{pkdgrav3_io,codes,sahyadri-sandbox}
+bash install_production.sh pawna
+# pegasus (login node): ~/sahyadri_pipeline/{pkdgrav3_io,codes,sahyadri-sandbox}
+bash install_production.sh pegasus
+```
+It clones or updates the repository (`run-manager`) and pkdgrav3 (GitHub main) and builds them. It also builds
+Rockstar with the `.pkc` reader, consistent-trees, the Python venv with the pinned versions of
+`scripts/pkdgrav3_pipeline/requirements.txt` (the same on both sites), and the post-processing C helpers. It ends
+by importing every pipeline and post-processing module. `setup_production.py --site pawna|pegasus` uses these
+paths by default. The manager runs from `/user/shadab/sahyadri_prod/sahyadri-sandbox` (`start_manager.sh`).
+
+**Planned runs.** `scripts/pkdgrav3_pipeline/production/planned_runs.txt` lists the runs to make, one line per
+cosmology and set of realisations (`site queue cosmology N L realisations priority [options]`; format in the
+file). Every `plan_s` (300 s), the manager sets up what is not set up yet (`setup_production.py` locally, or over
+ssh on pegasus), registers it and puts its simulation in the queue with that priority. Option `hold` registers the
+run paused. An existing `run.conf` is registered, never overwritten. A failed set-up is shown in the Upcoming tab and
+is not retried until its line changes.
+
+**Pegasus queues and core hours.** `--queue project` submits with `-q project -P hpc2502016` and is charged to the
+project's half-year budget (96 h jobs). `--queue regular` is charged to the user's budget (48 h jobs; more
+restarts). Before each pegasus submission the manager reads the balance with `amgr checkbalance` (cached 5 min) and
+submits only if cores × requested wall time fits in the balance minus `budget.reserve_coreh` (2000). Otherwise the run
+waits, with the reason shown on its card. PBS reserves that amount at submission and refunds the unused part at the
+end. On 13 Nov 2026: project hpc2502016, 2026.h2: 172,248 core-h; user calam.shadab: 49,110 core-h. A 96 h job
+on 3 nodes reserves 9,216 core-h.
+
+**Page.** Tabs: Summary (runs per site and state, budgets, disk, plan file, the simulation queue and its limits,
+the log), Active, Upcoming (planned and scheduled runs not started yet), Finished (archived runs with the trash and
+purge buttons; purged runs in a table).
+
+**Post-processing beyond the pipeline.** Every run directory has `postprocess.sh` (not run by the manager):
+`vpot` (halo potential profiles `.vpot`, then the vahc FITS tables again with the phi columns), `xcorr` (halo-halo
+potential cross-correlation), `all`. The older driver `scripts/post-process/postprocess.py` (two-point correlations,
+VVF, kNN, Voronoi web) reads Gadget snapshots, not `.pkc`, and has no submission script yet.
