@@ -531,6 +531,9 @@ class Run:
         else:
             raise FileNotFoundError('%s (and no saved copy)' % self.conf)
         self.P = retention.paths(self.E)
+        if not os.path.isdir(self.E['SCRATCH']):
+            # an unmounted file system looks like a missing directory: do not create anything there or start afresh
+            raise FileNotFoundError('SCRATCH %s does not exist (file system not mounted?)' % self.E['SCRATCH'])
         self.site = self.E.get('SITE') or LOCAL
         self.remote = self.site != LOCAL and bool(self.E.get('REMOTE_CONF'))
         # runs of another site are named <site>:<stem>/r<real> (the same run name may exist on both sites)
@@ -832,6 +835,7 @@ class Manager:
                     run.read_events()
                     log('run %s (%s): %d events' % (run.name, conf, len(run.ev)))
                 except Exception as e:  # noqa: BLE001
+                    self.unloaded.append(conf)      # tried again at every heartbeat
                     log('cannot load %s: %s' % (conf, e))
         self.restart_watch()
 
@@ -1134,6 +1138,12 @@ class Manager:
     def run_ok(self, run):
         """Does the file system with the run's files (its SCRATCH: state, events, logs) answer? Sets run.stalled."""
         key = run.E['SCRATCH']
+        if PROBE.ok(key, storage_test(run.P['state']), int(self.cfg.get('storage_timeout_s', 30))) and not os.path.isdir(key):
+            if not getattr(run, 'stalled', None):     # unmounted: answers, but SCRATCH is gone
+                run.stalled = 'storage: %s does not exist (file system not mounted?)' % key
+                log('%s: %s' % (run.name, run.stalled))
+                self.restart_watch()
+            return False
         if PROBE.ok(key, storage_test(run.P['state']), int(self.cfg.get('storage_timeout_s', 30))):
             if getattr(run, 'stalled', None):
                 run.stalled = None
@@ -1150,6 +1160,10 @@ class Manager:
         if qi and qi['state'] != 'open':
             return 'archive paused (queues file: %s archive %s)' % (LOCAL, qi['state'])
         A = run.E.get('ARCHIVE')
+        top = '/' + A.strip('/').split('/')[0] if A else None
+        if A and PROBE.ok('archive ' + A, archive_test(A), int(self.cfg.get('storage_timeout_s', 30))) and \
+                os.path.ismount(top) is False and len(os.listdir(top)) == 0:
+            return 'archive storage %s is empty (not mounted?)' % top
         if A and not PROBE.ok('archive ' + A, archive_test(A), int(self.cfg.get('storage_timeout_s', 30))):
             return 'archive storage %s not responding since %s' % (A, iso(PROBE.down('archive ' + A)))
         return None
