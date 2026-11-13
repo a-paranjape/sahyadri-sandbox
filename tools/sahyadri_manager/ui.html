@@ -119,7 +119,7 @@ function renderRun(r, idx){
   const sim=r.sim; let simline='';
   if(sim){ const f=sim.nsteps? Math.min(1, sim.step/sim.nsteps):0;
     simline=`<div class="row small"><span>simulation step ${sim.step|0}${sim.nsteps?' / '+sim.nsteps:''}, z = ${sim.z.toFixed(3)}</span><div class="bar" style="width:220px"><div style="width:${(100*f).toFixed(1)}%"></div></div>
-      <span class="muted">${sim.rate? (sim.rate*3600).toFixed(0)+' steps/h, done ~'+when(sim.eta) : ''} · log ${ago(sim.log_mtime)}</span></div>`; }
+      <span class="muted">${sim.rate && f<1? (sim.rate*3600).toFixed(0)+' steps/h, done ~'+when(sim.eta)+' · ' : ''}log ${ago(sim.log_mtime)}</span></div>`; }
   const st=STAGES.map(s=>{const i=stageInfo(r,s); return `<div class="stage ${i.cls}"><b>${s}</b>${i.txt}</div>`;}).join('');
   const clean = r.purged ? `<div class="stage st-ok"><b>cleanup</b>purged</div>` : (r.trash ? `<div class="stage st-run"><b>cleanup</b>in trash</div>` : `<div class="stage"><b>cleanup</b><span class="muted">—</span></div>`);
   let fail='';
