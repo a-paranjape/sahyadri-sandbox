@@ -124,7 +124,7 @@ function stageInfo(run, st){
 }
 function phaseBadge(r){
   const p=r.phase; let c='b-run';
-  if(p==='failed') c='b-bad'; else if(p==='scheduled'||p==='waiting to restart') c='b-wait'; else if(['archived','purged'].includes(p)) c='b-ok'; else if(p==='not started'||r.paused) c='b-off'; else if(p==='in trash') c='b-wait';
+  if(p==='failed') c='b-bad'; else if(p==='scheduled'||p==='waiting to restart') c='b-wait'; else if(['archived','purged','verified (no archive)'].includes(p)) c='b-ok'; else if(p==='not started'||r.paused) c='b-off'; else if(p==='in trash') c='b-wait';
   return `<span class="badge ${c}">${h(p)}${r.paused?' · paused':''}${r.busy?' · '+h(r.busy)+'…':''}</span>`;
 }
 function renderRun(r, idx){
@@ -250,13 +250,13 @@ function render(){
 const TABS=[['summary','Summary'],['active','Active'],['upcoming','Upcoming'],['finished','Finished']];
 let TAB = (location.hash||'').slice(1) || 'summary';
 function cat(r){
-  if(['archived','purged','in trash'].includes(r.phase)) return 'finished';
+  if(['archived','purged','in trash','verified (no archive)'].includes(r.phase)) return 'finished';
   if(['not started','scheduled'].includes(r.phase) && !(r.jobs||[]).length) return 'upcoming';
   return 'active';
 }
 function renderFinished(r, i){
   const A=r.archive||{}, nm=h(r.name);
-  const btn = r.phase==='in trash'
+  const btn = r.phase==='verified (no archive)' ? '<span class="muted small">no ARCHIVE in run.conf: nothing to delete</span>' : r.phase==='in trash'
     ? `<button onclick="act({run:'${nm}',action:'undo_trash'})">Undo (move back)</button><button class="danger" onclick="purge('${nm}')">Purge permanently…</button>`
     : `<button onclick="act({run:'${nm}',action:'check_trash'})">Check</button><button class="danger" onclick="trash('${nm}')">Move scratch data to the trash…</button>`;
   return `<div class="card"><div class="row"><b>${nm}</b>${r.site&&r.site!==S.local_site?`<span class="badge b-wait">${h(r.site)}</span>`:''}${phaseBadge(r)}

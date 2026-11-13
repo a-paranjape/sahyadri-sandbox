@@ -582,6 +582,10 @@ class Run:
         a = D['archive']
         if a and int(a.get('ok', 0)):
             return 'archived'
+        v = D['verify']
+        if (not self.E.get('ARCHIVE') and v and int(v.get('ok', 0)) and D['sim_done'] and not D['active']
+                and len(D['rs_done']) == len(self.outs)):
+            return 'verified (no archive)'
         for st in ('archive', 'verify', 'fits', 'vahc', 'ctrees'):
             j = D['last'].get(st)
             if j and j['status'] in ('submitted', 'queued', 'held', 'running', 'exiting'):
@@ -1335,7 +1339,10 @@ class Manager:
         conf = os.path.abspath(conf)
         if not os.path.isfile(conf):
             raise ValueError('no file %s' % conf)
-        Run(conf)    # loads without error
+        new = Run(conf)    # loads without error
+        same = [r for r in self.runs.values() if r.name == new.name and r.conf != conf]
+        if same:           # run names are how the page, the CLI and the plan file address runs
+            raise ValueError('a run named %s is already registered (%s); not adding %s' % (new.name, same[0].conf, conf))
         if not any(r['conf'] == conf for r in self.cfg['runs']):
             self.cfg['runs'].append(dict(conf=conf, paused=paused, added=iso()))
             save_cfg(self.cfg)
