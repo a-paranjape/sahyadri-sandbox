@@ -577,8 +577,8 @@ Guide: %(sandbox)s/docs/pkdgrav3_pipeline_pawna.md, section "Production runs"
         if a.schedule is not None:
             schedule_run(os.path.join(sdir, 'run.conf'), name, a.schedule)
         elif a.site != 'pawna':
-            print('        register on pawna: tools/sahyadri_manager/manager.py add %s:%s/run.conf; then schedule %s'
-                  % (a.site, sdir, name))
+            print('        register on pawna: tools/sahyadri_manager/manager.py add %s:%s/run.conf; then schedule %s:%s'
+                  % (a.site, sdir, a.site, name))
     print('''
 Nothing was submitted. Check (and edit if needed) for each realisation:
   r<R>/run.conf  r<R>/p.par  halos/.../r<R>/rockstar_input.cfg   (and %s/cosmology.txt)

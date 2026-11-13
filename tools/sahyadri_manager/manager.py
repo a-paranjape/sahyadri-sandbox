@@ -256,7 +256,8 @@ class Run:
         self.P = retention.paths(self.E)
         self.site = self.E.get('SITE') or LOCAL
         self.remote = self.site != LOCAL and bool(self.E.get('REMOTE_CONF'))
-        self.name = '%s/r%s' % (self.E['STEM'], self.E['REAL'])
+        # runs of another site are named <site>:<stem>/r<real> (the same run name may exist on both sites)
+        self.name = '%s%s/r%s' % (self.site + ':' if self.remote else '', self.E['STEM'], self.E['REAL'])
         self.outs = retention.planned_outputs(self.E, self.P)
         self.step_index = {o[1]: o[0] for o in self.outs}
         os.makedirs(os.path.join(self.P['state'], 'events'), exist_ok=True)

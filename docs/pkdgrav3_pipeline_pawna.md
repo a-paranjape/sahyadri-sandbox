@@ -786,7 +786,7 @@ cd ~/sahyadri_pipeline/sahyadri-sandbox/scripts/pkdgrav3_pipeline/production
 ~/sahyadri_pipeline/codes/venv/bin/python setup_production.py --site pegasus --cosmo var_Om_p --N 2048 --real 1
 # on pawna
 tools/sahyadri_manager/manager.py add pegasus:/data/project/hpc2502016/shadab/sahyadri_scratch/sims/Sahyadri_L200N2048/var_Om_p2048/r1/run.conf
-tools/sahyadri_manager/manager.py schedule Sahyadri_L200N2048/var_Om_p2048/r1
+tools/sahyadri_manager/manager.py schedule pegasus:Sahyadri_L200N2048/var_Om_p2048/r1   # runs of pegasus: pegasus:<stem>/r<N>
 tools/sahyadri_manager/manager.py limits pegasus.max_sim_running=2 pegasus.max_sim_queued=1
 ```
 The pegasus queues allow per user: `debug` 2 running jobs, 128 cores, 4 h; `project` 4 running jobs, 2048 cores;
