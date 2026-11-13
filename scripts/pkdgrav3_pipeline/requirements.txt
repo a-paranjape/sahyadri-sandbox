@@ -18,3 +18,4 @@ scipy==1.15.3
 six==1.17.0
 tzdata==2026.6
 zstandard==0.25.0
+ipython==8.37.0

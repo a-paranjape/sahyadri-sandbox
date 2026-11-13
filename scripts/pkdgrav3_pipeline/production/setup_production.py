@@ -167,11 +167,11 @@ def resources(N):
 
 
 PEG_HOME = '/mnt/home/project/calam.shadab/sahyadri_pipeline'
-# per site: defaults of --root, --archive, --codes, --pkd-io-root, --queue. A run of another site than pawna is archived
+# per site: defaults of --root, --archive, --codes, --pkd-io-root, --queue (installs: install_production.sh). A run of another site than pawna is archived
 # on pawna (REMOTE_ARCHIVE=1): the manager on pawna pulls its kept files from the site's data node.
 SITES = dict(
     pawna=dict(root='/user/{user}/sahyadri_scratch', archive='/storage/{user}/sahyadri_sims',
-               codes='/storage/shadab/pipeline_test/codes', pkd='/storage/shadab/pkdgrav3_io', queue='workq'),
+               codes='/user/{user}/sahyadri_prod/codes', pkd='/user/{user}/sahyadri_prod/pkdgrav3_io', queue='workq'),
     pegasus=dict(root='/data/project/hpc2502016/shadab/sahyadri_scratch', archive='/storage/shadab/sahyadri_sims',
                  codes=PEG_HOME + '/codes', pkd=PEG_HOME + '/pkdgrav3_io', queue='project'),
 )
