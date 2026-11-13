@@ -58,7 +58,7 @@ echo "== Python venv"
 # self-contained (no system site packages): pawna's system scipy is built for numpy < 1.25
 [ -x "$CODES/venv/bin/python" ] || python3 -m venv "$CODES/venv"
 "$CODES/venv/bin/python" -m pip install -q --upgrade pip
-"$CODES/venv/bin/python" -m pip install -q numpy scipy pandas "h5py<3.12" fitsio zstandard matplotlib "classy==3.4.2"
+"$CODES/venv/bin/python" -m pip install -q -r "$SB/scripts/pkdgrav3_pipeline/requirements.txt"   # the same versions on every site
 "$CODES/venv/bin/python" -c "import numpy, scipy, pandas, h5py, fitsio, zstandard, matplotlib, classy; print('python', numpy.__version__, scipy.__version__, pandas.__version__, fitsio.__version__, 'classy', classy.__version__)"
 
 echo "== post-process C helpers"
