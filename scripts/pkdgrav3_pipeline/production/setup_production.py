@@ -508,7 +508,7 @@ FITS_NCPU=%(fi_n)d;  FITS_MEM=%(fi_m)s; FITS_WALL=%(fi_w)s
 RS_CFG=%(hdir)s/rockstar_input.cfg
 FORCE_RES=%(fr).8g                       # = pkdgrav3 softening (Mpc/h comoving)
 RS_NUM_BLOCKS=%(rsb)d; RS_WRITERS=%(rsw)d          # readers from RS_CFG; writers = RS_NCPU (RS_WRITERS only with RS_WRITERS_FIXED=1)
-RS_LOCAL_OUT=1          # Rockstar writes to the node's disk, catalogs copied here (0: write here directly)
+RS_LOCAL_OUT=%(rs_local)d          # 1: Rockstar writes to the node's disk, catalogs copied here (0: write here directly; pegasus: Lustre)
 RS_PKC_SUBSAMPLES=""
 MIN_HALO_OUTPUT_SIZE=30; MIN_HALO_PARTICLES=20; UNBOUND_THRESHOLD=0.5
 
@@ -537,7 +537,7 @@ FITS_DELETE_ASCII=0     # keep 0 with the manager: verify reads the ASCII catalo
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
            sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2],
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
-           site_block=site_block(a, R), margin=margin, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
+           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
            rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'])
         write(os.path.join(sdir, 'run.conf'), conf, a.force)
         sub = '''#!/bin/bash

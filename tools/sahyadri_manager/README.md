@@ -80,6 +80,17 @@ the next turn, so one large run does not hold back the others.
 
 Each registered run's `run.conf` is copied to `~/.sahyadri_mgr/confs/` when it is added.
 
+## Runs on another site (pegasus)
+
+`manager.py add pegasus:<run.conf on pegasus>` registers a run set up there (`setup_production.py --site pegasus`).
+The manager keeps a mirror of the run's small files (events, output list, logs, P(k) plot) under
+`sites.pegasus.mirror` (`/user/shadab/sahyadri_mirror/pegasus`), refreshed every `sync_s` (120 s) with rsync from
+the data node `data.iucaa.in`. The run's jobs are submitted and watched over ssh on `pegasus.iucaa.in`, within the
+site's own limits (`manager.py limits pegasus.max_sim_running=2 ...`, or the pegasus row of the queue panel). After
+verify, a process on the pawna head node pulls the kept files from the data node into the archive and checks
+them against the checksums the verify job wrote (`KEPT_FILES.json`). Trash, undo and purge run on pegasus. Details:
+guide section 13.5.
+
 ## What it does
 
 | When | Action |

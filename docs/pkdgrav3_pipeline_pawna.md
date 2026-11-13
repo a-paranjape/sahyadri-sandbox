@@ -749,3 +749,46 @@ For (w0, wa) cosmologies `setup_production.py` writes `dLambda = 0`, `dOmegaDE =
 growth ODE that pkdgrav3 integrates (matter, curvature and CPL dark energy, no radiation), which gives the
 default 0.83048239 unchanged. Rockstar's PKC reader takes Ω_DE, w0 and wa from the snapshot header. Ω_k ≠ 0 enters
 pkdgrav3 as 1 − Ω_m − dLambda.
+
+### 13.5 Runs on pegasus, archived on pawna
+
+A run can be computed on pegasus (IUCAA) and still be driven by the manager on pawna and archived to pawna's
+`/storage`. Every stage up to and including verify runs on pegasus. Only the kept files cross to pawna, pulled from
+pegasus's data node `data.iucaa.in`; the login node is used for qsub and qstat only.
+
+| | pawna run | pegasus run |
+|---|---|---|
+| set up with | `setup_production.py` on pawna | `setup_production.py --site pegasus [--queue debug]` on pegasus |
+| scratch | `/user/$USER/sahyadri_scratch`, staged I/O | `/data/project/hpc2502016/shadab/sahyadri_scratch` (Lustre), no staging |
+| simulation | 1 node, threads | `SIM_NODES` × 32 cores, 2 MPI ranks per node (3 nodes from 1024³), 96 h wall (debug: 4 h) |
+| codes | `/storage/shadab/{pkdgrav3_io,pipeline_test/codes}` | `~/sahyadri_pipeline/{pkdgrav3_io,codes,sahyadri-sandbox}` in the pegasus home |
+| PBS | qsub here | qsub/qstat over ssh on `pegasus.iucaa.in` |
+| archive | PBS job copies SCRATCH → ARCHIVE | after verify, the verify job writes `KEPT_FILES.json` (SHA-256 of every kept file); a process on the pawna head node pulls those files with rsync from `data.iucaa.in` into ARCHIVE and compares each copy, read back with O_DIRECT, with the pegasus checksum |
+| deletion | after approval, on pawna | after approval, on pegasus (`scratch_ops.py` over ssh) |
+
+The pull runs on the head node because pawna's compute nodes have no route out: from node1 the name `data.iucaa.in`
+does not resolve, and its address times out (tested 13 Nov 2026, jobs 2536961/2536962). At most `max_pulls` (1)
+pulls run at a time. Earlier pegasus→pawna transfers ran at 4–24 MB/s.
+
+Install on pegasus (once; the home quota is 150 GB, about 7 GB of it is used by these):
+```bash
+# pkdgrav3 a99f6142 (same as pawna) with its conda env; package cache on /data
+R=~/sahyadri_pipeline/pkdgrav3_io; mkdir -p $R; ln -s /data/project/hpc2502016/shadab/cache/conda_pkgs $R/conda_pkgs
+git clone -b main https://github.com/shadaba/pkdgrav3.git $R/pkdgrav3 && bash -l $R/pkdgrav3/tools/pegasus/setup_pegasus.sh $R
+git clone -b run-manager https://github.com/a-paranjape/sahyadri-sandbox.git ~/sahyadri_pipeline/sahyadri-sandbox
+bash ~/sahyadri_pipeline/sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pegasus.sh ~/sahyadri_pipeline/codes $R
+```
+
+Set up a run on pegasus and register it with the manager on pawna:
+```bash
+# on pegasus
+cd ~/sahyadri_pipeline/sahyadri-sandbox/scripts/pkdgrav3_pipeline/production
+~/sahyadri_pipeline/codes/venv/bin/python setup_production.py --site pegasus --cosmo var_Om_p --N 2048 --real 1
+# on pawna
+tools/sahyadri_manager/manager.py add pegasus:/data/project/hpc2502016/shadab/sahyadri_scratch/sims/Sahyadri_L200N2048/var_Om_p2048/r1/run.conf
+tools/sahyadri_manager/manager.py schedule Sahyadri_L200N2048/var_Om_p2048/r1
+tools/sahyadri_manager/manager.py limits pegasus.max_sim_running=2 pegasus.max_sim_queued=1
+```
+The pegasus queues allow per user: `debug` 2 running jobs, 128 cores, 4 h; `project` 4 running jobs, 2048 cores;
+`regular` 4 jobs, 1280 cores, 48 h (`qstat -Qf`, 13 Nov 2026). Rockstar at 2048³ needs about 624 GB, more
+than one pegasus node, and Rockstar across several nodes is not set up yet.
