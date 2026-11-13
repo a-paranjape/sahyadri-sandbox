@@ -249,7 +249,8 @@ def source_sums(E):
     rows = []
     for cat, snap, src, rel in files:
         st = os.stat(src)
-        rows.append(dict(path=rel, cat=cat, snap=snap, size=st.st_size, mtime=st.st_mtime, sha256=sha_file(src)))
+        rows.append(dict(path=rel, src=os.path.relpath(src, E['SCRATCH']), cat=cat, snap=snap, size=st.st_size,
+                         mtime=st.st_mtime, sha256=sha_file(src)))
     out = dict(run='%s/r%s' % (E['STEM'], E['REAL']), scratch=E['SCRATCH'], host=os.uname()[1], time=time.strftime('%Y-%m-%dT%H:%M:%S'),
                verify_time=V['time'], bytes=sum(r['size'] for r in rows), files=rows)
     f = os.path.join(P['state'], 'KEPT_FILES.json')
@@ -296,25 +297,39 @@ def pull(E, dry):
             existing.append(r)        # already archived by another run (shared cosmology files): must be identical
         else:
             todo.append(r)
-    t0 = time.time()
-    if todo:
-        lst = os.path.join(P['state'], 'pull_files.txt')
-        with open(lst, 'w') as f:
-            f.write(''.join(r['path'] + '\n' for r in todo))
-        os.makedirs(E['ARCHIVE'], exist_ok=True)
-        # -t times, -p permissions of the source (made read-only below), whole files (-W: no delta against old copies)
-        cmd = ['rsync', '-tpW', '--partial', '--files-from=' + lst, '-e',
-               'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10', '%s:%s/' % (host, rscr),
-               E['ARCHIVE'].rstrip('/') + '/']
+    def src_of(r):
+        # where the file is in the remote SCRATCH; KEPT_FILES.json before 'src' was recorded: the cosmology copies
+        # are archived as sims/<stem>/r<N>/cosmology/<f> from sims/<stem>/<f> (retention.kept_files)
+        if r.get('src'):
+            return r['src']
+        if r['cat'] == 'cosmo':
+            return r['path'].replace('/r%s/cosmology/' % E['REAL'], '/')
+        return r['path']
+
+    def rsync(args):
+        cmd = ['rsync', '-tpW', '--partial', '-e', 'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10'] + args
         print(' '.join(cmd), flush=True)
         for attempt in range(1, 6):
             rc = subprocess.run(cmd).returncode
             if rc == 0:
-                break
+                return
             print('rsync exit %d (attempt %d); retrying in 60 s' % (rc, attempt), flush=True)
             time.sleep(60)
-        else:
-            sys.exit('rsync failed %d times' % attempt)
+        sys.exit('rsync failed %d times' % attempt)
+    t0 = time.time()
+    same = [r for r in todo if src_of(r) == r['path']]
+    moved = [r for r in todo if src_of(r) != r['path']]
+    os.makedirs(E['ARCHIVE'], exist_ok=True)
+    if same:
+        lst = os.path.join(P['state'], 'pull_files.txt')
+        with open(lst, 'w') as f:
+            f.write(''.join(r['path'] + '\n' for r in same))
+        # -t times, -p permissions of the source (made read-only below), whole files (-W: no delta against old copies)
+        rsync(['--files-from=' + lst, '%s:%s/' % (host, rscr), E['ARCHIVE'].rstrip('/') + '/'])
+    for r in moved:              # stored under another name in the archive: one file at a time
+        dst = os.path.join(E['ARCHIVE'], r['path'])
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        rsync(['%s:%s/%s' % (host, rscr, src_of(r)), dst])
     nb = sum(r['size'] for r in todo)
     t1 = time.time()
     print('pulled %s in %.0f s (%.2f MB/s)' % (retention.human(nb), t1 - t0, nb / 1e6 / max(t1 - t0, 1e-3)), flush=True)
