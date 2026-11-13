@@ -72,6 +72,9 @@ PBS = '/opt/pbs/bin'
 # (checkpoint, not all outputs) is scheduled again to restart, at most max_sim_restarts times
 DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000,
                    max_sim_running=3, max_sim_queued=1, max_sim_restarts=5, max_pulls=1,
+                   # a file system (run SCRATCH, ARCHIVE) that does not answer a small read/write test within
+                   # storage_timeout_s is 'not responding': its runs are left alone until it answers again
+                   storage_timeout_s=30,
                    local_codes='/user/shadab/sahyadri_prod/codes',
                    # planned runs: set up, registered and scheduled by the manager; queues: which PBS queues take
                    # jobs (open | drain | closed) and their own limits. Both in the manager's directory (edited there,
@@ -231,6 +234,76 @@ class Budgets:
 
 
 BUDGETS = Budgets()
+
+
+class Probe:
+    """Is a file system answering? A small test (fn) in a thread, waited for at most `timeout` s; a test that has
+    not returned by then marks the key down until it returns (NFS hard mounts hang instead of failing). Errors count
+    as answering: only a hang is 'not responding'. Results younger than FRESH s are reused."""
+    FRESH = 60
+
+    def __init__(self):
+        self.st = {}
+
+    def ok(self, key, fn, timeout):
+        s = self.st.setdefault(key, dict(t_ok=0.0, th=None, t0=0.0, down=None))
+        th = s['th']
+        if th is None or not th.is_alive():
+            if now() - s['t_ok'] < self.FRESH:
+                return True
+
+            def test():
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001
+                    pass
+                s['t_ok'] = now()
+                if s['down'] is not None:
+                    log('storage %s answers again (not responding for %.0f s)' % (key, now() - s['down']))
+                    s['down'] = None
+            s['t0'] = now()
+            th = s['th'] = threading.Thread(target=test, daemon=True)
+            th.start()
+        wait = s['t0'] + timeout - now()
+        if wait > 0:
+            th.join(wait)
+        if th.is_alive():
+            if s['down'] is None:
+                s['down'] = s['t0']
+                log('storage %s not responding (no answer in %d s); its runs are left alone until it answers' % (key, timeout))
+            return False
+        return True
+
+    def down(self, key):
+        """Down since (time) or None, without starting a test."""
+        s = self.st.get(key)
+        return s and s['down']
+
+
+PROBE = Probe()
+
+
+def storage_test(d):
+    """List directory d and write, fsync and remove a small file in it."""
+    def fn():
+        os.listdir(d)
+        f = os.path.join(d, '.mgr_probe')
+        with open(f, 'w') as fh:
+            fh.write(str(now()))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.unlink(f)
+    return fn
+
+
+def archive_test(d):
+    """Stat the archive root (or its nearest existing parent) and list it."""
+    def fn():
+        p = d
+        while p and not os.path.isdir(p) and p != '/':
+            p = os.path.dirname(p)
+        os.listdir(p)
+    return fn
 
 
 def fmt_l(L):
@@ -599,7 +672,7 @@ class Run:
 
     def sim_progress(self):
         t, v = self.simcache
-        if now() - t < 60:
+        if now() - t < 60 or getattr(self, 'stalled', None):
             return v
         v = None
         # the newest pkdgrav3 log: run.<job>.log while the job runs (run.log links to it only at the end in older jobs)
@@ -743,8 +816,14 @@ class Manager:
         for conf in list(self.runs):
             if conf not in want:
                 del self.runs[conf]
+        self.unloaded = []
         for conf, r in want.items():
             if conf not in self.runs:
+                if not PROBE.ok('conf ' + os.path.dirname(conf), archive_test(os.path.dirname(conf)),
+                                int(self.cfg.get('storage_timeout_s', 30))):
+                    self.unloaded.append(conf)      # loaded at a later heartbeat, once its storage answers
+                    log('run %s not loaded: its storage is not responding; trying again later' % conf)
+                    continue
                 try:
                     if os.path.dirname(os.path.dirname(conf)).endswith(tuple(S['mirror'] for S in self.cfg['sites'].values())):
                         refresh_mirror_conf(conf, self.cfg)
@@ -757,7 +836,7 @@ class Manager:
         self.restart_watch()
 
     def restart_watch(self):
-        dirs = sorted([HOME] + [r.P['state'] for r in self.runs.values()])
+        dirs = sorted([HOME] + [r.P['state'] for r in self.runs.values() if not getattr(r, 'stalled', None)])
         if self.watch_proc and self.watch_proc.poll() is None and dirs == self.watch_dirs:
             return
         if self.watch_proc and self.watch_proc.poll() is None:
@@ -973,8 +1052,12 @@ class Manager:
     def refresh_disk(self):
         d, seen = {}, {}           # one entry per file system and kind (several scratch roots may share one)
         for run in self.runs.values():
+            if getattr(run, 'stalled', None):
+                continue
             for k in (('ARCHIVE',) if run.remote else ('SCRATCH', 'ARCHIVE')):
                 p = run.E.get(k)
+                if k == 'ARCHIVE' and p and PROBE.down('archive ' + p):
+                    continue
                 if p and p not in d and os.path.isdir(p):
                     key = (os.stat(p).st_dev, k)
                     if key in seen:
@@ -1048,11 +1131,36 @@ class Manager:
             log('queues: %s%s' % (', '.join('%s:%s %s' % (k[0], k[1], v['state']) for k, v in sorted(self.queues.items()))
                                   or 'none listed (all open)', ('; ERRORS: ' + '; '.join(self.queue_errors)) if self.queue_errors else ''))
 
+    def run_ok(self, run):
+        """Does the file system with the run's files (its SCRATCH: state, events, logs) answer? Sets run.stalled."""
+        key = run.E['SCRATCH']
+        if PROBE.ok(key, storage_test(run.P['state']), int(self.cfg.get('storage_timeout_s', 30))):
+            if getattr(run, 'stalled', None):
+                run.stalled = None
+                self.restart_watch()
+            return True
+        if not getattr(run, 'stalled', None):
+            run.stalled = 'storage %s not responding since %s' % (key, iso(PROBE.down(key)))
+            self.restart_watch()
+        return False
+
+    def archive_wait(self, run):
+        """Why the archive of `run` must wait now (queues file 'pawna archive', or ARCHIVE not answering), or None."""
+        qi = self.queues.get((LOCAL, 'archive'))
+        if qi and qi['state'] != 'open':
+            return 'archive paused (queues file: %s archive %s)' % (LOCAL, qi['state'])
+        A = run.E.get('ARCHIVE')
+        if A and not PROBE.ok('archive ' + A, archive_test(A), int(self.cfg.get('storage_timeout_s', 30))):
+            return 'archive storage %s not responding since %s' % (A, iso(PROBE.down('archive ' + A)))
+        return None
+
     def qinfo(self, run):
         return self.queues.get((run.site, run_queue(run))) or dict(state='open', max_running=None, max_waiting=None)
 
     def policy(self, run, D, active_rs):
         """Submit what is due for this run; returns the number of Rockstar jobs submitted."""
+        if getattr(run, 'stalled', None):
+            return 0
         if run.busy or run.err or run.ms.get('paused') or run.ms.get('failed') or run.ms.get('trash') or run.ms.get('purged'):
             return 0
         E = run.E
@@ -1142,8 +1250,16 @@ class Manager:
             run.submit(stages, [], dict(chain=stages))
             return 0
         v = D['verify']
+        run.archive_msg = None
         if lv and lv['status'] == 'done' and v and int(v.get('ok', 0)) == 1 and E.get('ARCHIVE'):
             la = D['last'].get('archive')   # one archive job per passed verify (PBS ids increase; node clocks differ)
+            due = not any(j['stage'] == 'archive' for j in D['active']) and (
+                (la is None or jobnum(la['job']) < jobnum(lv['job'])) if not run.remote else
+                lv['job'] not in {s.get('after_verify') for s in run.ms['submitted'] if s['stage'] == 'archive'})
+            if due:
+                run.archive_msg = self.archive_wait(run)
+                if run.archive_msg:
+                    return 0
             if run.remote:
                 # pulled here after the checksums of that verify job (KEPT_FILES.json in the mirror)
                 k = D['kept']
@@ -1203,7 +1319,9 @@ class Manager:
                 run.ms['scheduled'] = None
                 run.note('removed from the simulation queue: the simulation has finished')
                 continue
-            if any(j['stage'] == 'sim' for j in D['active']):
+            if getattr(run, 'stalled', None):
+                wait = run.stalled
+            elif any(j['stage'] == 'sim' for j in D['active']):
                 wait = 'a simulation job of this run is still active'
             elif sc.get('not_before') and now() < sc['not_before']:
                 wait = 'not before %s' % iso(sc['not_before'])
@@ -1288,6 +1406,8 @@ class Manager:
             log('limits: %s' % (', '.join(changed) or 'unchanged'))
             return 'set %s' % (', '.join(changed) or 'nothing changed')
         run = next((r for r in self.runs.values() if r.name == name or r.conf == name), None)
+        if run is not None and getattr(run, 'stalled', None) and act != 'remove':
+            raise ValueError('%s: %s; try again when it answers' % (run.name, run.stalled))
         if run is None:
             raise ValueError('no run %s' % name)
         if act == 'remove_run':
@@ -1596,6 +1716,7 @@ class Manager:
                 trash=run.ms.get('trash'), purged=run.ms.get('purged'), scheduled=run.ms.get('scheduled'),
                 restarts=run.ms.get('restarts', 0), actions=run.ms.get('actions', [])[-30:],
                 budget_msg=getattr(run, 'budget_msg', None) if getattr(run, 'budget_wait', None) else None,
+                stalled=getattr(run, 'stalled', None), archive_msg=getattr(run, 'archive_msg', None),
                 keep=dict(full=pl['full_z'] if pl else [], pct=pl['subsample_pct'] if pl else None,
                           tables=pl['tables'] if pl else []),
                 outputs=[[o[0], o[1], o[3]] for o in run.outs], scratch_bytes=run.scratch_bytes,
@@ -1624,10 +1745,15 @@ class Manager:
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
 
     def queues_view(self, derived):
-        keys = set(self.queues) | {(r.site, run_queue(r)) for r in self.runs.values()}
+        keys = set(self.queues) | {(r.site, run_queue(r)) for r in self.runs.values()} | {(LOCAL, 'archive')}
         out = []
         for site, qn in sorted(keys):
             qi = self.queues.get((site, qn)) or dict(state='open', max_running=None, max_waiting=None, note='not listed')
+            if (site, qn) == (LOCAL, 'archive'):     # not a PBS queue: archive copies and pulls into ARCHIVE
+                out.append(dict(site=site, queue=qn, state=qi['state'], max_running=None, max_waiting=None,
+                                note=qi.get('note', ''), sims_running=0, sims_waiting=0, archive=True,
+                                runs=sum(1 for r in self.runs.values() if getattr(r, 'archive_msg', None)), scheduled=0))
+                continue
             r_, w_ = self.sim_counts(derived, site, qn) if derived else (0, 0)
             nrun = sum(1 for r in self.runs.values() if r.site == site and run_queue(r) == qn)
             out.append(dict(site=site, queue=qn, state=qi['state'], max_running=qi['max_running'],
@@ -1637,6 +1763,12 @@ class Manager:
         return out
 
     def verify_summary(self, run, D):
+        if getattr(run, 'stalled', None):
+            return getattr(run, 'verify_cache', None)
+        run.verify_cache = self._verify_summary(run)
+        return run.verify_cache
+
+    def _verify_summary(self, run):
         f = os.path.join(run.P['state'], 'verify.json')
         if not os.path.isfile(f):
             return None
@@ -1739,10 +1871,13 @@ class Manager:
                 if changed_cfg:
                     self.load_runs()
                 for run in self.runs.values():
-                    run.read_events()
+                    if self.run_ok(run):
+                        run.read_events()
                 t = now()
                 if t >= self.next_hb or (self.recheck_at and t >= self.recheck_at):
                     self.recheck_at = None
+                    if getattr(self, 'unloaded', None):
+                        self.load_runs()
                     self.refresh_qstat()
                     for site in self.sites():
                         try:

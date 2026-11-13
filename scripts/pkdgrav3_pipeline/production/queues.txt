@@ -7,11 +7,14 @@
 #           closed   nothing is submitted to this queue (maintenance, budget used up); jobs already in PBS stay
 #   max_running   simulations of this queue running + waiting in PBS at most (besides the site's max_sim_running)
 #   max_waiting   simulations of this queue waiting in PBS at most
+# The line 'pawna archive' is not a PBS queue: closed (or drain) holds every archive copy/pull into ARCHIVE (e.g. while
+# /storage is in trouble); verified runs wait, data stays in scratch, and opening it archives them one after another.
 # A run uses the queue it was set up for (PBS_QUEUE in its run.conf; the queue column of planned_runs.txt).
 # A queue not listed here is open.
 #
 # site     queue    state    max_running  max_waiting
 pawna      workq    open     -            -
+pawna      archive  open     -            -          # archive copies/pulls into ARCHIVE (not PBS)
 pegasus    project  open     -            -
 pegasus    regular  closed   -            -          # user budget: open only when the project budget is short
 pegasus    debug    closed   2            1          # tests only

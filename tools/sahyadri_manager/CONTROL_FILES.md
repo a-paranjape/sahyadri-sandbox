@@ -14,6 +14,7 @@ pegasus install is `~/sahyadri_pipeline` there.
 | `config.json` | Global limits (`max_sim_running`, `max_sim_queued`, `max_sim_restarts`, `max_rockstar`, `scratch_reserve_gb`, `heartbeat_s`, `max_pulls`); paths (`local_python`, `local_codes`, `scratch_root`, `plan_file`, `queues_file`); per-site block `sites.pegasus` (login, data node, scratch, python, sandbox, mirror, `sync_s`, its own limits, `max_pbs_queued`, budget user and `reserve_coreh`); the list of registered runs | Limits: use the page or `manager.py limits`. Anything else by hand, then restart the manager (`start_manager.sh stop; start_manager.sh start`) |
 | `planned_runs.txt` | Runs to set up, register and schedule: site, queue, cosmology, N, L, realisations, priority, options (`hold`, `not_before=`, `keep_full_z=`, `keep_pct=`, `root=`, `archive=`). Reread every `plan_s` seconds (300) | Yes |
 | `queues.txt` | Which PBS queues take jobs: `open`, `drain` (no new runs; restarts and post-processing go on) or `closed` (nothing submitted), with optional per-queue `max_running` and `max_waiting`. Reread before every scheduling pass. A queue not listed is open | Yes, or the Summary tab buttons, or `manager.py queue <site> <queue> open\|drain\|closed` |
+| `queues.txt`, line `pawna archive` | Not a PBS queue: `closed` or `drain` holds all archive copies and pulls into `ARCHIVE` (verified runs wait, nothing fails); `open` archives them again, one after another | Yes |
 | `confs/` | The manager's saved copy of each run.conf, used when the run's own copy has been purged | No |
 | `manager.log`, `screen.log` | What the manager did | Read only |
 | `gui.sock`, `ssh-*` | Socket for the page and CLI; ssh connection sockets | No |
@@ -60,3 +61,9 @@ copy is in `~/sahyadri_pipeline/sahyadri-sandbox`.
 - **Core-hour budgets** on pegasus (`amgr`); a job is submitted only if cores × requested wall time fits in the
   balance minus `reserve_coreh`.
 - **Free space** on each scratch file system, kept above `scratch_reserve_gb`.
+- **Whether storage answers:** before touching a run's files the manager lists its state directory and writes,
+  fsyncs and removes a small `.mgr_probe` file there (at most once a minute); for the archive it lists `ARCHIVE`.
+  A test with no answer within `storage_timeout_s` (`config.json`, default 30 s) marks that file system "not
+  responding". Its runs are then left alone: no reads, no submissions, page actions refused, shown in red. The
+  other runs (e.g. pegasus runs while pawna `/storage` hangs) carry on. Archives into a non-responding `ARCHIVE` wait.
+  Everything resumes by itself when the test returns.

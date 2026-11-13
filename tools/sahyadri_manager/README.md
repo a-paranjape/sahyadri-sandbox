@@ -83,6 +83,16 @@ the next turn, so one large run does not hold back the others.
 
 Each registered run's `run.conf` is copied to `~/.sahyadri_mgr/confs/` when it is added.
 
+## When storage is in trouble
+
+* **Archive paused by hand:** `manager.py queue pawna archive closed` (or the Summary tab). Verified runs wait with
+  "archive paused" instead of failing; their data stays in scratch. `... archive open` archives them, one at a time.
+* **Storage that hangs** (NFS hard mount): before touching a run's files the manager runs a small read/write test on
+  its state directory in a thread (at most once a minute). No answer within `storage_timeout_s` (30 s) -> the run is
+  "storage not responding": the manager does not read its files, submit for it or accept page actions on it, and
+  stops watching its directories, so the other runs (e.g. on pegasus) go on. An `ARCHIVE` that does not answer
+  holds that run's archive the same way. All resumes by itself once the test returns.
+
 ## Runs on another site (pegasus)
 
 `manager.py add pegasus:<run.conf on pegasus>` registers a run set up there (`setup_production.py --site pegasus`).

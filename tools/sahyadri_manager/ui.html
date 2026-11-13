@@ -175,6 +175,8 @@ function renderRun(r, idx){
     <div class="row"><b style="font-size:15px">${h(r.name)}</b>${r.site&&r.site!==S.local_site?`<span class="badge b-wait" title="${h(r.remote_conf||'')}">${h(r.site)}</span>`:''}${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)} of ≤${hum(r.scratch_estimate)}${r.outstanding?' (+'+hum(r.outstanding)+' to come)':''}</span><span class="sp"></span>${ctl}</div>
     ${r.err?`<div class="fail">config: ${h(r.err)}</div>`:''}
     ${fail}
+    ${r.stalled?`<div class="fail">${h(r.stalled)}: the manager leaves this run alone until its storage answers (its PBS jobs are not touched)</div>`:''}
+    ${r.archive_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">archive waiting: ${h(r.archive_msg)}</div>`:''}
     ${r.budget_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">waiting for core hours: ${h(r.budget_msg)}</div>`:''}
     ${simline}
     <div class="snaps">${snaps}</div>
@@ -295,7 +297,8 @@ function renderTabs(){
     ${(S.queue_errors||[]).map(e=>`<div class="small" style="color:var(--bad)">${h(e)}</div>`).join('')}
     <table style="margin-top:4px"><tr><th>site</th><th>queue</th><th>state</th><th class="num">sims running</th><th class="num">waiting in PBS</th><th class="num">scheduled</th><th class="num">runs</th><th>own limits</th><th></th></tr>${
       (S.queues||[]).map(x=>`<tr><td>${h(x.site)}</td><td><b>${h(x.queue)}</b></td><td><span class="badge ${x.state==='open'?'b-ok':x.state==='drain'?'b-wait':'b-bad'}">${h(x.state)}</span></td>
-        <td class="num">${x.sims_running}</td><td class="num">${x.sims_waiting}</td><td class="num">${x.scheduled||''}</td><td class="num">${x.runs}</td>
+        ${x.archive?`<td colspan="3" class="small muted">archive copies and pulls into ARCHIVE (not PBS)</td><td class="num" title="runs whose archive is waiting">${x.runs||''}</td>`:
+        `<td class="num">${x.sims_running}</td><td class="num">${x.sims_waiting}</td><td class="num">${x.scheduled||''}</td><td class="num">${x.runs}</td>`}
         <td class="small">${x.max_running!=null?'running ≤ '+x.max_running:''}${x.max_waiting!=null?' waiting ≤ '+x.max_waiting:''}${x.note?' <span class="muted">'+h(x.note)+'</span>':''}</td>
         <td>${['open','drain','closed'].filter(st=>st!==x.state).map(st=>`<button onclick="setQueue('${h(x.site)}','${h(x.queue)}','${st}')">${st}</button>`).join('')}</td></tr>`).join('')}</table></div>
     <div style="margin-top:12px"><b>Plan file</b> <span class="muted small">${h(S.plan_file||'—')}</span>: ${pl.length} planned runs, ${pl.filter(p=>p.state==='registered').length} set up${plErr?`, <b style="color:var(--bad)">${plErr} with errors</b> (Upcoming)`:''}</div>`;
