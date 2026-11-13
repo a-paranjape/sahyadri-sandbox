@@ -88,11 +88,18 @@ def seed_of(r):
     sys.exit('no seed for realisation %d in config/sims/seeds.txt' % r)
 
 
-def growth(a, om, ok):
-    """Linear growth D(a) (unnormalised) for matter + curvature + Lambda, no radiation: D ~ H int da/(a H)^3."""
-    ol = 1.0 - om - ok
-    E = lambda x: math.sqrt(om / x**3 + ok / x**2 + ol)
-    return E(a) * quad(lambda x: 1.0 / (x * E(x))**3, 0.0, a, epsabs=0, epsrel=1e-12, limit=500)[0]
+def dark_energy(c):
+    """(w0, wa) of a cosmology file; (-1, 0) is a cosmological constant."""
+    return float(c.get('W0', -1)), float(c.get('WA', 0))
+
+
+def growth(a, c):
+    """Linear growth D(a) for matter + curvature + (w0, wa) dark energy, no radiation, as pkdgrav3 integrates it
+    (H from csmExp2Hub; growth ODE of csmComoveGrowth). Same function as the P(k) checks (class_pk.growth)."""
+    sys.path.insert(0, PIPE)
+    from class_pk import growth as growth_ode
+    w0, wa = dark_energy(c)
+    return float(growth_ode([a], float(c['OMEGA_M']), float(c.get('OMEGA_K', 0)), w0, wa)[0])
 
 
 def ic_spectrum(c):
@@ -116,9 +123,8 @@ def ic_spectrum(c):
         warnings.simplefilter('ignore')
         var = sum(quad(integrand, lnk[i], lnk[i + 1], epsabs=0, epsrel=1e-10, limit=1000)[0] for i in range(len(k) - 1))
     s8_start = math.sqrt(var)
-    om, ok = float(c['OMEGA_M']), float(c.get('OMEGA_K', 0))
     a0 = 1.0 / (1.0 + float(c['Z_START']))
-    s8 = s8_start * growth(1.0, om, ok) / growth(a0, om, ok)
+    s8 = s8_start * growth(1.0, c) / growth(a0, c)
     return k, T, s8_start, s8
 
 
@@ -244,7 +250,9 @@ def setup_cosmo(a, cosmo):
     cname = '%s%d' % (a.cosmo, N)
     stem = '%s/%s' % (sim, cname)
     om, ok = float(c['OMEGA_M']), float(c.get('OMEGA_K', 0))
-    ol = 1.0 - om - ok
+    ol = 1.0 - om - ok          # dark energy: Lambda, or (w0, wa) fluid with the same density today
+    w0, wa = dark_energy(c)
+    lcdm = (w0, wa) == (-1.0, 0.0)
     zstart = float(c['Z_START'])
     a_start = 1.0 / (1.0 + zstart)
     a_out = np.loadtxt(a.outputs, comments='#', ndmin=1)
@@ -280,9 +288,10 @@ def setup_cosmo(a, cosmo):
     write(os.path.join(cdir, 'cosmology.txt'), (
         '# %s, written by setup_production.py %s from %s\n' % (cname, now, c['file']) +
         ''.join('%s=%s\n' % (kk, c[kk]) for kk in ('OMEGA_M', 'OMEGA_B', 'OMEGA_K', 'HUBBLE', 'NS', 'AS', 'Z_START')) +
-        'OMEGA_L=%.7f\nSIGMA8_ZSTART=%.8f   # of the CLASS P(k) at Z_START\n'
-        'SIGMA8_LINEAR_Z0=%.8f   # the same, scaled to z = 0 with the LCDM growth factor (= pkdgrav3 dSigma8)\n'
-        % (ol, s8_start, s8)), True)
+        ('OMEGA_L=%.7f\n' % ol if lcdm else 'OMEGA_L=0\nOMEGA_DE=%.7f\n' % ol) + 'W0=%r\nWA=%r\n' % (w0, wa) +
+        'SIGMA8_ZSTART=%.8f   # of the CLASS P(k) at Z_START\n'
+        'SIGMA8_LINEAR_Z0=%.8f   # the same, scaled to z = 0 with the no-radiation growth factor (= pkdgrav3 dSigma8)\n'
+        % (s8_start, s8)), True)
 
     print('%s: %d outputs (z = %.3f ... 0), %d top-level steps from z = %g; softening %.6g Mpc/h (1/%g of the spacing);'
           ' sigma8 = %.5f' % (stem, len(a_out), z_out[0], steps[-1], zstart, force_res, 1 / a.soft_frac, s8))
@@ -317,7 +326,11 @@ def setup_cosmo(a, cosmo):
             '# cosmology: %s' % c.get('COMMENT', a.cosmo),
             'h               = %s' % c['HUBBLE'],
             'dOmega0         = %s' % c['OMEGA_M'],
-            'dLambda         = %.7f' % ol,
+        ] + (['dLambda         = %.7f' % ol] if lcdm else [
+            'dLambda         = 0',
+            'dOmegaDE        = %.7f     # (w0, wa) dark energy: w(a) = w0 + wa (1 - a)' % ol,
+            'w0              = %r' % w0,
+            'wa              = %r' % wa]) + [
             'dSpectral       = %s' % c['NS'],
             'dSigma8         = %.8f     # linear sigma8 at z = 0 (sigma8 of the CLASS P(k) at z = %g: %.8f)' % (s8, zstart, s8_start),
             '',

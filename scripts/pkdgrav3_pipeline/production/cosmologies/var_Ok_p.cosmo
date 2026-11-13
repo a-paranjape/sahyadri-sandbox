@@ -1,0 +1,15 @@
+# Sahyadri variation var_Ok_p: Omega_k raised, everything else as default.cosmo.
+# From the pegasus CLASS input class_var_Ok_p2048.ini (/mnt/home/student/csaee/chpc2501005/sahyadri-sandbox/
+# config/transfer/sahyadri/, k_pivot = 0.05/Mpc, z_pk = 49).
+# Curved: Omega_L = 1 - Omega_m - Omega_k.
+OMEGA_M=0.3137721
+OMEGA_B=0.0493017
+OMEGA_K=0.05
+HUBBLE=0.6736
+NS=0.9649
+AS=2.098903e-09
+Z_START=49.0
+# CLASS matter power spectrum at z = Z_START (k [h/Mpc], P [(Mpc/h)^3]): class_var_Ok_p2048_pk.dat from pegasus,
+# the table behind the NGenIC input class_var_Ok_p2048_pk.txt. Path relative to this file.
+PK_FILE=var_Ok_p_class_pk_z49.dat
+COMMENT="Sahyadri var_Ok_p: OMEGA_K=0.05 (else default; CLASS P(k) at z=49)"
