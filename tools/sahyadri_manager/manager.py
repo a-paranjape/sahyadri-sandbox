@@ -75,9 +75,13 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
                                            mirror='/user/shadab/sahyadri_mirror/pegasus', sync_s=120,
                                            max_sim_running=2, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
-                                           scratch_reserve_gb=2000)))
+                                           scratch_reserve_gb=2000, max_pbs_queued=6)))
 LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s')
-SITE_LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb')
+# max_pbs_queued: our jobs waiting in the site's PBS at most (pegasus queued_jobs_threshold: project 6, debug 2 per
+# user); with it, the post-processing stages are submitted one at a time, each after the previous one finished
+SITE_LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb',
+                   'max_pbs_queued')
+POST = ['ctrees', 'vahc', 'fits', 'verify']
 LOCAL = 'pawna'
 SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=30', '-o', 'ServerAliveInterval=30',
             '-o', 'ControlMaster=auto', '-o', 'ControlPersist=600']
@@ -465,6 +469,10 @@ class Run:
             if m:
                 ids.append((m.group(1), m.group(2)))
         if r.returncode != 0 or not ids:
+            for st, jid in ids:      # part of a chain went in before qsub refused (e.g. a queue's job limit)
+                self.ms['submitted'].append(dict(job=jid, stage=st, t=now(), partial=True))
+            if ids:
+                self.save()
             raise RuntimeError('submit %s failed (rc %d): %s %s' % (stages, r.returncode, r.stdout[-500:], r.stderr[-500:]))
         for st, jid in ids:
             rec = dict(job=jid, stage=st, t=now())
@@ -504,6 +512,7 @@ class Manager:
         self.qjobs, self.qtime, self.qok = {}, 0.0, None
         self.qsite = {}            # other sites: name -> (jobs, qtime, ok)
         self.site_disk = {}        # other sites: SCRATCH -> dict(total, used, free, ...)
+        self.waiting = {}
         self.next_hb = 0.0
         self.recheck_at = None
         self.watch_proc = None
@@ -688,10 +697,13 @@ class Manager:
     def tick(self):
         active_rs = {}             # per site
         derived = {}
+        self.waiting = {}          # per site: our jobs submitted but not started (PBS queue limits)
         for run in self.runs.values():
             D = self.derive(run)
             derived[run.conf] = D
             active_rs[run.site] = active_rs.get(run.site, 0) + sum(1 for j in D['active'] if j['stage'] == 'rockstar')
+            self.waiting[run.site] = self.waiting.get(run.site, 0) + sum(
+                1 for j in D['active'] if j['status'] in ('submitted', 'queued', 'held') and not j['job'].startswith('L'))
         self.schedule_sims(derived)
         # Rockstar turn order over the runs: the one whose next snapshot has waited longest goes first
         def waiting(run):
@@ -764,21 +776,35 @@ class Manager:
                 if k == 0:
                     return 0
                 if k >= nmin or D['sim_done']:          # after the simulation: whatever is left
-                    if active_rs >= int(SC.get('max_rockstar', 1)):
+                    if active_rs >= int(SC.get('max_rockstar', 1)) or not self.pbs_room(run.site):
                         return 0
                     last = first + k - 1
                     run.submit('rockstar', ['--rs-snaps', '%d-%d' % (first, last)], dict(first=first, last=last))
+                    self.took(run.site)
                     return 1
                 return 0
-            if D['sim_done'] and active_rs < int(SC.get('max_rockstar', 1)) and not D['last'].get('rockstar'):
+            if (D['sim_done'] and active_rs < int(SC.get('max_rockstar', 1)) and not D['last'].get('rockstar')
+                    and self.pbs_room(run.site)):
                 run.submit('rockstar', [], dict(first=0, last=n_out - 1))
+                self.took(run.site)
                 return 1
             return 0
         # ---- post-processing chain, once Rockstar covers everything
         if not D['sim_done']:
             return 0
         lv = D['last'].get('verify')
-        if not any(D['last'].get(s) for s in ('ctrees', 'vahc', 'fits', 'verify')):
+        if site_cfg(self.cfg, run.site).get('max_pbs_queued') is not None:
+            # one stage at a time: the first whose newest job is not a success newer than the previous stage's
+            prev = None
+            for st in POST:
+                j = D['last'].get(st)
+                if j is None or j['status'] != 'done' or (prev and jobnum(j['job']) < jobnum(prev['job'])):
+                    if self.pbs_room(run.site):
+                        run.submit(st, [], dict(chain=st, sequential=True))
+                        self.took(run.site)
+                    return 0
+                prev = j
+        elif not any(D['last'].get(s) for s in POST):
             stages = 'ctrees,vahc,fits,verify'
             run.submit(stages, [], dict(chain=stages))
             return 0
@@ -799,6 +825,14 @@ class Manager:
             elif la is None or jobnum(la['job']) < jobnum(lv['job']):
                 run.submit('archive', [], dict(after_verify=lv['job']))
         return 0
+
+    def pbs_room(self, site, n=1):
+        """May n more jobs wait in the site's PBS? (max_pbs_queued; no limit when unset)"""
+        m = site_cfg(self.cfg, site).get('max_pbs_queued')
+        return m is None or self.waiting.get(site, 0) + n <= int(m)
+
+    def took(self, site, n=1):
+        self.waiting[site] = self.waiting.get(site, 0) + n
 
     def sim_counts(self, derived, site=LOCAL):
         running = queued = 0
@@ -842,6 +876,9 @@ class Manager:
                 self.recheck_at = min(self.recheck_at or 1e30, sc['not_before'] + 1)
             elif blocked:
                 wait = blocked
+            elif not self.pbs_room(site):
+                blocked = wait = 'site PBS queue limit: %d of our jobs waiting (max_pbs_queued %s)' % (
+                    self.waiting.get(site, 0), site_cfg(self.cfg, site).get('max_pbs_queued'))
             elif running + queued >= mr or queued >= mq:
                 blocked = wait = ('limits: %d running + %d waiting in PBS (max_sim_running %d, max_sim_queued %d)'
                                   % (running, queued, mr, mq))
@@ -853,6 +890,7 @@ class Manager:
                 try:
                     extra = ['--restart', 'latest'] if sc.get('restart') else []
                     run.submit('sim', extra, dict(restart=bool(sc.get('restart')), scheduled=True))
+                    self.took(site)
                     if sc.get('restart'):
                         run.ms['restarts'] = int(run.ms.get('restarts', 0)) + 1
                     run.ms['scheduled'] = None
@@ -969,8 +1007,10 @@ class Manager:
             if st == 'rockstar' and f.get('first') is not None:
                 run.submit('rockstar', ['--rs-snaps', '%s-%s' % (f['first'], f['last'])],
                            dict(first=int(f['first']), last=int(f['last']), retry=f.get('job')))
-            elif st in ('ctrees', 'vahc', 'fits', 'verify'):
-                rest = ['ctrees', 'vahc', 'fits', 'verify']
+            elif st in POST and site_cfg(self.cfg, run.site).get('max_pbs_queued') is not None:
+                run.submit(st, [], dict(chain=st, sequential=True, retry=f.get('job')))     # the rest follows
+            elif st in POST:
+                rest = POST
                 stages = ','.join(rest[rest.index(st):])
                 run.submit(stages, [], dict(chain=stages, retry=f.get('job')))
             elif st == 'archive':
