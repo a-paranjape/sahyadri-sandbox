@@ -1,0 +1,15 @@
+# Sahyadri variation var_Ob_p: Omega_b raised by 10 % (Sinhagad design, config/submit/sinhagad/sub_var_Ob_p.conf), else as
+# default.cosmo. No pegasus 2048^3 run or CLASS table exists for it: the table was made here, 13 Nov 2026, with CLASS 3.4.2
+# (classy, pawna venv) and the settings of the pegasus inis (k_pivot = 0.05/Mpc, z_pk = 49), on the k grid of the default
+# table. The same CLASS reproduces every pegasus table (default and 12 variations) to 1.4e-5 for k = 1e-3..10 h/Mpc.
+# Flat: dark energy density 1 - Omega_m - Omega_k.
+OMEGA_M=0.3137721
+OMEGA_B=0.05423187
+OMEGA_K=0.0
+HUBBLE=0.6736
+NS=0.9649
+AS=2.098903e-09
+Z_START=49.0
+# CLASS matter power spectrum at z = Z_START (k [h/Mpc], P [(Mpc/h)^3]). Path relative to this file.
+PK_FILE=var_Ob_p_class_pk_z49.dat
+COMMENT="Sahyadri var_Ob_p: OMEGA_B=0.05423187 (else default; CLASS P(k) at z=49)"

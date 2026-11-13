@@ -663,9 +663,8 @@ python setup_production.py --cosmo 'var_*' --real 1 --schedule 5                
 tools/sahyadri_manager/manager.py limits max_sim_running=3 max_sim_queued=1 max_rockstar=1
 ```
 
-- `--cosmo` takes a name, a comma list, shell patterns or `all` (`cosmologies/<name>.cosmo`). Only
-  `default.cosmo` exists so far; the `var_*` cosmologies need their `.cosmo` files made first from
-  `config/submit/sinhagad/sub_var_*.conf` with CLASS.
+- `--cosmo` takes a name, a comma list, shell patterns or `all` (`cosmologies/<name>.cosmo`); see 13.4 for the
+  cosmologies.
 - `--schedule [P]` registers each run with the manager and queues its simulation. The manager submits queued
   simulations by priority, then age, while running + waiting simulations < `max_sim_running`, waiting <
   `max_sim_queued`, and the run fits in scratch next to the running ones plus `scratch_reserve_gb`.
@@ -720,3 +719,33 @@ own node.
   an estimate of ≤ 180.9 GB. Start to archived took 7.2 h. P(k): G = 0.987–0.999. The IC table agrees with CLASS to 0.11 %.
 - Clocks: the compute nodes run 1.5–3 min and `/storage` about 15 min behind the head node. All ordering uses PBS
   job IDs or file times from the same server.
+
+### 13.4 Cosmologies
+
+`production/cosmologies/` holds the default and 14 one-parameter variations, each a `.cosmo` file with its CLASS
+P(k) at z = 49 (the initial conditions are made from that table). The run directories are named `<name><N>`, e.g.
+`var_Om_p2048`, as on pegasus. σ8 is the linear σ8 at z = 0 that pkdgrav3 evolves (no radiation; `dSigma8`).
+
+| name | change from default | σ8 | source of the table |
+|---|---|---|---|
+| default | — | 0.83048 | pegasus `class_default2048_pk.dat` |
+| var_As_m / p | A_s = 1.8890127e-9 / 2.3087933e-9 (±10 %) | 0.78786 / 0.87102 | pegasus, run there |
+| var_h_m / p | h = 0.63992 / 0.70728 (±5 %) | 0.78483 / 0.87598 | pegasus, run there |
+| var_ns_m / p | n_s = 0.916655 / 1.013145 (±5 %) | 0.81569 / 0.84595 | pegasus, run there |
+| var_Om_m / p | Ω_m = 0.2980835 / 0.3294607 (±5 %) | 0.79935 / 0.86017 | pegasus, run there |
+| var_w_m / p | (w0, wa) = (−1.03278258, 0.12063991) / (−0.96721742, −0.12063991) | 0.82948 / 0.83128 | pegasus, run there |
+| var_Ok_m / p | Ω_k = −0.05 / +0.05 (Ω_Λ = 1 − Ω_m − Ω_k) | 0.87260 / 0.79223 | pegasus inis, not run there |
+| var_Ob_m / p | Ω_b = 0.04437153 / 0.05423187 (±10 %) | 0.85550 / 0.80598 | made here with CLASS 3.4.2 |
+
+The pegasus tables are `class_var_*2048_pk.dat` from
+`/mnt/home/student/csaee/chpc2501005/sahyadri-sandbox/config/transfer/sahyadri/`. Their `_pk.txt` versions, which
+NGenIC read, are log10 (k, Δ²) of the same tables to 1e-8. The Ω_m, h, w0 and wa of the pegasus runs agree with the
+headers of their snapshots on pawna (`/storage/shadab/sahyadri_sims/sims/sahyadri/var_*2048`). CLASS 3.4.2 (pawna
+venv) reproduces every pegasus table from the `.cosmo` parameters to 1.4e-5 for k = 1e-3–10 h/Mpc. The Ω_b tables
+were made with it, using the same settings.
+
+For (w0, wa) cosmologies `setup_production.py` writes `dLambda = 0`, `dOmegaDE = 1 − Ω_m − Ω_k`, `w0` and `wa` to
+`p.par`, and `OMEGA_DE`, `W0`, `WA` to `cosmology.txt` (read by `class_pk.py`). `dSigma8` comes from the
+growth ODE that pkdgrav3 integrates (matter, curvature and CPL dark energy, no radiation), which gives the
+default 0.83048239 unchanged. Rockstar's PKC reader takes Ω_DE, w0 and wa from the snapshot header. Ω_k ≠ 0 enters
+pkdgrav3 as 1 − Ω_m − dLambda.

@@ -285,9 +285,9 @@ tools/sahyadri_manager/manager.py add <scratch>/sims/Sahyadri_L200N512/default51
 \code{--cosmo} takes a name, a comma list, shell patterns or \code{all} (files
 \code{production/cosmologies/<name>.cosmo}). Each realisation gets its own seed from \code{config/sims/seeds.txt}
 (249 seeds); the same realisation number has the same seed in every cosmology. Other options: \code{--root}
-(scratch, default \code{/user/\$USER/sahyadri_scratch}), \code{--archive} (default
-\code{/storage/\$USER/sahyadri_sims}), \code{--keep-full-z}, \code{--keep-pct}. Only \code{default.cosmo} exists so
-far; the variations used on pegasus need their \code{.cosmo} files (parameters and a CLASS table at $z=49$) first.
+(scratch, default \code{/user/$USER/sahyadri_scratch}), \code{--archive} (default
+\code{/storage/$USER/sahyadri_sims}), \code{--keep-full-z}, \code{--keep-pct}. Besides \code{default}, 14 variations exist
+(\code{var_{As,h,ns,Om,w,Ok,Ob}_{m,p}}), each with its CLASS table at $z=49$ (those of pegasus where they exist; $\Omega_b$ made with CLASS 3.4.2).
 
 \subsection{Watch and act from the laptop}
 \begin{lstlisting}
@@ -505,8 +505,9 @@ before the check was changed, and the reasons are written next to the code.
 
 \begin{itemize}
   \item \textbf{Merge.} Everything is on the branch \code{run-manager}; it is not merged into \code{master}.
-  \item \textbf{Variation cosmologies.} Only \code{default.cosmo} exists. The pegasus variations need
-    \code{.cosmo} files (parameters and a CLASS table at $z=49$) before \code{--cosmo 'var_*'} can be used.
+  \item \textbf{Variation cosmologies.} Done after this report was first written: 14 \code{.cosmo} files
+    (pegasus tables for $A_s$, $h$, $n_s$, $\Omega_m$, $(w_0,w_a)$, $\Omega_k$; $\Omega_b$ made with CLASS), with
+    $(w_0,w_a)$ passed to pkdgrav3. None has been run through the manager yet.
   \item \textbf{Reboot.} The \code{@reboot} crontab line for the manager is not installed. After a reboot of the
     head node the manager has to be started by hand; it then catches up from the event files.
   \item \textbf{Untested at $2048^3$.} The archive copies with one Python process to \code{/storage}, measured at
