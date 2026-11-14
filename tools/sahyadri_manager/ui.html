@@ -171,7 +171,8 @@ function renderRun(r, idx){
      ${r.sim_done && !['archived','in trash','purged'].includes(r.phase) ? `<span class="muted small">post-processing:</span>
        <button onclick="postproc('${h(r.name)}','vpot')" title="halo potentials (.vpot), FITS again, verify; only if vahc ran with PP_POT=0">vpot</button>
        <button onclick="postproc('${h(r.name)}','xcorr')" title="halo-halo potential cross-correlation at every output with .vpot, then verify">xcorr</button>
-       <button onclick="postproc('${h(r.name)}','all')" title="vpot, fits, xcorr, verify">all</button>` : ''}`;
+       <button onclick="postproc('${h(r.name)}','vprof')" title="stacked volume-weighted potential profiles around halos (xcorr mass bins), then verify">vprof</button>
+       <button onclick="postproc('${h(r.name)}','all')" title="vpot, fits, xcorr, vprof, verify">all</button>` : ''}`;
   const evs=r.events.slice().reverse().map(e=>`<tr><td class="muted">${when(e.t)}</td><td>${h(e.stage)}</td><td>${h(e.job)}</td><td>${h(e.ev)}</td><td class="small">${h(Object.entries(e.info).map(([k,v])=>k+'='+v).join(' '))}</td></tr>`).join('');
   const acts=(r.actions||[]).slice().reverse().map(a=>`<tr><td class="muted">${when(a[0])}</td><td>${h(a[1])}</td></tr>`).join('');
   const D=(k,title,body)=>`<details data-k="${id+k}" ${openDetails.has(id+k)?'open':''}><summary>${title}</summary>${body}</details>`;

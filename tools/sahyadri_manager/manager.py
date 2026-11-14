@@ -717,7 +717,7 @@ class Run:
         if (not self.E.get('ARCHIVE') and v and int(v.get('ok', 0)) and D['sim_done'] and not D['active']
                 and len(D['rs_done']) == len(self.outs)):
             return 'verified (no archive)'
-        for st in ('archive', 'verify', 'xcorr', 'fits', 'vpot', 'vahc', 'ctrees'):
+        for st in ('archive', 'verify', 'vprof', 'xcorr', 'fits', 'vpot', 'vahc', 'ctrees'):
             j = D['last'].get(st)
             if j and j['status'] in ('submitted', 'queued', 'held', 'running', 'exiting'):
                 return st
@@ -1212,7 +1212,7 @@ class Manager:
                     run.note('%s job %s vanished from PBS without an end event; automation stopped' % (j['stage'], j['job']))
                     return 0
                 self.recheck_at = min(self.recheck_at or 1e30, first_seen + self.cfg['lost_grace_s'] + 5)
-        if D['active'] and any(j['stage'] in ('ctrees', 'vahc', 'vpot', 'fits', 'xcorr', 'verify', 'archive')
+        if D['active'] and any(j['stage'] in ('ctrees', 'vahc', 'vpot', 'fits', 'xcorr', 'vprof', 'verify', 'archive')
                                for j in D['active']):
             return 0
         if self.qinfo(run)['state'] == 'closed':     # nothing new into a closed queue (drain: post-processing goes on)
@@ -1512,7 +1512,8 @@ class Manager:
         if act == 'postprocess':
             # optional products (postprocess.sh): vpot -> fits -> verify; xcorr -> verify; all. Before the archive only:
             # they change kept files, and the archive is read-only once checked
-            chains = dict(vpot='vpot,fits,verify', xcorr='xcorr,verify', all='vpot,fits,xcorr,verify')
+            chains = dict(vpot='vpot,fits,verify', xcorr='xcorr,verify', vprof='vprof,verify',
+                          all='vpot,fits,xcorr,vprof,verify')
             what = a.get('what')
             if what not in chains:
                 raise ValueError('what must be one of %s' % ', '.join(chains))
@@ -1524,7 +1525,7 @@ class Manager:
                                  % (run.name, ', '.join('%s %s' % (j['stage'], j['job']) for j in D['active'])))
             if not D['last'].get('ctrees') or D['last']['ctrees']['status'] != 'done':
                 raise ValueError('%s: the halo catalogues (ctrees) are not finished' % run.name)
-            if what != 'vpot' and not D['last'].get('fits'):
+            if what in ('xcorr', 'all') and not D['last'].get('fits'):
                 raise ValueError('%s: no FITS tables yet (stage fits)' % run.name)
             ids = run.submit(chains[what], [], dict(chain=chains[what], postprocess=what))
             return 'submitted %s' % ', '.join('%s %s' % x for x in ids)

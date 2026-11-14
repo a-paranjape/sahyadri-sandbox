@@ -2,7 +2,8 @@
 # Submit the Sahyadri pkdgrav3 pipeline for one run as a chain of PBS jobs:
 #   sim -> rockstar -> ctrees -> vahc -> fits     (each starts only if the previous one succeeded: afterok)
 #   optional, only when named in --stages: vpot (halo potential profiles, job_vpot.pbs; then fits again),
-#   xcorr (halo-halo potential cross-correlation, job_xcorr.pbs); production runs: postprocess.sh in the run directory
+#   xcorr (halo-halo potential cross-correlation, job_xcorr.pbs), vprof (stacked volume-weighted potential profiles
+#   around halos, job_vprof.pbs); production runs: postprocess.sh in the run directory
 #   -> verify -> archive (checks; copy of the kept data to ARCHIVE, read-only), only when named in --stages
 #   (tools/sahyadri_manager submits them itself)
 # Rockstar batch: --stages rockstar --rs-snaps A-B (snapshots A..B, see job_rockstar.pbs)
@@ -37,7 +38,7 @@ QSUB=$(command -v qsub || echo /opt/pbs/bin/qsub)
 RUN=$(echo "$STEM" | tr / _)_r$REAL
 CHAIN=$LOGS/chain.$RUN.$(date +%Y%m%d_%H%M%S).txt
 prev=$AFTER
-for st in sim rockstar ctrees vahc vpot fits xcorr verify archive; do
+for st in sim rockstar ctrees vahc vpot fits xcorr vprof verify archive; do
   case ",$STAGES," in *",$st,"*) ;; *) continue ;; esac
   case $st in
     sim)      # SIM_NODES > 1 or SIM_MPIPROCS > 1 (pegasus): pkdgrav3 with MPI ranks over the nodes (job_sim.pbs)
@@ -54,6 +55,7 @@ for st in sim rockstar ctrees vahc vpot fits xcorr verify archive; do
     vpot)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
     fits)     R="select=1:ncpus=$FITS_NCPU:mem=$FITS_MEM"; W=$FITS_WALL ;;
     xcorr)    R="select=1:ncpus=${XC_NCPU:-16}:mem=${XC_MEM:-16gb}"; W=${XC_WALL:-24:00:00} ;;
+    vprof)    R="select=1:ncpus=${VPROF_NCPU:-32}:mem=${VPROF_MEM:-160gb}"; W=${VPROF_WALL:-48:00:00} ;;
     verify)   R="select=1:ncpus=${VF_NCPU:-8}:mem=${VF_MEM:-32gb}"; W=${VF_WALL:-12:00:00} ;;
     archive)  R="select=1:ncpus=${AR_NCPU:-2}:mem=${AR_MEM:-8gb}"; W=${AR_WALL:-72:00:00} ;;
   esac

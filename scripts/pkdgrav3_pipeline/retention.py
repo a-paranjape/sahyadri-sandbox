@@ -169,6 +169,9 @@ def kept_files(E, pl=None):
             add('trees_fits', None, f)
     for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), 'xcorr', '*'))):
         add('xcorr', None, f)
+    for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), 'vprof', '*.npz'))):   # stacked profiles
+        if not f.endswith('.tmp.npz'):
+            add('vprof', None, f)
     for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), 'out_*.pk'))):   # P(k) per output (pk_measure.py)
         m = re.match(r'out_(\d+)\.pk$', os.path.basename(f))
         add('pk', int(m.group(1)) if m else None, f)

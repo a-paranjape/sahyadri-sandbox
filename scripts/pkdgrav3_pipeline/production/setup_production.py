@@ -586,7 +586,9 @@ esac
 #                            needed when the vahc stage ran with PP_POT=0 (PP_POT=1 writes .vpot in the same pass)
 #   ./postprocess.sh xcorr   halo-halo potential cross-correlation at every output with .vpot, then verify
 #                            (XC_* in run.conf, job_xcorr.pbs)
-#   ./postprocess.sh all     vpot, fits, xcorr, verify
+#   ./postprocess.sh vprof   stacked volume-weighted potential profiles around halos (xcorr mass bins) at every
+#                            output that stores the potential, then verify (VPROF_* in run.conf, job_vprof.pbs)
+#   ./postprocess.sh all     vpot, fits, xcorr, vprof, verify
 #   ./postprocess.sh dry ... print the qsub commands only
 # The products are kept files (FITS, xcorr/): after the archive the archive is not updated by this script.
 SUB=%(pipe)s/submit_pipeline.sh
@@ -595,8 +597,9 @@ DRY=; [ "${1:-}" = dry ] && { DRY=--dry-run; shift; }
 case "${1:-}" in
   vpot)  exec "$SUB" "$CONF" --stages vpot,fits,verify $DRY ;;
   xcorr) exec "$SUB" "$CONF" --stages xcorr,verify $DRY ;;
-  all)   exec "$SUB" "$CONF" --stages vpot,fits,xcorr,verify $DRY ;;
-  *)     sed -n '2,12p' "$0"; exit 1 ;;
+  vprof) exec "$SUB" "$CONF" --stages vprof,verify $DRY ;;
+  all)   exec "$SUB" "$CONF" --stages vpot,fits,xcorr,vprof,verify $DRY ;;
+  *)     sed -n '2,14p' "$0"; exit 1 ;;
 esac
 ''' % dict(name=name, now=now, pipe=PIPE, sdir=sdir)
         write(os.path.join(sdir, 'postprocess.sh'), pp, a.force, 0o755)
