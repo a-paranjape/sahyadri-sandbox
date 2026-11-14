@@ -167,7 +167,11 @@ function renderRun(r, idx){
                    : `<button class="primary" onclick="schedule('${h(r.name)}')">Schedule simulation</button>`}
      <button onclick="submitSim('${h(r.name)}')" title="submit now, outside the queue limits">Submit now</button>
      <button onclick="if(confirm('Restart the simulation of ${h(r.name)} from its newest checkpoint?')) act({run:'${h(r.name)}',action:'submit_sim',restart:true})">Restart from checkpoint</button>
-     <button onclick="act({run:'${h(r.name)}',action:'reload_conf'})" title="read run.conf again">Reload config</button>`;
+     <button onclick="act({run:'${h(r.name)}',action:'reload_conf'})" title="read run.conf again">Reload config</button>
+     ${r.sim_done && !['archived','in trash','purged'].includes(r.phase) ? `<span class="muted small">post-processing:</span>
+       <button onclick="postproc('${h(r.name)}','vpot')" title="halo potentials (.vpot), FITS again, verify; only if vahc ran with PP_POT=0">vpot</button>
+       <button onclick="postproc('${h(r.name)}','xcorr')" title="halo-halo potential cross-correlation at every output with .vpot, then verify">xcorr</button>
+       <button onclick="postproc('${h(r.name)}','all')" title="vpot, fits, xcorr, verify">all</button>` : ''}`;
   const evs=r.events.slice().reverse().map(e=>`<tr><td class="muted">${when(e.t)}</td><td>${h(e.stage)}</td><td>${h(e.job)}</td><td>${h(e.ev)}</td><td class="small">${h(Object.entries(e.info).map(([k,v])=>k+'='+v).join(' '))}</td></tr>`).join('');
   const acts=(r.actions||[]).slice().reverse().map(a=>`<tr><td class="muted">${when(a[0])}</td><td>${h(a[1])}</td></tr>`).join('');
   const D=(k,title,body)=>`<details data-k="${id+k}" ${openDetails.has(id+k)?'open':''}><summary>${title}</summary>${body}</details>`;
@@ -224,6 +228,7 @@ function trash(name){
   if(!confirm('Move the scratch data of '+name+' to the trash?\n\nThe manager first re-checks that every kept file is in the archive and unchanged. The move can be undone until you purge.')) return;
   act({run:name, action:'approve_trash'});
 }
+function postproc(name,what){ if(confirm('Submit post-processing "'+what+'" for '+name+'?')) act({run:name, action:'postprocess', what:what}); }
 function setQueue(site,q,st){ if(confirm('Set queue '+site+':'+q+' to '+st+'?')) act({action:'set_queue', site:site, queue:q, state:st}); }
 function purge(name){
   const t=prompt('Permanently delete the trash of '+name+'?\nThe archive copy stays. Type the run name to confirm:');

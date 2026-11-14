@@ -29,6 +29,9 @@ Statistics, per bin pair, column k and shell (pairs with both phi defined; dphi 
   cov        <phi_i phi_j> - <phi_i><phi_j>;  corr = cov / (sd_i sd_j) with the pair-weighted sd of each side
   each with a jackknife error (*_err). Stored too: the raw sums (S[pair, k, shell, 6] = N, sum phi_i, sum phi_j,
   sum phi_i phi_j, sum phi_i^2, sum phi_j^2; and per jackknife region), npair, r_mean, frac (dilution).
+  Mass bins in the file: m_edges (Msun/h, mass_col, hosts_only), n_halos per bin, pairs (P, 2) bin indices A, B,
+  pair_m_range (P, 2, 2) = [[A lo, A hi], [B lo, B hi]] in Msun/h and pair_n_halos (P, 2); statistics are indexed
+  [pair, phi column, shell].
   phi is shifted by the mean of each column over all selected halos before summing (phi_shift; it cancels in every
   statistic and keeps the sums well conditioned).
 
@@ -264,7 +267,9 @@ def main():
     # (P, nbin, K) -> (P, K, nbin)
     tr = lambda x: np.moveaxis(x, 2, 1)
     np.savez_compressed(A.out, r_edges=edges, r_mid=r_mid, r_mean=r_mean, binning=binning, r_units='Mpc/h comoving',
-             m_edges=me, mass_col=A.mass_col, n_halos=n_halos, pairs=np.array(pairs), phi_cols=np.array(phis),
+             m_edges=me, mass_col=A.mass_col, m_units='Msun/h', n_halos=n_halos, pairs=np.array(pairs),
+             pair_m_range=np.array([[[me[a], me[a + 1]], [me[b], me[b + 1]]] for a, b in pairs]),
+             pair_n_halos=np.array([[n_halos[a], n_halos[b]] for a, b in pairs]), phi_cols=np.array(phis),
              phi_shift=shift, a=H['a'], z=1 / H['a'] - 1, box=L, hosts_only=not A.all_halos,
              npair=tot_n, frac=frac, level=levels, expected_pairs=exp_pairs, target=A.target, min_a=A.min_a,
              jk=A.jk, mean_diff=tr(md), sf=tr(sf), cov=tr(cov), corr=tr(corr),

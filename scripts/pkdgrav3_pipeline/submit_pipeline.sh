@@ -53,7 +53,7 @@ for st in sim rockstar ctrees vahc vpot fits xcorr verify archive; do
     vahc)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
     vpot)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
     fits)     R="select=1:ncpus=$FITS_NCPU:mem=$FITS_MEM"; W=$FITS_WALL ;;
-    xcorr)    R="select=1:ncpus=${XC_NCPU:-16}:mem=${XC_MEM:-16gb}"; W=${XC_WALL:-02:00:00} ;;
+    xcorr)    R="select=1:ncpus=${XC_NCPU:-16}:mem=${XC_MEM:-16gb}"; W=${XC_WALL:-24:00:00} ;;
     verify)   R="select=1:ncpus=${VF_NCPU:-8}:mem=${VF_MEM:-32gb}"; W=${VF_WALL:-12:00:00} ;;
     archive)  R="select=1:ncpus=${AR_NCPU:-2}:mem=${AR_MEM:-8gb}"; W=${AR_WALL:-72:00:00} ;;
   esac

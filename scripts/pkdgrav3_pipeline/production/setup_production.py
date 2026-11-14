@@ -539,7 +539,7 @@ PP_GRID=512             # production grid; memory per process ~13 GB (PP_FAST=1,
 PP_DOWN_TO=0            # 0 = all particles (no downsampling)
 PP_TENS=1
 PP_FAST=1               # 1: vahc_fast.py (identical .vahc/.tens to AddValue, ~12x faster); 0: original AddValue
-PP_POT=0                # 1 (needs PP_FAST): out_<snap>.vpot, mean particle potential around halos (snapshots with potential)
+PP_POT=1                # 1 (needs PP_FAST): out_<snap>.vpot, mean particle potential around halos (snapshots with potential)
 PP_NPROC=%(ppn)d             # snapshots in parallel
 PP_PK=1                 # matter + halo-mass-bin P(k) and bias of every output from the same grid (out_<snap>.pk),
                         # CLASS P(k) at every output (halos/.../pk/), checked against each other in stage verify
@@ -579,22 +579,24 @@ esac
 ''' % dict(name=name, now=now, hdir=hdir, pipe=PIPE, sdir=sdir)
         write(os.path.join(sdir, 'submit.sh'), sub, a.force, 0o755)
         pp = '''#!/bin/bash
-# Post-processing of %(name)s beyond the pipeline (written by setup_production.py %(now)s). Not submitted by the
-# run manager; run it when wanted, after the pipeline (verify) has finished:
+# Post-processing of %(name)s beyond the pipeline (written by setup_production.py %(now)s). Run it when wanted,
+# after the pipeline (verify) has finished and before the archive (or from the run manager page, Post-processing):
 #   ./postprocess.sh vpot    halo potential profiles out_<snap>.vpot (outputs that store the potential, z <= 0.5),
-#                            then the FITS tables of those outputs again with the phi_* columns (stages vpot, fits)
-#   ./postprocess.sh xcorr   halo-halo potential cross-correlation (needs vpot; XC_* in run.conf, job_xcorr.pbs)
-#   ./postprocess.sh all     vpot, fits, xcorr
+#                            then the FITS tables of those outputs again with the phi_* columns, then verify; only
+#                            needed when the vahc stage ran with PP_POT=0 (PP_POT=1 writes .vpot in the same pass)
+#   ./postprocess.sh xcorr   halo-halo potential cross-correlation at every output with .vpot, then verify
+#                            (XC_* in run.conf, job_xcorr.pbs)
+#   ./postprocess.sh all     vpot, fits, xcorr, verify
 #   ./postprocess.sh dry ... print the qsub commands only
-# Products change kept files (FITS) after the archive; the archive is not updated by this script.
+# The products are kept files (FITS, xcorr/): after the archive the archive is not updated by this script.
 SUB=%(pipe)s/submit_pipeline.sh
 CONF=%(sdir)s/run.conf
 DRY=; [ "${1:-}" = dry ] && { DRY=--dry-run; shift; }
 case "${1:-}" in
-  vpot)  exec "$SUB" "$CONF" --stages vpot,fits $DRY ;;
-  xcorr) exec "$SUB" "$CONF" --stages xcorr $DRY ;;
-  all)   exec "$SUB" "$CONF" --stages vpot,fits,xcorr $DRY ;;
-  *)     sed -n '2,10p' "$0"; exit 1 ;;
+  vpot)  exec "$SUB" "$CONF" --stages vpot,fits,verify $DRY ;;
+  xcorr) exec "$SUB" "$CONF" --stages xcorr,verify $DRY ;;
+  all)   exec "$SUB" "$CONF" --stages vpot,fits,xcorr,verify $DRY ;;
+  *)     sed -n '2,12p' "$0"; exit 1 ;;
 esac
 ''' % dict(name=name, now=now, pipe=PIPE, sdir=sdir)
         write(os.path.join(sdir, 'postprocess.sh'), pp, a.force, 0o755)

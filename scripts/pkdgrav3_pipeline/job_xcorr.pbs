@@ -3,16 +3,23 @@
 # from $HALO_DIR/compressed/out_<snap>_{basic,vahc}.fits.gz (the vahc file needs the .vpot columns: PP_POT=1).
 #   submit_pipeline.sh <run.conf> --stages xcorr          (or --stages vahc,fits,xcorr)
 # Config (all optional):
-#   XC_SNAPS   snapshots, comma separated (default: the last one, z = 0)
+#   XC_SNAPS   snapshots, comma separated; default (or "all"): every snapshot with out_<snap>.vpot, i.e. every output
+#              that stores the potential (z <= 0.5 in production); "last": the last one only
 #   XC_ARGS    options of halo_potential_xcorr.py (default: its defaults, log:0.2,50,30 bins, profile mass bins,
 #              phi_Rvir,phi_rs,phi_R1p5vir,phi_R0p5vir,phi_R200b); e.g. XC_ARGS="--rbins lin:0,50,0.2"
 #   XC_TAG     output name tag (default: log or lin from --rbins)
-#   XC_NCPU, XC_MEM, XC_WALL   resources (default 16 cores, 16gb, 2 h; used by submit_pipeline.sh)
+#   XC_NCPU, XC_MEM, XC_WALL   resources (default 16 cores, 16gb, 24 h; used by submit_pipeline.sh)
 # Output: $HALO_DIR/xcorr/out_<snap>_xcorr_<tag>.npz. Restart: rerun; existing outputs are skipped.
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
 NS=$(grep -c . "$SIM_DIR/snapnames.txt")
-SNAPS=${XC_SNAPS:-$((NS - 1))}
+case "${XC_SNAPS:-all}" in
+  all)  SNAPS=$(ls "$HALO_DIR"/out_*.vpot 2>/dev/null | sed 's/.*out_\([0-9]*\)\.vpot$/\1/' | sort -n | paste -sd,) ;;
+  last) SNAPS=$((NS - 1)) ;;
+  *)    SNAPS=$XC_SNAPS ;;
+esac
+[ -n "$SNAPS" ] || { stamp "no out_<snap>.vpot in $HALO_DIR (stage vpot, or vahc with PP_POT=1, first)"; exit 1; }
+stamp "snapshots: $SNAPS"
 ARGS=${XC_ARGS:-}
 TAG=${XC_TAG:-$(echo "$ARGS" | grep -q 'lin:' && echo lin || echo log)}
 mkdir -p "$HALO_DIR/xcorr"
