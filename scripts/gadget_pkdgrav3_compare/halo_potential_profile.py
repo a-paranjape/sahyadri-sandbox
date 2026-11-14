@@ -182,26 +182,47 @@ def local_linear(dx, f, d, h):
     return out
 
 
+VG = {}
+VG_ROWS = 1 << 18           # grid points per task (memory per worker ~ 0.4 GB at k = 16)
+
+
+def vgrid_block(t):
+    """phi at grid points [p0, p1) of layer i (flat index within the layer), in a forked worker"""
+    i, p0, p1 = t
+    x, phi, tree, L, ng, k = (VG[n] for n in ('x', 'phi', 'tree', 'L', 'ng', 'k'))
+    h = L / ng
+    q = np.arange(p0, p1)
+    pts = (np.column_stack([np.full(q.size, i), q // ng, q % ng]) + 0.5) * h
+    d, j = tree.query(pts, k=k)
+    dx = x[j] - pts[:, None, :]
+    dx -= L * np.round(dx / L)                                              # periodic offsets
+    return i, p0, local_linear(dx, phi[j], d, h).astype(np.float32)
+
+
 def build_vgrid(uts, L, ng, k, workers):
-    """phi on the ng^3 cell centres from the k nearest particles, local linear fit (float32)"""
+    """phi on the ng^3 cell centres from the k nearest particles, local linear fit (float32). The tree and the
+    particles are shared with forked workers; each task fits VG_ROWS grid points (the fit is serial numpy, so the
+    parallelism has to come from processes)."""
+    import multiprocessing as mp
     xs, ps = [], []
     for u in uts:
         x, p, _ = load_unit(u)
         xs.append(x); ps.append(p)
     x, phi = np.concatenate(xs), np.concatenate(ps)
     del xs, ps
-    tree = cKDTree(x, boxsize=L)
-    h = L / ng
-    out = np.empty((ng, ng, ng), np.float32)
-    c = (np.arange(ng) + 0.5) * h
-    yy, zz = np.meshgrid(c, c, indexing='ij')
-    for i in range(ng):
-        pts = np.column_stack([np.full(ng * ng, c[i]), yy.ravel(), zz.ravel()])
-        d, j = tree.query(pts, k=k, workers=workers)
-        dx = x[j] - pts[:, None, :]
-        dx -= L * np.round(dx / L)                                          # periodic offsets
-        out[i] = local_linear(dx, phi[j], d, h).reshape(ng, ng)
-    return out
+    VG.update(x=x, phi=phi, tree=cKDTree(x, boxsize=L), L=L, ng=ng, k=k)
+    out = np.empty((ng, ng * ng), np.float32)
+    tasks = [(i, p0, min(ng * ng, p0 + VG_ROWS)) for i in range(ng) for p0 in range(0, ng * ng, VG_ROWS)]
+    if workers <= 1:
+        res = map(vgrid_block, tasks)
+        for i, p0, v in res:
+            out[i, p0:p0 + v.size] = v
+    else:
+        with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context('fork')) as ex:
+            for i, p0, v in ex.map(vgrid_block, tasks, chunksize=1):
+                out[i, p0:p0 + v.size] = v
+    VG.clear()
+    return out.reshape(ng, ng, ng)
 
 
 def load_grid(u):

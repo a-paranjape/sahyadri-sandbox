@@ -18,6 +18,8 @@
 #   VPROF_ARGS     other options of halo_potential_profile.py (default: --max-halos 20000 per bin, --target 8192
 #                  for volume weighting, grid 2 x the particle grid per side)
 #   VPROF_NCPU, VPROF_MEM, VPROF_WALL   resources (default 32 cores, 160gb, 48 h; used by submit_pipeline.sh)
+#                  Measured (pawna, 32 cores, /usr/bin/time -v): 512^3, grid 1024^3: 7.9 min per snapshot, 15 GB max
+#                  RSS of one process; 37 snapshots ~5 h. The grid fit scales with grid points (~8x for 1024^3 particles).
 # Output: $HALO_DIR/vprof/out_<snap>_vprof_<weight>.npz (kept with the run). Restart: rerun; existing outputs are
 # skipped. The gridded potential (4 bytes per grid point) is a temporary file in $HALO_DIR/vprof/tmp, removed after
 # each snapshot.
