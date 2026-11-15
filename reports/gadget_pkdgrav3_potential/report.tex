@@ -232,6 +232,12 @@ small-$r$ pairs, which are not diluted.
 \input{results256.tex}
 
 %======================================================================================================
+\section{Finite box size: $512^3$ production boxes of 200, 500 and 1000\,\Mpch}
+\label{sec:boxsize}
+
+\input{boxsize.tex}
+
+%======================================================================================================
 \section{Problems found on the way}
 \label{sec:issues}
 \begin{enumerate}
@@ -287,6 +293,9 @@ for c in gadget256 pkd256; do for b in log:0.2,50,30 lin:0,50,0.2; do
   python ../../scripts/post-process/halo_potential_xcorr.py <halos>/$c/r1/compressed 100 \
       xc/${c}_out100_xc_${b%%:*}.npz --rbins $b; done; done
 python make_xcorr_figures.py --full xc
+# finite box size: vprof/xcorr outputs of Sahyadri_L{200,500,1000}N512/default512/r1, outputs 64, 82, 100, copied
+# (xcorr without the per-region sums) to data/box512_L200_L500_L1000/L<L>_out<snap>_{vprof_volume,xcorr_log}.npz
+python make_boxsize_figures.py
 latexmk -pdf report.tex
 \end{verbatim}
 }

@@ -28,6 +28,13 @@ difference, structure function and correlation of the per-halo potentials as a f
 OpenMP and dilution, built for $2048^3$, and is an optional pipeline stage. At $256^3$ the two codes agree within
 the jackknife errors at all separations from 0.4 to 50\,\Mpch. Within the lowest mass bin the correlation falls
 from 0.999 at 0.4\,\Mpch{} to 0.28 at 50\,\Mpch.
+\item \textbf{Finite box size} (\S\ref{sec:boxsize}). Three $512^3$ production boxes of 200, 500 and 1000\,\Mpch{}
+from the same seed: the smaller box has a shallower mean potential around halos at every radius, by
+$(1.5$--$3.7)\times10^5$\,\kms{} for L200 at $z=0$ (15--30\% at 1\,\Mpch), and a halo--halo potential structure
+function lower by up to 40\% at 40\,\Mpch. A linear-theory estimate, derived both as a Fourier mode sum and in real
+space (mass conservation in the box forces a compensating deficit around every halo; periodicity removes the pull of
+outside matter, i.e.\ a bulk flow of $\sim$200\,km\,s$^{-1}$ for L200), accounts for 75--90\% of the mean-potential
+difference but only 50--60\% of the structure-function deficit.
 \end{itemize}
 The stacking tool keeps only per-mass-bin sums and dilutes the outer shells by particle ID. A stack of a $256^3$
 snapshot with $\sim17\,000$ halos takes $\sim10$\,s; gridding the potential for the volume weighting takes 6\,min.
