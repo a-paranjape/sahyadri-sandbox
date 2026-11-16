@@ -41,7 +41,9 @@ effect: grav - real, rsd+grav - rsd) are stored with their own jackknife errors;
 
 Output (npz): s_edges, s_mid, mu_edges, ells, spaces, los, pairs, n_halos, ...; DD[space, los, pair, s, mu];
 xi_ell[space, los, pair, ell, s] (+ _err) and the mean over the lines of sight xi_ell_mean (+ _err, jackknife of the
-mean); xi_ell_jk (per region, of the mean over lines of sight); diff_names, dxi_ell, dxi_ell_err (potential effect);
+mean); xi_ell_jk (per region, of the mean over lines of sight); diff_names, dxi_ell, dxi_ell_err (potential effect,
+mean over the lines of sight: [diff, pair, ell, s]); dxi_ell_los, dxi_ell_los_err (the same for each line of sight on
+its own, with its own paired jackknife: [diff, los, pair, ell, s]);
 vg_mean[phi column, mass bin] (mean v_g in km/s, including --pot-amp).
 """
 import argparse
@@ -257,8 +259,8 @@ def main():
         """multipoles of DD with region r of the A halos left out"""
         return multipoles(d, (nA[ip] - nA_k[ip, r]) * nBe[ip], s_edges, mu_edges, L, W, ells)
 
-    def jerr(x):  # jackknife error over the region axis (2)
-        return np.sqrt((nreg - 1) / nreg * ((x - x.mean(axis=2, keepdims=True))**2).sum(axis=2))
+    def jerr(x, axis=2):  # jackknife error over the region axis (2 for (space, pair, region, ...); 1 for (pair, region, ...))
+        return np.sqrt((nreg - 1) / nreg * ((x - x.mean(axis=axis, keepdims=True))**2).sum(axis=axis))
 
     # mean over lines of sight and its jackknife
     DDm = DD.mean(axis=1)                                # (S, P, s, mu)
@@ -271,15 +273,15 @@ def main():
         for r in range(nreg):
             jk[:, ip, r] = xi_loo(DDm[:, ip] - DDkm[:, ip, r], ip, r)
     xim_err = jerr(jk)
-    for il in range(NL):                                 # each line of sight on its own
-        jl = np.zeros((S, P, nreg, len(ells), ns))
+    jkl = np.zeros((S, NL, P, nreg, len(ells), ns))      # jackknife values of each line of sight on its own
+    for il in range(NL):
         for ip in range(P):
             for r in range(nreg):
-                jl[:, ip, r] = xi_loo(DD[:, il, ip] - DDk[:, il, ip, r], ip, r)
-        xi_err[:, il] = jerr(jl)
+                jkl[:, il, ip, r] = xi_loo(DD[:, il, ip] - DDk[:, il, ip, r], ip, r)
+        xi_err[:, il] = jerr(jkl[:, il])
     # potential effect: grav - real, rsd+grav - rsd (same halos and regions)
     names = [s[0] for s in spaces]
-    diffs, dxi, dxi_err = [], [], []
+    diffs, dxi, dxi_err, dxi_los, dxi_los_err = [], [], [], [], []
     for i, (name, use_v, c) in enumerate(spaces):
         if c is None:
             continue
@@ -288,7 +290,9 @@ def main():
             j = names.index(base)
             diffs.append('%s - %s' % (name, base))
             dxi.append(xim[i] - xim[j])
-            dxi_err.append(jerr(jk[i] - jk[j]))
+            dxi_err.append(jerr(jk[i] - jk[j], axis=1))                # (pair, region, ell, s): region axis 1
+            dxi_los.append(xi[i] - xi[j])                              # (los, pair, ell, s)
+            dxi_los_err.append(np.array([jerr(jkl[i, il] - jkl[j, il], axis=1) for il in range(NL)]))
     s_mid = 0.5 * (s_edges[1:] + s_edges[:-1])
     np.savez_compressed(
         A.out, s_edges=s_edges, s_mid=s_mid, mu_edges=mu_edges, ells=np.array(ells), spaces=np.array(names),
@@ -297,6 +301,7 @@ def main():
         omega_m=H['om'], omega_l=H['ol'], subsample_a=A.subsample_a, jk=A.jk, DD=DD,
         xi_ell=xi, xi_ell_err=xi_err, xi_ell_mean=xim, xi_ell_mean_err=xim_err, xi_ell_jk=jk,
         diff_names=np.array(diffs), dxi_ell=np.array(dxi), dxi_ell_err=np.array(dxi_err),
+        dxi_ell_los=np.array(dxi_los), dxi_ell_los_err=np.array(dxi_los_err),
         source=os.path.abspath(A.dir), snap=str(A.snap))
     print('wrote %s in %.1f s' % (A.out, time.time() - t0))
 

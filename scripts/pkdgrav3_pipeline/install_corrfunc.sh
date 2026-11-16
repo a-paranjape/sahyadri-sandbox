@@ -57,6 +57,8 @@ EOF
   fi
 fi
 "$PY" -m pip install -q setuptools wheel
+# Corrfunc's run-time dependencies: the build below uses --no-deps (it must not replace this venv's numpy)
+"$PY" -m pip install -q wurlitzer future
 "$PY" -m pip install -q --no-build-isolation --force-reinstall --no-deps .
 cd /
 "$PY" - <<'EOF'
