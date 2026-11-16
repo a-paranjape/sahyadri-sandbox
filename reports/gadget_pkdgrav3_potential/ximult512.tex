@@ -1,0 +1,66 @@
+% Halo correlation multipoles of the 512^3 production boxes with the gravitational-redshift shift.
+% Figures and table: make_ximult_box_figures.py; data: data/box512_L200_L500_L1000/L<L>_out100_ximult.npz.
+
+\paragraph{Measurement.} \fp{scripts/post-process/halo_xi_multipoles.py} (pipeline stage \texttt{ximult}) on the
+three matched-seed $512^3$ boxes of Section~\ref{sec:boxsize} at $z = 0$ (output 100): host halos in the mass bins of
+the stacked profiles ($M_{\rm vir}$), pair counts in $(s, \mu)$ with Corrfunc \texttt{DDsmu} from the
+\texttt{adematti/Corrfunc} fork (branch \texttt{desi}: signed $\mu$, so the odd multipoles survive), analytic random
+pairs of the periodic box, $s = 0$--$100$\,\Mpch{} in 2\,\Mpch{} bins, 200 $\mu$ bins, multipoles $\ell = 0\ldots4$.
+Each halo is moved along the line of sight by $v_{\rm los}/(aH)$ (\emph{rsd}), by $v_g/(aH)$ with $v_g = -\phi/c$
+and $\phi = \phi_{r_s}$ (mean particle potential within $r_s$, from \texttt{.vpot}; $\phi_{0.5R_{\rm vir}}$ where
+undefined) (\emph{grav}), or by both. The plane-parallel line of sight is $x$, $y$ and $z$ in turn; the pair counts
+are averaged over the three, and each line of sight is also stored on its own. The potential effect is the difference
+of two spaces with the same halos, $\xi_\ell^{\rm grav}-\xi_\ell^{\rm real}$ and $\xi_\ell^{\rm rsd+grav}-\xi_\ell^{\rm
+rsd}$, with its own (paired) jackknife error over $3^3$ sub-cubes of the A halos, for the mean and for each line of
+sight. Convention: $\mathbf s = \mathbf x_B - \mathbf x_A$, $\mu = s_{\rm los}/s$; a B population moved by $+\delta$
+gives $\xi_1 = -\delta\, d\xi_0/ds$. Halos in deeper potentials have larger $v_g$, so with B the heavier bin the
+gravitational dipole is positive where $\xi_0$ falls with $s$. Cost: 18--33\,s and 0.3--0.5\,GB per box on 32 cores
+(jobs 2538076--78, 16 Nov 2026). Halos without a potential (2070, 3817, 5625 in L200, L500, L1000) are left out of
+every space.
+
+\paragraph{Mean shift estimate.} If the gravitational redshift only moved each population as a whole, by
+$\delta = \langle v_g\rangle/(aH)$, the dipole would be $-(\delta_B-\delta_A)\, d\xi_0^{\rm real}/ds$ (dotted
+curves). The mean $v_g$ per bin is 2.0--3.2, 3.7--4.0, 7.6--8.2 and 16.2--16.9\,km\,s$^{-1}$ (bins 0--3; the
+lowest bin differs in L1000 because it is incomplete there), so $\delta_B - \delta_A$ is 0.04--0.13\,\Mpch{} for the
+cross pairs (Table~\ref{tab:ximult512}).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/ximult512_even.pdf}
+\caption{Even multipoles $s^2\xi_0$, $s^2\xi_2$, $s^2\xi_4$ of same-bin halo pairs in real space (solid) and redshift
+space (dashed), mean over the lines of sight $x$, $y$, $z$, with jackknife bands, in the three boxes.}
+\label{fig:ximult512_even}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/ximult512_dipole.pdf}
+\caption{Dipole from the gravitational redshift, $\xi_1^{\rm grav}-\xi_1^{\rm real}$ (top) and
+$\xi_1^{\rm rsd+grav}-\xi_1^{\rm rsd}$ (bottom), for the three cross pairs of the upper mass bins. Points: mean over
+the lines of sight averaged in 8\,\Mpch{} bins (four 2\,\Mpch{} bins; errors combined as if the bins were
+independent, which underestimates them somewhat). Thin lines: each line of sight. Dotted: mean-shift estimate.}
+\label{fig:ximult512_dipole}
+\end{figure}
+
+\begin{table}[H]
+\centering\footnotesize
+\input{ximult512_table.tex}
+\caption{Gravitational dipole $\xi_1^{\rm grav}-\xi_1^{\rm real}$ in units of $10^{-3}$, inverse-variance weighted
+mean over $s = 10$--$40$\,\Mpch{} (jackknife errors of the 2\,\Mpch{} bins, treated as independent): mean over the
+lines of sight with error, each line of sight, and the mean-shift estimate averaged with the same weights.
+$\Delta\delta = (\langle v_g\rangle_B-\langle v_g\rangle_A)/(aH)$.}
+\label{tab:ximult512}
+\end{table}
+
+\paragraph{Results.} \emph{Even multipoles} (Fig.~\ref{fig:ximult512_even}): the three boxes agree in real and
+redshift space within the errors up to $\sim$40\,\Mpch; the redshift-space monopole is enhanced and the quadrupole
+negative (Kaiser squashing), and $\xi_4$ is consistent with zero for these bins. Beyond $\sim$50\,\Mpch{} the L200
+monopole drops below the larger boxes, the finite-box deficit of Section~\ref{sec:boxsize}; its top bin (76 halos) is
+noise. \emph{Dipole} (Fig.~\ref{fig:ximult512_dipole}, Table~\ref{tab:ximult512}): only L1000 has the volume to
+detect it, $(1.78\pm0.52)\times10^{-3}$ for pair 1--3 and $(1.75\pm0.77)\times10^{-3}$ for 2--3 between 10 and
+40\,\Mpch{} (3.4 and 2.3$\sigma$, errors from bins treated as independent), $(0.25\pm0.11)\times10^{-3}$ for 1--2.
+The three lines of sight agree with each other within their errors. The signal is 50--75\% of the mean-shift estimate
+in L1000 (1.78 against 2.50, 1.75 against 2.36, 0.25 against 0.57); at $256^3$ a potential shift scaled by 50 also
+gave 0.5--1.2 times the mean-shift prediction (guide \fp{docs/pkdgrav3_pipeline_pawna.md}, section 14). In L200 and L500 the dipole is consistent both with zero and with the
+estimate. With redshift-space distortions included (bottom row) the potential effect on the dipole is similar. It grows
+toward small $s$, where $\xi_0$ is steep; below $\sim$8\,\Mpch{} halo exclusion dominates.

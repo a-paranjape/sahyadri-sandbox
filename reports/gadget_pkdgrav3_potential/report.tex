@@ -238,6 +238,12 @@ small-$r$ pairs, which are not diluted.
 \input{boxsize.tex}
 
 %======================================================================================================
+\section{Correlation multipoles with the gravitational redshift: $512^3$ boxes}
+\label{sec:ximult512}
+
+\input{ximult512.tex}
+
+%======================================================================================================
 \section{Problems found on the way}
 \label{sec:issues}
 \begin{enumerate}
@@ -296,6 +302,9 @@ python make_xcorr_figures.py --full xc
 # finite box size: vprof/xcorr outputs of Sahyadri_L{200,500,1000}N512/default512/r1, outputs 64, 82, 100, copied
 # (xcorr without the per-region sums) to data/box512_L200_L500_L1000/L<L>_out<snap>_{vprof_volume,xcorr_log}.npz
 python make_boxsize_figures.py
+# correlation multipoles of the same boxes at z = 0: stage ximult (XM_ARGS="--los x,y,z" in run.conf), outputs
+# <halos>/xcorr/out_100_ximult.npz copied without DD and xi_ell_jk to data/box512_L200_L500_L1000/L<L>_out100_ximult.npz
+python make_ximult_box_figures.py
 latexmk -pdf report.tex
 \end{verbatim}
 }
