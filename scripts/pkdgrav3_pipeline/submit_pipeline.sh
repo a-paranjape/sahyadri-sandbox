@@ -42,11 +42,13 @@ for st in sim rockstar ctrees vahc vpot fits xcorr vprof verify archive; do
   case ",$STAGES," in *",$st,"*) ;; *) continue ;; esac
   case $st in
     sim)      # SIM_NODES > 1 or SIM_MPIPROCS > 1 (pegasus): pkdgrav3 with MPI ranks over the nodes (job_sim.pbs)
+              # SIM_GPU=1 (pegasus GPU nodes): one GPU per node (ngpus=1), job_sim.pbs then runs build_gpu
+              GPU=; [ "${SIM_GPU:-0}" = 1 ] && GPU=":ngpus=1"
               if [ "${SIM_NODES:-1}" -gt 1 ] || [ "${SIM_MPIPROCS:-1}" -gt 1 ]; then
-                R="select=${SIM_NODES:-1}:ncpus=$SIM_NCPU:mpiprocs=${SIM_MPIPROCS:-1}:mem=$SIM_MEM"
+                R="select=${SIM_NODES:-1}:ncpus=$SIM_NCPU:mpiprocs=${SIM_MPIPROCS:-1}$GPU:mem=$SIM_MEM"
                 [ -n "${SIM_PLACE:-}" ] && R="$R -l place=$SIM_PLACE"
               else
-                R="select=1:ncpus=$SIM_NCPU:mem=$SIM_MEM"
+                R="select=1:ncpus=$SIM_NCPU$GPU:mem=$SIM_MEM"
               fi
               W=$SIM_WALL ;;
     rockstar) R="select=1:ncpus=$RS_NCPU:mem=$RS_MEM";     W=$RS_WALL ;;

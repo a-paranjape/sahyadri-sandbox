@@ -33,6 +33,11 @@ if [ -n "${RESTART:-}" ]; then
   stamp "restart from $CHK"
 fi
 NTH=${PBS_NCPUS:-$SIM_NCPU}
+# SIM_GPU=1 (pegasus GPU nodes, one P100 each): the CUDA build $PKD_IO_ROOT/build_gpu (build_pkdgrav3_gpu_pegasus.sh);
+# submit_pipeline.sh then asks for ngpus=1 per node. SIM_BUILD overrides the build directory.
+PKD_BIN=$PKD_IO_ROOT/${SIM_BUILD:-$([ "${SIM_GPU:-0}" = 1 ] && echo build_gpu || echo build)}/pkdgrav3
+[ -x "$PKD_BIN" ] || { stamp "pkdgrav3 binary $PKD_BIN missing"; exit 1; }
+[ "${SIM_GPU:-0}" = 1 ] && stamp "GPU build $PKD_BIN; GPUs: $(nvidia-smi -L 2>/dev/null | tr '\n' ' ' || echo 'nvidia-smi not found')"
 # MPI ranks: SIM_MPIPROCS per node on SIM_NODES nodes (pegasus); NTH threads per rank
 NRANK=$(( ${SIM_NODES:-1} * ${SIM_MPIPROCS:-1} ))
 [ "$NRANK" -gt 1 ] && NTH=$(( SIM_NCPU / ${SIM_MPIPROCS:-1} ))
@@ -102,15 +107,19 @@ else
     stamp "pkdgrav3: $NRANK MPI ranks (${SIM_MPIPROCS:-1} per node on $(sort -u "$PBS_NODEFILE" | tr '\n' ' ')) x $NTH threads, parameter file $PAR (snapshots straight to $PKC_DIR)"
     # shellcheck disable=SC2086
     /usr/bin/time -v mpirun --hostfile "$PBS_NODEFILE" --bind-to none ${mpirun_pegasus_args:-} ${PYTHONPATH:+-x PYTHONPATH} -np "$NRANK" \
-        --map-by ppr:${SIM_MPIPROCS:-1}:node ${SIM_MPI_EXTRA:-} "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
+        --map-by ppr:${SIM_MPIPROCS:-1}:node ${SIM_MPI_EXTRA:-} "$PKD_BIN" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
   else
     stamp "pkdgrav3 with $NTH threads, parameter file $PAR (snapshots straight to $PKC_DIR)"
-    /usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_IO_ROOT/build/pkdgrav3" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
+    /usr/bin/time -v mpirun --bind-to none -np 1 -x PYTHONPATH "$PKD_BIN" -sz "$NTH" "$PAR" > run.$J.log 2> time.$J.log
   fi
   rc=$?
 fi
 ln -sf run.$J.log run.log
 grep -E "Elapsed|Maximum resident" time.$J.log
+# GPU builds: share of the gravity tiles done on the GPUs over the job (pkdgrav3's per-step "Total tiles processed")
+if [ "${SIM_GPU:-0}" = 1 ]; then
+  grep -h "Total tiles processed" run.$J.log | awk '{t+=$4; g+=$8} END {if (t) printf "GPU: %.4g of %.4g gravity tiles on the GPUs (%.1f %%)\n", g, t, 100*g/t; else print "GPU: no tile statistics in the log"}' | sed 's/,//g'
+fi
 # time pkdgrav3 spent writing (it waits for each write): snapshots and checkpoints
 for w in Output Checkpoint; do
   grep -h "$w.*successfully written" run.$J.log | awk -v w=$w '{t+=$(NF-1); n++; if($(NF-1)>m)m=$(NF-1)} END {if(n) printf "%s writes: %d, %.0f s in total, longest %.0f s\n", w, n, t, m}'

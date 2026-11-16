@@ -953,6 +953,8 @@ class Manager:
                         ('nodes', '--sim-nodes'), ('rs_batch', '--rs-batch')):
             if k in o:
                 args += [flag, str(o[k])]
+        if str(o.get('gpu', '0')).lower() in ('1', 'true', 'yes'):
+            args += ['--sim-gpu']          # pegasus GPU nodes (3 nodes by default from 2048^3)
         if remote:
             py, sb = S['python'], S['sandbox']
             setup = os.path.join(sb, 'scripts', 'pkdgrav3_pipeline', 'production', 'setup_production.py')

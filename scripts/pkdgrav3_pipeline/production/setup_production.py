@@ -178,6 +178,8 @@ SITES = dict(
 # pegasus queues (qstat -Qf, 13 Nov 2026): project (-P PEGASUS_PROJECT, the project's budget; 96 h used here),
 # regular (user budget, 48 h at most), debug (4 h, tests); budgets in core-hours (amgr checkbalance)
 PEGASUS_PROJECT = 'hpc2502016'
+# pegasus GPU nodes gpu001-004: one Tesla P100 each, 32 Skylake cores, 385608 MB (PBS); amgr charges a GPU like a core
+GPU_NODE_MEM = '360gb'
 PEGASUS_WALL = dict(project='96:00:00', regular='48:00:00', debug='04:00:00')
 
 
@@ -231,6 +233,7 @@ def site_block(a, R):
         'SIM_NODES=%d; SIM_MPIPROCS=2; SIM_PLACE=%s   # SIM_NCPU cores per node; 2 MPI ranks per node' % (
             R['SIM'][3], 'scatter:excl' if R['SIM'][3] > 1 else 'free'),
         'SIM_ENV=%s/pkdgrav3/tools/pegasus/env_pegasus.sh   # pkdgrav3 run-time environment (conda MPI)' % a.pkd_io_root,
+        'SIM_GPU=%d               # 1: GPU nodes (ngpus=1 per node) and the CUDA build $PKD_IO_ROOT/build_gpu' % (1 if a.sim_gpu else 0),
         'SIM_STAGING=0           # snapshots and checkpoints written straight to SCRATCH (Lustre)']
                      + (['VF_WALL=04:00:00; XC_WALL=02:00:00   # debug queue: at most 4 h'] if a.queue == 'debug' else []))
 
@@ -274,6 +277,10 @@ def main():
     ap.add_argument('--sim-nodes', type=int, default=None,
                     help='pegasus: nodes of the simulation (default: 1 up to 512^3, 3 above); memory per node then '
                          '1.5 x the expected peak (747 GiB at 2048^3, scaled as N^3) / nodes, at most 480 GB')
+    ap.add_argument('--sim-gpu', action='store_true',
+                    help='pegasus: run the simulation on the GPU nodes (one P100 each) with the CUDA build '
+                         '$PKD_IO_ROOT/build_gpu (build_pkdgrav3_gpu_pegasus.sh); nodes default 3 from 2048^3 (memory), '
+                         '1 below; memory per node at most %s' % GPU_NODE_MEM)
     ap.add_argument('--rs-batch', type=int, choices=(0, 1), default=1,
                     help='1: Rockstar in batches while the simulation runs; 0: one Rockstar job after it')
     ap.add_argument('--force', action='store_true', help='overwrite existing configuration files')
@@ -337,11 +344,19 @@ def setup_cosmo(a, cosmo):
     force_res = L * soft_box
     k, T, s8_start, s8 = ic_spectrum(c)
     res = resources(N) if a.site == 'pawna' else resources_pegasus(N, a.queue)
+    if a.sim_gpu and a.site != 'pegasus':
+        sys.exit('--sim-gpu: only pegasus has GPU nodes')
+    if a.sim_gpu and not a.sim_nodes:
+        a.sim_nodes = 3 if N >= 2048 else 1          # 2048^3 needs ~785 GB: 3 GPU nodes (~370 GB usable each)
     if a.sim_nodes:
         if a.site == 'pawna':
             sys.exit('--sim-nodes: pawna simulations run on one node')
         peak_gb = 747 * 1.0737 * (N / 2048.) ** 3          # measured 747 GiB at 2048^3 (one node)
-        mem = int(min(480, max(100, 1.5 * peak_gb / a.sim_nodes)))
+        cap = int(GPU_NODE_MEM[:-2]) if a.sim_gpu else 480
+        if peak_gb * 1.05 / a.sim_nodes > cap:
+            sys.exit('%d %snodes hold at most %d GB each, the simulation needs ~%.0f GB: use more nodes'
+                     % (a.sim_nodes, 'GPU ' if a.sim_gpu else '', cap, peak_gb))
+        mem = int(min(cap, max(100, 1.5 * peak_gb / a.sim_nodes)))
         res['SIM'] = (res['SIM'][0], '%dgb' % mem, res['SIM'][2], a.sim_nodes)
     wall_h = int(res['SIM'][2].split(':')[0])
     # pkdgrav3 stops this long before the PBS wall time: the staging drain must still copy the last checkpoint

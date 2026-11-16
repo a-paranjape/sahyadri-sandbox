@@ -15,6 +15,8 @@
 #   options   hold                 set up and register, paused (start from the page)
 #             not_before=YYYY-MM-DDTHH:MM   keep_full_z="0 0.5 1"   keep_pct=1   root=DIR   archive=DIR
 #             nodes=4 (pegasus simulation nodes)   rs_batch=0 (Rockstar only after the simulation)
+#             gpu=1 (pegasus: simulation on the GPU nodes with the CUDA build; nodes default 3 from 2048^3, else 1;
+#                    queue regular or project, not debug: the debug queue has no GPU nodes)
 # Runs above 512^3 need approval: add them here only once approved.
 #
 # site     queue    cosmology  N     L    reals  priority  options

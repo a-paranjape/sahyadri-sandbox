@@ -793,6 +793,24 @@ The pegasus queues allow per user: `debug` 2 running jobs, 128 cores, 4 h; `proj
 `regular` 4 jobs, 1280 cores, 48 h (`qstat -Qf`, 13 Nov 2026). Rockstar at 2048³ needs about 624 GB, more
 than one pegasus node, and Rockstar across several nodes is not set up yet.
 
+**Simulations on the pegasus GPU nodes.** pegasus has four GPU nodes (`gpu001`–`gpu004`): one Tesla P100 (16 GB,
+compute capability 6.0, driver 525 = CUDA 12.0) each, with the same 32 Skylake cores and ~370 GB as the CPU nodes.
+They are reached through `regular` or `project` with `ngpus=1` per node; the `debug` queue has none.
+- Build (once, on the login node; a separate build next to the CPU one, which is not touched):
+  `bash scripts/pkdgrav3_pipeline/build_pkdgrav3_gpu_pegasus.sh` → `~/sahyadri_pipeline/pkdgrav3_io/build_gpu/pkdgrav3`.
+  It creates the conda env `pkdgrav3_io/env_cuda` (CUDA 12.0 nvcc, gcc 11) and builds the whole code with gcc 11
+  against the CPU build's MPI/HDF5/FFTW env. Mixing compilers (gcc 15 C++ with gcc 11 CUDA host code) crashes at the
+  first GPU work package; gcc 12 headers do not compile under nvcc 12.0.
+- Use: `setup_production.py --site pegasus --sim-gpu` (plan option `gpu=1`) writes `SIM_GPU=1` in run.conf;
+  `submit_pipeline.sh` then asks for `ngpus=1` per node and `job_sim.pbs` runs `build_gpu/pkdgrav3` (`SIM_BUILD`
+  overrides the directory). Nodes: 3 by default from 2048³ (~785 GB needed; 2 GPU nodes hold 740 GB), 1 below;
+  memory per node at most 360 GB. The job log reports the share of gravity tiles done on the GPUs.
+- Measured (16 Nov 2026, 512³ L200 restart at z = 0.06, 2 ranks × 16 threads per node, wall clock per step from
+  `snap.timing`): CPU node 36.1 s, GPU node 10.3 s (3.5×), 2 GPU nodes 5.7 s (1.8× of one). The step-2005 snapshot
+  of the GPU run differs from the CPU run's less than two CPU runs with 16 and 32 threads per rank differ from each
+  other (positions rms 0.010 kpc/h, velocities 0.10 km/s, P(k) < 2e-7). `amgr` charges a GPU like one more core
+  (a GPU node-hour = 33 units, from the reservations of the test jobs).
+
 ### 13.6 Production install, planned runs, budgets
 
 **Install.** One script installs everything a site needs, in a new directory; production runs use only these:
