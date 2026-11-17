@@ -244,6 +244,12 @@ small-$r$ pairs, which are not diluted.
 \input{ximult512.tex}
 
 %======================================================================================================
+\section{Rockstar over several nodes (pegasus)}
+\label{sec:rsmultinode}
+
+\input{rs_multinode.tex}
+
+%======================================================================================================
 \section{Problems found on the way}
 \label{sec:issues}
 \begin{enumerate}
@@ -305,6 +311,9 @@ python make_boxsize_figures.py
 # correlation multipoles of the same boxes at z = 0: stage ximult (XM_ARGS="--los x,y,z" in run.conf), outputs
 # <halos>/xcorr/out_100_ximult.npz copied without DD and xi_ell_jk to data/box512_L200_L500_L1000/L<L>_out100_ximult.npz
 python make_ximult_box_figures.py
+# Rockstar on 2 nodes vs 1 node (pegasus debug queue, RS_NODES; Mvir, X, Y, Z, Vmax of out_{30,50,80,100}.list of the
+# three test runs in data/rs_multinode_halos.npz)
+python make_rs_multinode_figure.py
 latexmk -pdf report.tex
 \end{verbatim}
 }

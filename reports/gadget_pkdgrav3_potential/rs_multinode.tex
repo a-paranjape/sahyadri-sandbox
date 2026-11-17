@@ -1,0 +1,41 @@
+% Rockstar over several nodes (pegasus). Figure and table: make_rs_multinode_figure.py; data: data/rs_multinode_halos.npz.
+
+At $2048^3$ Rockstar needs about 624\,GB (2.2 times its particle array, measured scaling from $512^3$), more than a
+pegasus node (385\,GB). Rockstar has no MPI: a server process and the writer/reader clients talk over TCP sockets, and
+the server records each client's address from its connection, so the single-node build runs across nodes unchanged.
+\fp{job_rockstar.pbs} now does this when \texttt{RS\_NODES} $>1$: the server runs on the first node of the job and
+listens on its name (instead of \texttt{localhost}), one client per node (the others started over ssh) forks
+\texttt{RS\_NCPU} writers, so the particles and their memory are spread over the nodes, and the halo files go straight
+to the shared \fp{HALO_DIR}. \fp{setup_production.py} sets \texttt{RS\_NODES} on pegasus to give $1.5\times$ the
+expected peak at most 360\,GB per node: 3 nodes of 312\,GB (96 writers) at $2048^3$; the runs r2 and r10 were changed
+to this.
+
+\paragraph{Test.} The 101 outputs of the $128^3$, $100$\,\Mpch{} pegasus test run (the GPU end-to-end test) with the
+same 64 writers in three ways on the debug queue (17 Nov 2026): 2 nodes $\times$ 32 writers (\texttt{hpc082},
+\texttt{hpc083}; job 37895), one node $\times$ 64 writers (job 37896) and the latter again (job 37897). All three
+finished every snapshot in 24.4--25.8\,min; the job's memory sampler on the first node saw 0.6\,GB (PSS) with 2 nodes
+against 1.0\,GB on one, the share of the writers on that node. Rockstar is not deterministic from run to run (the
+order in which the writers' work arrives changes the result slightly), so the 2-node catalogues are judged against
+the difference between the two 1-node runs (Table~\ref{tab:rsmn}, Fig.~\ref{fig:rsmn}): matched within 50\,kpc/$h$
+95--97\% of the halos in either case, 89--93\% with identical $M_{\rm vir}$, 6--9\% differing by more than 1\%, and
+$N(>M_{\rm vir})$ within 0.5\% from $10^{11}$ to $10^{14}$\,\Msunh. The 2-node run differs from either 1-node run as
+much as they differ from each other: running on several nodes adds no difference of its own. Above $10^{13}$\,\Msunh{}
+fewer masses are bit-identical (65--80\%), but 95--100\% agree within 1\% in both comparisons.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/rs_multinode.pdf}
+\caption{Rockstar on 2 nodes (orange) and a repeated 1-node run (blue), both against the first 1-node run, all with 64
+writers. Left: cumulative halo counts relative to the 1-node run at $z=0$ (solid) and snapshot 50 (dashed). Right:
+share of the 1-node halos found again within 50\,kpc/$h$ with identical $M_{\rm vir}$ (solid) and within 1\% (dashed),
+$z=0$.}
+\label{fig:rsmn}
+\end{figure}
+
+\begin{table}[H]
+\centering\footnotesize
+\input{rs_multinode_table.tex}
+\caption{Halo catalogues of the three Rockstar runs compared pairwise: halos matched by position within 50\,kpc/$h$,
+of those the share with identical $M_{\rm vir}$ and with $|\Delta M/M| > 1\%$.}
+\label{tab:rsmn}
+\end{table}
