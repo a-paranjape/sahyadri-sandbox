@@ -181,6 +181,7 @@ PEGASUS_PROJECT = 'hpc2502016'
 # pegasus GPU nodes gpu001-004: one Tesla P100 each, 32 Skylake cores, 385608 MB (PBS); amgr charges a GPU like a core
 GPU_NODE_MEM = '360gb'
 RS_NODE_MEM = '360gb'    # Rockstar memory per pegasus node (Skylake nodes: 385 GB, ~370 GB usable)
+RS_MARGIN = 1.1          # Rockstar over several nodes: memory asked for = 1.1 x rockstar_mem, spread over the nodes
 PEGASUS_WALL = dict(project='96:00:00', regular='48:00:00', debug='04:00:00')
 
 
@@ -198,10 +199,11 @@ def resources_pegasus(N, queue):
     else:
         r = dict(SIM=(32, '480gb', '96:00:00', 3), RS=(32, rsm, '96:00:00'), CT=(2, '128gb', '96:00:00'),
                  PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=8)
-    # Rockstar over several nodes when one node cannot hold it (RS_NODES, job_rockstar.pbs): enough nodes for 1.5 x the
-    # expected peak at most RS_NODE_MEM each (the writers' shares of the box are not equal); 2048^3: 624 GB -> 3 nodes
+    # Rockstar over several nodes when one node cannot hold it (RS_NODES, job_rockstar.pbs): the fewest nodes that hold
+    # 1.1 x rockstar_mem (which already has a margin: 2.2 x the particle array against 1.75-1.9 x measured; the 10 %
+    # covers unequal shares of the writers) at most RS_NODE_MEM each; 2048^3: 624 GB -> 2 nodes x 344 GB
     r['RS'] = r['RS'] + (1,)
-    need = 1.5 * int(rsm[:-2])
+    need = RS_MARGIN * int(rsm[:-2])
     if need > int(RS_NODE_MEM[:-2]):
         nodes = int(np.ceil(need / int(RS_NODE_MEM[:-2])))
         r['RS'] = (r['RS'][0], '%dgb' % int(np.ceil(need / nodes)), r['RS'][2], nodes)
@@ -287,8 +289,8 @@ def main():
                          '$PKD_IO_ROOT/build_gpu (build_pkdgrav3_gpu_pegasus.sh); nodes default 3 from 2048^3 (memory), '
                          '1 below; memory per node at most %s' % GPU_NODE_MEM)
     ap.add_argument('--rs-nodes', type=int, default=None,
-                    help='pegasus: Rockstar nodes (default: enough for 1.5 x the expected peak at most %s each; 3 at '
-                         '2048^3); memory per node then 1.5 x the peak / nodes' % RS_NODE_MEM)
+                    help='pegasus: Rockstar nodes (default: the fewest for 1.1 x its memory estimate at most %s each; 2 '
+                         'at 2048^3); memory per node then 1.1 x the estimate / nodes' % RS_NODE_MEM)
     ap.add_argument('--rs-batch', type=int, choices=(0, 1), default=1,
                     help='1: Rockstar in batches while the simulation runs; 0: one Rockstar job after it')
     ap.add_argument('--force', action='store_true', help='overwrite existing configuration files')
@@ -369,7 +371,7 @@ def setup_cosmo(a, cosmo):
     if a.rs_nodes:
         if a.site == 'pawna':
             sys.exit('--rs-nodes: pawna Rockstar runs on one node')
-        need = 1.5 * int(rockstar_mem(N)[:-2])
+        need = RS_MARGIN * int(rockstar_mem(N)[:-2])
         res['RS'] = (res['RS'][0], '%dgb' % int(np.ceil(need / a.rs_nodes)), res['RS'][2], a.rs_nodes)
         if need / a.rs_nodes > int(RS_NODE_MEM[:-2]):
             sys.exit('--rs-nodes %d: %.0f GB per node, more than %s' % (a.rs_nodes, need / a.rs_nodes, RS_NODE_MEM))

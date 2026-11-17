@@ -6,9 +6,9 @@ the server records each client's address from its connection, so the single-node
 \fp{job_rockstar.pbs} now does this when \texttt{RS\_NODES} $>1$: the server runs on the first node of the job and
 listens on its name (instead of \texttt{localhost}), one client per node (the others started over ssh) forks
 \texttt{RS\_NCPU} writers, so the particles and their memory are spread over the nodes, and the halo files go straight
-to the shared \fp{HALO_DIR}. \fp{setup_production.py} sets \texttt{RS\_NODES} on pegasus to give $1.5\times$ the
-expected peak at most 360\,GB per node: 3 nodes of 312\,GB (96 writers) at $2048^3$; the runs r2 and r10 were changed
-to this.
+to the shared \fp{HALO_DIR}. \fp{setup_production.py} sets \texttt{RS\_NODES} on pegasus to the fewest nodes that hold
+$1.1\times$ the memory estimate (which already exceeds the measured peak, 1.75--1.9 times the particle array) at most
+360\,GB each: 2 nodes of 344\,GB (64 writers) at $2048^3$; the runs r2 and r10 were changed to this.
 
 \paragraph{Test.} The 101 outputs of the $128^3$, $100$\,\Mpch{} pegasus test run (the GPU end-to-end test) with the
 same 64 writers in three ways on the debug queue (17 Nov 2026): 2 nodes $\times$ 32 writers (\texttt{hpc082},
