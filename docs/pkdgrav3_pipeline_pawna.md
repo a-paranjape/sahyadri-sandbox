@@ -792,7 +792,19 @@ tools/sahyadri_manager/manager.py limits pegasus.max_sim_running=2 pegasus.max_s
 ```
 The pegasus queues allow per user: `debug` 2 running jobs, 128 cores, 4 h; `project` 4 running jobs, 2048 cores;
 `regular` 4 jobs, 1280 cores, 48 h (`qstat -Qf`, 13 Nov 2026). Rockstar at 2048³ needs about 624 GB, more
-than one pegasus node, and Rockstar across several nodes is not set up yet.
+than one pegasus node: run it over several nodes with `RS_NODES` (below).
+
+**Rockstar over several nodes (`RS_NODES`).** Rockstar has no MPI: its server and clients talk over TCP sockets, so the
+single-node build runs across nodes unchanged. With `RS_NODES=N` in run.conf, `submit_pipeline.sh` asks for
+`select=N:ncpus=RS_NCPU:mem=RS_MEM` with `place=scatter:excl`; `job_rockstar.pbs` starts the server on the first node
+(listening on its name instead of `localhost`) and one client per node (the others over ssh), each forking `RS_NCPU`
+writers, so the particles and the memory are spread over the nodes. Output goes straight to `$HALO_DIR` on the shared
+file system (`RS_LOCAL_OUT=0`, as on pegasus anyway); each node's client writes `client.<node>.log/.time`.
+Tested 17 Nov 2026 on the pegasus debug queue with the 128³ test run (101 outputs, jobs 37895–37897): 2 nodes × 32
+writers and 1 node × 64 writers both finished in 24 min. The catalogues differ between the two by as much as two
+repeated 1-node runs differ from each other (Rockstar is not deterministic run to run: 95–97 % of halos matched within
+50 kpc/h, 89–92 % with identical Mvir, counts above 1e11–1e14 within 0.5 %), so the multi-node mode adds nothing
+beyond that. For 2048³ on pegasus (Rockstar ~624 GB on pawna) use `RS_NODES=2` or 3.
 
 **Simulations on the pegasus GPU nodes.** pegasus has four GPU nodes (`gpu001`–`gpu004`): one Tesla P100 (16 GB,
 compute capability 6.0, driver 525 = CUDA 12.0) each, with the same 32 Skylake cores and ~370 GB as the CPU nodes.
