@@ -2,8 +2,17 @@
 # Stage archive (after verify): the kept files (retention.py) copied SCRATCH -> ARCHIVE, read back from the disk
 # and compared (SHA-256), MANIFEST.json + SHA256SUMS written, the archive made read-only (archive_run.py).
 # Nothing in SCRATCH is deleted (that is done by the manager after approval). Restart: rerun (checked files skipped).
+# ARCHIVE_UPTO=N (stage archb, started by the manager while the simulation runs): only the kept particle files of
+# snapshots 0..N (archive_run.py --particles-upto N); no manifest, nothing locked; event archive_batch_done.
+# The manager runs this script as a process on its own (head) node, not through PBS (archive_on_head).
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+if [ -n "${ARCHIVE_UPTO:-}" ]; then
+  "$PY" "$PIPE/archive_run.py" "$CONF" --particles-upto "$ARCHIVE_UPTO"
+  rc=$?
+  event archive_batch_done rc="$rc" ok="$([ $rc = 0 ] && echo 1 || echo 0)" upto="$ARCHIVE_UPTO"
+  exit $rc
+fi
 "$PY" "$PIPE/archive_run.py" "$CONF"
 rc=$?
 event archive_done rc="$rc" ok="$([ $rc = 0 ] && echo 1 || echo 0)" manifest="$ARCHIVE/state/$STEM/r$REAL/MANIFEST.json"

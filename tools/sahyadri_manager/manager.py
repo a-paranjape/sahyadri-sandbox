@@ -26,6 +26,9 @@ manager.json written here; nothing is lost when the manager stops, it catches up
   * then ctrees -> vahc -> fits -> verify (one chain, afterok), then archive (copy, check, read-only) automatically,
     as a process on this head node (archive_on_head, default on: /storage at ~430 MB/s from here against ~25-30 MB/s
     from a compute node, and no compute node taken), one at a time with the pulls of remote runs (max_pulls)
+  * archive batches (archive_batches, default on): while the run is computed, each time a snapshot kept in full and
+    all earlier outputs are written, their kept particle files (the bulk of a run) are copied (pulled from another
+    site) and checked; the final archive skips them. A failed batch only stops further batches of that run
   * a failed job stops the run's automation (shown in red; retry from the page)
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to
     <SCRATCH>/.trash/ (instant, can be undone), then purge; both re-check the archive manifest first
@@ -73,7 +76,7 @@ PBS = '/opt/pbs/bin'
 # waiting-in-PBS < max_sim_queued (and it fits in scratch); a simulation that stops cleanly at its wall time
 # (checkpoint, not all outputs) is scheduled again to restart, at most max_sim_restarts times
 DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000,
-                   max_sim_running=3, max_sim_queued=1, max_sim_restarts=5, max_pulls=1, archive_on_head=True,
+                   max_sim_running=3, max_sim_queued=1, max_sim_restarts=5, max_pulls=1, archive_on_head=True, archive_batches=True,
                    # a file system (run SCRATCH, ARCHIVE) that does not answer a small read/write test within
                    # storage_timeout_s is 'not responding': its runs are left alone until it answers again
                    storage_timeout_s=30,
@@ -679,6 +682,9 @@ class Run:
                                and int(e.get('ndone', 0)) < int(e.get('nout', 0))}
         D['verify'] = ok_after('verify_done')
         D['archive'] = ok_after('archive_done')
+        # particles archived in batches while the run is computed: the newest snapshot of a passed batch
+        D['archb'] = max([int(e['upto']) for e in self.ev if e['ev'] == 'archive_batch_done' and int(e.get('ok', 0)) == 1]
+                         or [-1])
         D['kept'] = ok_after('kept_sums')
         D['fits'] = ok_after('fits_done')
         D['sim_info'] = self.sim_progress()
@@ -746,8 +752,8 @@ class Run:
         # archive as a process on this (head) node: always for a remote run (a pull from its data node), and for a
         # local run unless archive_on_head is off (the head node writes /storage at ~430 MB/s against ~25-30 MB/s from
         # a compute node, and no compute node is taken)
-        if stages == 'archive' and (self.remote or (Run.CFG or {}).get('archive_on_head', True)):
-            return self.start_pull(what)
+        if stages in ('archive', 'archb') and (self.remote or (Run.CFG or {}).get('archive_on_head', True)):
+            return self.start_pull(what, stage=stages)
         if self.remote:     # qsub on the site's login node, with the run's own run.conf there
             BUDGETS.check(cfg or Run.CFG, self, stages)
             sub = os.path.join(self.E['REMOTE_SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'submit_pipeline.sh')
@@ -778,24 +784,28 @@ class Run:
         self.note('submitted %s' % ', '.join('%s %s' % x for x in ids) + (' (%s)' % what if what else ''))
         return ids
 
-    def start_pull(self, what=None):
+    def start_pull(self, what=None, stage='archive'):
         """Archive as a process on this host: job_archive.pbs run with bash (a remote run: archive_run.py pulls from
         PULL_HOST; a local run: copies SCRATCH -> ARCHIVE)."""
         jid = 'L%d' % int(now())
         pipe = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline')
-        env = dict(os.environ, CONF=self.conf, PIPE_ENV=os.path.join(pipe, 'pipeline_env.sh'), STAGE='archive',
+        env = dict(os.environ, CONF=self.conf, PIPE_ENV=os.path.join(pipe, 'pipeline_env.sh'), STAGE=stage,
                    PBS_JOBID=jid, PATH=PBS + ':' + os.environ.get('PATH', ''))
+        if stage == 'archb':     # batch: the kept particle files of snapshots 0..upto (job_archive.pbs ARCHIVE_UPTO)
+            env['ARCHIVE_UPTO'] = str(int((what or {})['upto']))
         p = subprocess.Popen(['bash', os.path.join(pipe, 'job_archive.pbs')], env=env, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        rec = dict(job=jid, stage='archive', t=now(), pid=p.pid)
+        rec = dict(job=jid, stage=stage, t=now(), pid=p.pid)
         if what:
             rec.update(what)
         self.ms['submitted'].append(rec)
         self.save()
-        self.note('archive %s %s started on %s (pid %d)%s' % ('pull' if self.remote else 'copy', jid, socket.gethostname(),
-                                                            p.pid, (' from %s' % self.E['PULL_HOST']) if self.remote else ''))
+        self.note('archive%s %s %s started on %s (pid %d)%s' % (
+            (' batch (particles of snapshots 0-%s)' % what['upto']) if stage == 'archb' else '',
+            'pull' if self.remote else 'copy', jid, socket.gethostname(), p.pid,
+            (' from %s' % self.E['PULL_HOST']) if self.remote else ''))
         threading.Thread(target=p.wait, daemon=True).start()     # reap it
-        return [('archive', jid)]
+        return [(stage, jid)]
 
 
 # ====================================================================================================== manager
@@ -1214,6 +1224,17 @@ class Manager:
                 run.note('simulation job %s stopped cleanly before the last output (wall time); scheduled to restart '
                          'from the newest checkpoint (restart %d of at most %d)' % (j['job'], n + 1, SC.get('max_sim_restarts', 5)))
                 continue
+            if j['stage'] == 'archb' and j['status'] in ('failed', 'gone') and not self.acked(run, j):
+                if j['status'] == 'gone':
+                    g = run.ms.setdefault('gone', {})
+                    if now() - g.setdefault(j['job'], now()) <= self.cfg['lost_grace_s']:
+                        continue
+                run.ms.setdefault('acked', []).append(j['job'])
+                run.ms['archb_hold'] = j['job']
+                run.note('archive batch %s %s: no more batches for this run (the final archive copies everything; '
+                         '"retry" is not needed)' % (j['job'], j['status']))
+                run.save()
+                continue
             if j['status'] == 'failed' and not self.acked(run, j):
                 run.ms['failed'] = dict(stage=j['stage'], job=j['job'], rc=j.get('rc'), log=j.get('log'), t=now(),
                                         first=j.get('first'), last=j.get('last'))
@@ -1230,6 +1251,7 @@ class Manager:
                     run.note('%s job %s vanished from PBS without an end event; automation stopped' % (j['stage'], j['job']))
                     return 0
                 self.recheck_at = min(self.recheck_at or 1e30, first_seen + self.cfg['lost_grace_s'] + 5)
+        self.archive_batch(run, D)
         if D['active'] and any(j['stage'] in ('ctrees', 'vahc', 'vpot', 'fits', 'xcorr', 'vprof', 'verify', 'archive')
                                for j in D['active']):
             return 0
@@ -1287,7 +1309,7 @@ class Manager:
         run.archive_msg = None
         if lv and lv['status'] == 'done' and v and int(v.get('ok', 0)) == 1 and E.get('ARCHIVE'):
             la = D['last'].get('archive')   # one archive job per passed verify (PBS ids increase; node clocks differ)
-            due = not any(j['stage'] == 'archive' for j in D['active']) and (
+            due = not any(j['stage'] in ('archive', 'archb') for j in D['active']) and (
                 (la is None or jobnum(la['job']) < jobnum(lv['job'])) if not run.remote else
                 lv['job'] not in {s.get('after_verify') for s in run.ms['submitted'] if s['stage'] == 'archive'})
             if due:
@@ -1313,6 +1335,31 @@ class Manager:
                         return 0
                 run.submit('archive', [], dict(after_verify=lv['job']))
         return 0
+
+    def archive_batch(self, run, D):
+        """While the run is computed: archive the kept particle files up to the newest snapshot kept in full whose
+        outputs (and all earlier ones) are written (archive_run.py --particles-upto, a process on this node). The
+        final archive after verify does the rest and skips what the batches did. Off with archive_batches: false in
+        the config or ARCHIVE_BATCH=0 in run.conf."""
+        E = run.E
+        if (not E.get('ARCHIVE') or not self.cfg.get('archive_batches', True) or E.get('ARCHIVE_BATCH', '1') == '0'
+                or run.ms.get('archb_hold') or not (run.remote or self.cfg.get('archive_on_head', True))):
+            return
+        v = D['verify']
+        if v and int(v.get('ok', 0)) == 1:
+            return                                   # the final archive takes over
+        if any(j['stage'] in ('archive', 'archb') for j in D['active']):
+            return
+        ready, k = set(D['ready']), 0
+        while k in ready:
+            k += 1
+        cand = [f for f in (run.plan or {}).get('full', []) if D['archb'] < f <= k - 1]
+        if not cand:
+            return
+        pulls = sum(1 for r in self.runs.values() for j in self.derive(r)['active'] if j['job'].startswith('L'))
+        if pulls >= int(self.cfg.get('max_pulls', 1)) or self.archive_wait(run):
+            return
+        run.submit('archb', [], dict(upto=max(cand)))
 
     def pbs_room(self, site, n=1):
         """May n more jobs wait in the site's PBS? (max_pbs_queued; no limit when unset)"""
@@ -1769,7 +1816,7 @@ class Manager:
             pl = run.plan
             runs.append(dict(
                 name=run.name, conf=run.conf, site=run.site, remote_conf=run.E.get('REMOTE_CONF'), phase=run.phase(D), paused=run.ms.get('paused'), failed=run.ms.get('failed'), busy=run.busy,
-                err=run.err, n_out=D['n_out'], ready=D['ready'], rs_done=D['rs_done'], sim_done=D['sim_done'],
+                err=run.err, n_out=D['n_out'], ready=D['ready'], rs_done=D['rs_done'], archived_upto=D['archb'], sim_done=D['sim_done'],
                 sim=D['sim_info'], jobs=D['jobs'][-40:], active=D['active'],
                 verify=self.verify_summary(run, D), archive=D['archive'], fits=D['fits'],
                 trash=run.ms.get('trash'), purged=run.ms.get('purged'), scheduled=run.ms.get('scheduled'),

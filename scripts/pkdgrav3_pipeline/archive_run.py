@@ -21,7 +21,14 @@ Runs computed on another site (REMOTE_ARCHIVE=1 in run.conf, e.g. pegasus), arch
                                             each read back (O_DIRECT) and compared with the source's SHA-256; logs and
                                             event files (still growing after the sums) are compared by rsync only;
                                             then steps 4-5 as above
-usage: archive_run.py <run.conf> [--dry-run] [--no-lock] [--source-sums]
+Batches while the run is computed (archive_run.py <run.conf> --particles-upto N; job_archive.pbs with ARCHIVE_UPTO,
+started by the manager each time a snapshot kept in full is written): the kept particle files (pkc_full, pkc_sub) of
+snapshots 0..N are copied (or, with PULL_HOST, pulled: size, mtime and SHA-256 taken on the data node) into ARCHIVE,
+read back with O_DIRECT and compared, and recorded in <state>/archive_partial.json. No verify needed, no manifest,
+nothing made read-only: the final archive (above) skips these files (same size and mtime, checked copy) and does the
+rest. So most of the particle data, the bulk of a run, is archived while the simulation runs.
+
+usage: archive_run.py <run.conf> [--dry-run] [--no-lock] [--source-sums] [--particles-upto N]
 """
 import hashlib
 import json
@@ -87,6 +94,8 @@ def main():
         sys.exit('SCRATCH (%s) and ARCHIVE (%s) must be separate trees' % (scratch, archive))
     if '--source-sums' in sys.argv:
         return source_sums(E)
+    if '--particles-upto' in sys.argv:
+        return particles_batch(E, int(sys.argv[sys.argv.index('--particles-upto') + 1]), dry)
     if E.get('PULL_HOST'):
         return pull(E, dry)
     pl = retention.plan(E)
@@ -356,6 +365,120 @@ def pull(E, dry):
         sys.exit(1)
     return finish(E, P, V, rows, adir, man_path, partial,
                   source=dict(scratch=rscr, source_host=host, kept_files_time=K['time'], pulled_seconds=round(t1 - t0, 1)))
+
+
+REMOTE_SUMS = r"""
+import glob, hashlib, json, os, sys
+rscr, rel_pkc, snaps, tags = sys.argv[1], sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4])
+out = []
+for snap, step, full in snaps:
+    for f in sorted(glob.glob(os.path.join(glob.escape(os.path.join(rscr, rel_pkc)), 'snap.%s.s*.pkc' % step))):
+        tag = os.path.basename(f).split('.')[2]
+        if not full and tag not in tags:
+            continue
+        h = hashlib.sha256()
+        with open(f, 'rb') as fh:
+            for b in iter(lambda: fh.read(16 << 20), b''):
+                h.update(b)
+        st = os.stat(f)
+        out.append(dict(path=os.path.relpath(f, rscr), cat='pkc_full' if full else 'pkc_sub', snap=snap,
+                        size=st.st_size, mtime=st.st_mtime, sha256=h.hexdigest()))
+json.dump(out, sys.stdout)
+"""
+
+
+def particles_batch(E, upto, dry):
+    """Kept particle files of snapshots 0..upto into ARCHIVE (copied or pulled, read back, recorded in
+    archive_partial.json), while the run is computed. The final archive skips them."""
+    pl = retention.plan(E)
+    P = pl['paths']
+    full = set(pl['full'])
+    tags = [retention.pct_tag(x) for x in pl['subsamples']]
+    snaps = [(snap, step, snap in full) for snap, step, _a, _z in pl['outputs'] if snap <= upto]
+    partial = os.path.join(P['state'], 'archive_partial.json')
+    os.makedirs(P['state'], exist_ok=True)
+    done = json.load(open(partial)) if os.path.isfile(partial) else {}
+    remote = bool(E.get('PULL_HOST'))
+    t0 = time.time()
+    if remote:
+        host, rscr = E['PULL_HOST'], E['REMOTE_SCRATCH'].rstrip('/')
+        rel_pkc = os.path.relpath(P['pkc'], E['SCRATCH'])
+        r = subprocess.run(['ssh', '-o', 'BatchMode=yes', host, 'python3', '-', rscr, rel_pkc, shlex_quote(json.dumps(snaps)),
+                            shlex_quote(json.dumps(tags))], input=REMOTE_SUMS, capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.exit('checksums on %s failed: %s' % (host, r.stderr.strip()[-400:]))
+        files = json.loads(r.stdout)
+        print('sums of %d files on %s in %.0f s' % (len(files), host, time.time() - t0), flush=True)
+    else:
+        files = []
+        for cat, snap, src, rel in retention.kept_files(E, pl):
+            if cat in ('pkc_full', 'pkc_sub') and snap <= upto:
+                st = os.stat(src)
+                files.append(dict(path=rel, src=src, cat=cat, snap=snap, size=st.st_size, mtime=st.st_mtime))
+
+    def is_done(f):
+        prev = done.get(f['path'])
+        dst = os.path.join(E['ARCHIVE'], f['path'])
+        if not prev or prev.get('sha256_dst') != prev.get('sha256') or not os.path.isfile(dst):
+            return False
+        if os.path.getsize(dst) != f['size'] or prev['size'] != f['size']:
+            return False
+        return prev.get('src_mtime', prev['mtime']) == f['mtime'] and (not remote or prev['sha256'] == f['sha256'])
+    todo = [f for f in files if not is_done(f)]
+    nb = sum(f['size'] for f in todo)
+    print('%s r%s: particles of snapshots 0-%d: %d files (%s), %d to archive (%s) -> %s' % (
+        E['STEM'], E['REAL'], upto, len(files), retention.human(sum(f['size'] for f in files)), len(todo),
+        retention.human(nb), E['ARCHIVE']), flush=True)
+    if dry or not todo:
+        return 0
+    t1 = time.time()
+    if remote:
+        lst = os.path.join(P['state'], 'pull_files.batch.txt')
+        with open(lst, 'w') as fh:
+            fh.write(''.join(f['path'] + '\n' for f in todo))
+        cmd = ['rsync', '-tpW', '--partial', '-e', 'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10',
+               '--files-from=' + lst, '%s:%s/' % (host, rscr), E['ARCHIVE'].rstrip('/') + '/']
+        for attempt in range(1, 6):
+            rc = subprocess.run(cmd).returncode
+            if rc == 0:
+                break
+            print('rsync exit %d (attempt %d); retrying in 60 s' % (rc, attempt), flush=True)
+            time.sleep(60)
+        else:
+            sys.exit('rsync failed 5 times')
+    else:
+        for f in todo:
+            dst = os.path.join(E['ARCHIVE'], f['path'])
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            f['sha256'] = sha_copy(f['src'], dst)
+    t2 = time.time()
+    print('%s %s in %.0f s (%.0f MB/s)' % ('pulled' if remote else 'copied', retention.human(nb), t2 - t1,
+                                          nb / 1e6 / max(t2 - t1, 1e-3)), flush=True)
+    bad = 0
+    for f in todo:
+        dst = os.path.join(E['ARCHIVE'], f['path'])
+        hd, direct = sha_direct(dst)
+        if hd != f['sha256'] or os.path.getsize(dst) != f['size']:
+            bad += 1
+            print('MISMATCH %s: source %s, archive %s' % (f['path'], f['sha256'], hd))
+            continue
+        row = dict(path=f['path'], cat=f['cat'], snap=f['snap'], size=f['size'], mtime=f['mtime'], sha256=f['sha256'],
+                   sha256_dst=hd, direct=direct, batch=upto)
+        if remote:
+            row['src_mtime'] = f['mtime']
+        done[f['path']] = row
+    with open(partial + '.part', 'w') as fh:
+        json.dump(done, fh)
+    os.replace(partial + '.part', partial)
+    t3 = time.time()
+    print('read back %s in %.0f s (%.0f MB/s), %d mismatches; %s' % (retention.human(nb), t3 - t2,
+                                                                      nb / 1e6 / max(t3 - t2, 1e-3), bad, partial))
+    return 1 if bad else 0
+
+
+def shlex_quote(x):
+    import shlex
+    return shlex.quote(x)
 
 
 def git_head():
