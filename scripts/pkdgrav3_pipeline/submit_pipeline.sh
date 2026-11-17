@@ -54,7 +54,8 @@ for st in sim rockstar ctrees vahc vpot fits xcorr ximult vprof verify archive; 
               W=$SIM_WALL ;;
     rockstar) # RS_NODES > 1: Rockstar over several nodes (server here, a client per node; job_rockstar.pbs)
               R="select=${RS_NODES:-1}:ncpus=$RS_NCPU:mem=$RS_MEM"
-              [ "${RS_NODES:-1}" -gt 1 ] && R="$R -l place=scatter:excl"
+              # RS_PLACE: placement of the nodes (default scatter:excl; scatter shares the nodes with other jobs, swarm)
+              [ "${RS_NODES:-1}" -gt 1 ] && R="$R -l place=${RS_PLACE:-scatter:excl}"
               W=$RS_WALL ;;
     ctrees)   R="select=1:ncpus=$CT_NCPU:mem=$CT_MEM";     W=$CT_WALL ;;
     vahc)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
