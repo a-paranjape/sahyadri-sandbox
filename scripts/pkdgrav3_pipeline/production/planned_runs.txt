@@ -7,9 +7,9 @@
 # still waiting; removing a line does not touch a run that was set up (unschedule or remove it in the page).
 #
 # columns:  site     queue    cosmology  N     L      realisations  priority  [options]
-#   site      pawna | pegasus
+#   site      pawna | pegasus | swarm
 #   queue     pawna: workq;  pegasus: project (project budget hpc2502016, 96 h jobs) | regular (user budget, 48 h)
-#             | debug (tests, 4 h)
+#             | debug (tests, 4 h);  swarm: workq (72 h, shared nodes)
 #   cosmology a name in cosmologies/ (default, var_As_m, var_Om_p, ...)
 #   realisations  1 | 1,3 | 1-5
 #   options   hold                 set up and register, paused (start from the page)

@@ -28,7 +28,7 @@ manager.json written here; nothing is lost when the manager stops, it catches up
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to
     <SCRATCH>/.trash/ (instant, can be undone), then purge; both re-check the archive manifest first
 
-Runs on another site (cfg sites.<name>, e.g. pegasus; run.conf written there by setup_production.py --site pegasus):
+Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there by setup_production.py --site <name>):
   * the manager keeps a mirror of the run's small files (state/ with the events, output_steps.txt, snapnames.txt,
     the pkdgrav3 and job logs, the P(k) plot) under sites.<name>.mirror, refreshed with rsync over ssh from the
     site's data node every sites.<name>.sync_s seconds; the mirror config (confs/ there) is the run's run.conf with
@@ -92,7 +92,15 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                                            # core-hour budgets (amgr): queue PBS_PROJECT set -> the project's, else
                                            # the user's; a job is submitted only if cores x requested wall time fits
                                            # in the balance minus budget_reserve_coreh
-                                           budget=dict(user='calam.shadab', reserve_coreh=2000))))
+                                           budget=dict(user='calam.shadab', reserve_coreh=2000)),
+                             # swarm (TIFR): login, data and PBS on the same host; no core-hour budgets
+                             swarm=dict(login='shadab@swarm.theory.tifr.res.in', data='shadab@swarm.theory.tifr.res.in',
+                                        scratch_root='/user1/shadab/sahyadri_scratch',
+                                        python='/user1/shadab/sahyadri_pipeline/codes/venv/bin/python',
+                                        sandbox='/user1/shadab/sahyadri_pipeline/sahyadri-sandbox',
+                                        mirror='/user/shadab/sahyadri_mirror/swarm', sync_s=120,
+                                        max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
+                                        scratch_reserve_gb=2000, max_pbs_queued=4)))
 LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s')
 # max_pbs_queued: our jobs waiting in the site's PBS at most (pegasus queued_jobs_threshold: project 6, debug 2 per
 # user); with it, the post-processing stages are submitted one at a time, each after the previous one finished
@@ -351,7 +359,7 @@ def read_plan(path):
 
 TEMPLATES = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'production')
 QSTATES = ('open', 'drain', 'closed')
-DEFAULT_QUEUE = {LOCAL: 'workq', 'pegasus': 'project'}
+DEFAULT_QUEUE = {LOCAL: 'workq', 'pegasus': 'project', 'swarm': 'workq'}
 
 
 def read_queues(path):

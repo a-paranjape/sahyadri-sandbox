@@ -18,3 +18,4 @@ pawna      archive  open     -            -          # archive copies/pulls into
 pegasus    project  open     -            -
 pegasus    regular  closed   -            -          # user budget: open only when the project budget is short
 pegasus    debug    closed   2            1          # tests only
+swarm      workq    open     -            -          # TIFR swarm: shared 64-core nodes, 72 h

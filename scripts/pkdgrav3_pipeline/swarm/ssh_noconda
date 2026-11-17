@@ -1,0 +1,4 @@
+#!/bin/sh
+# system ssh without the conda environment's library path (conda's OpenSSL breaks /usr/bin/ssh on swarm);
+# mpirun uses it to start its daemons on the other nodes (env_swarm.sh: --prtemca plm_ssh_agent)
+exec env -u LD_LIBRARY_PATH -u PYTHONHOME /usr/bin/ssh "$@"

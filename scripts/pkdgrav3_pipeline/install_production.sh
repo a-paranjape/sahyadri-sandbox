@@ -1,18 +1,22 @@
 #!/bin/bash -l
 # Production install of everything the Sahyadri pipeline needs on one site, in a new directory:
 #   <root>/pkdgrav3_io        pkdgrav3 (GitHub main) + snapcomp tools; pawna: own venv for pkdgrav3's embedded
-#                             Python (dill, tomli, Cython); pegasus: conda env (MPI, HDF5, FFTW; package cache on /data)
+#                             Python (dill, tomli, Cython); pegasus, swarm: conda env (MPI, HDF5, FFTW)
 #   <root>/sahyadri-sandbox   this repository (branch run-manager): pipeline, post-processing, run manager
 #   <root>/codes              Rockstar (.pkc reader), consistent-trees, Python venv (requirements.txt), C helpers
 #
 # usage: install_production.sh pawna   [/user/$USER/sahyadri_prod]
 #        install_production.sh pegasus [~/sahyadri_pipeline]
+#        install_production.sh swarm   [/user1/$USER/sahyadri_pipeline]   (Miniforge in /user1/$USER/miniforge3 if
+#                                       missing; pkdgrav3 for Ice Lake; no 'bash -l': swarm's login shell drops the
+#                                       arguments of a script started that way)
 # Rerunning updates the clones and rebuilds. Nothing outside <root> is changed (pegasus: caches on /data).
 set -eu
-SITE=${1:?usage: install_production.sh pawna|pegasus [root]}
+SITE=${1:?usage: install_production.sh pawna|pegasus|swarm [root]}
 case $SITE in
   pawna)   ROOT=${2:-/user/$USER/sahyadri_prod} ;;
   pegasus) ROOT=${2:-$HOME/sahyadri_pipeline} ;;
+  swarm)   ROOT=${2:-/user1/$USER/sahyadri_pipeline} ;;
   *) echo "unknown site $SITE"; exit 1 ;;
 esac
 BRANCH=${BRANCH:-run-manager}
@@ -42,6 +46,16 @@ if [ "$SITE" = pawna ]; then
   "$R/venv/bin/python" -m pip install -q "numpy<2" "cython>=3" dill tomli
   PKD_IO_ROOT=$R bash -l "$R/pkdgrav3/bench/phase0/compile_pawna.sh"
   ENVSH=$R/pkdgrav3/bench/phase0/env_pawna.sh
+elif [ "$SITE" = swarm ]; then
+  export CONDA_BASE=${CONDA_BASE:-/user1/$USER/miniforge3}
+  CACHE=${CACHE:-$ROOT/cache}
+  mkdir -p "$CACHE/pip"
+  if [ ! -x "$CONDA_BASE/bin/conda" ]; then
+    curl -sSL -o "$CACHE/Miniforge3.sh" https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+    bash "$CACHE/Miniforge3.sh" -b -p "$CONDA_BASE"
+  fi
+  ARCH=icelake-server bash "$R/pkdgrav3/tools/pegasus/setup_pegasus.sh" "$R"   # same conda env and build as pegasus
+  ENVSH=$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/swarm/env_swarm.sh
 else
   CACHE=${CACHE:-/data/project/hpc2502016/shadab/cache}
   mkdir -p "$CACHE/conda_pkgs" "$CACHE/pip"
@@ -54,6 +68,8 @@ ls -la "$R/build/pkdgrav3" "$R/build_snapcomp/pkc_check"
 stamp "== Rockstar, consistent-trees, Python venv, post-processing helpers in $ROOT/codes"
 if [ "$SITE" = pawna ]; then
   bash "$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pawna.sh" "$ROOT/codes" "$R"
+elif [ "$SITE" = swarm ]; then
+  PIP_CACHE_DIR=$CACHE/pip bash "$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pegasus.sh" "$ROOT/codes" "$R"
 else
   PIP_CACHE_DIR=$CACHE/pip bash "$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pegasus.sh" "$ROOT/codes" "$R"
 fi
