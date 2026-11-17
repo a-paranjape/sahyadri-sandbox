@@ -804,7 +804,9 @@ Tested 17 Nov 2026 on the pegasus debug queue with the 128³ test run (101 outpu
 writers and 1 node × 64 writers both finished in 24 min. The catalogues differ between the two by as much as two
 repeated 1-node runs differ from each other (Rockstar is not deterministic run to run: 95–97 % of halos matched within
 50 kpc/h, 89–92 % with identical Mvir, counts above 1e11–1e14 within 0.5 %), so the multi-node mode adds nothing
-beyond that. For 2048³ on pegasus (Rockstar ~624 GB on pawna) use `RS_NODES=2` or 3.
+beyond that. `setup_production.py --site pegasus` sets `RS_NODES` itself: enough nodes for 1.5 × the expected Rockstar
+peak at most 360 GB each (`--rs-nodes N` or plan option `rs_nodes=N` to choose): 2048³ (624 GB) → 3 nodes × 312 GB,
+96 writers; up to 1024³ one node. The manager's core-hour estimate counts every node.
 
 **Simulations on the pegasus GPU nodes.** pegasus has four GPU nodes (`gpu001`–`gpu004`): one Tesla P100 (16 GB,
 compute capability 6.0, driver 525 = CUDA 12.0) each, with the same 32 Skylake cores and ~370 GB as the CPU nodes.

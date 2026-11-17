@@ -180,6 +180,7 @@ SITES = dict(
 PEGASUS_PROJECT = 'hpc2502016'
 # pegasus GPU nodes gpu001-004: one Tesla P100 each, 32 Skylake cores, 385608 MB (PBS); amgr charges a GPU like a core
 GPU_NODE_MEM = '360gb'
+RS_NODE_MEM = '360gb'    # Rockstar memory per pegasus node (Skylake nodes: 385 GB, ~370 GB usable)
 PEGASUS_WALL = dict(project='96:00:00', regular='48:00:00', debug='04:00:00')
 
 
@@ -197,9 +198,13 @@ def resources_pegasus(N, queue):
     else:
         r = dict(SIM=(32, '480gb', '96:00:00', 3), RS=(32, rsm, '96:00:00'), CT=(2, '128gb', '96:00:00'),
                  PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=8)
-        if int(rsm[:-2]) > 480:
-            print('NOTE: Rockstar needs ~%s at %d^3, more than one pegasus node (480 GB usable): multi-node Rockstar is '
-                  'not set up' % (rsm, N))
+    # Rockstar over several nodes when one node cannot hold it (RS_NODES, job_rockstar.pbs): enough nodes for 1.5 x the
+    # expected peak at most RS_NODE_MEM each (the writers' shares of the box are not equal); 2048^3: 624 GB -> 3 nodes
+    r['RS'] = r['RS'] + (1,)
+    need = 1.5 * int(rsm[:-2])
+    if need > int(RS_NODE_MEM[:-2]):
+        nodes = int(np.ceil(need / int(RS_NODE_MEM[:-2])))
+        r['RS'] = (r['RS'][0], '%dgb' % int(np.ceil(need / nodes)), r['RS'][2], nodes)
     cap = PEGASUS_WALL.get(queue, '96:00:00')
     for k in ('SIM', 'RS', 'CT', 'PP', 'FITS'):
         r[k] = (r[k][0], r[k][1], min(r[k][2], cap)) + tuple(r[k][3:])
@@ -281,6 +286,9 @@ def main():
                     help='pegasus: run the simulation on the GPU nodes (one P100 each) with the CUDA build '
                          '$PKD_IO_ROOT/build_gpu (build_pkdgrav3_gpu_pegasus.sh); nodes default 3 from 2048^3 (memory), '
                          '1 below; memory per node at most %s' % GPU_NODE_MEM)
+    ap.add_argument('--rs-nodes', type=int, default=None,
+                    help='pegasus: Rockstar nodes (default: enough for 1.5 x the expected peak at most %s each; 3 at '
+                         '2048^3); memory per node then 1.5 x the peak / nodes' % RS_NODE_MEM)
     ap.add_argument('--rs-batch', type=int, choices=(0, 1), default=1,
                     help='1: Rockstar in batches while the simulation runs; 0: one Rockstar job after it')
     ap.add_argument('--force', action='store_true', help='overwrite existing configuration files')
@@ -358,6 +366,13 @@ def setup_cosmo(a, cosmo):
                      % (a.sim_nodes, 'GPU ' if a.sim_gpu else '', cap, peak_gb))
         mem = int(min(cap, max(100, 1.5 * peak_gb / a.sim_nodes)))
         res['SIM'] = (res['SIM'][0], '%dgb' % mem, res['SIM'][2], a.sim_nodes)
+    if a.rs_nodes:
+        if a.site == 'pawna':
+            sys.exit('--rs-nodes: pawna Rockstar runs on one node')
+        need = 1.5 * int(rockstar_mem(N)[:-2])
+        res['RS'] = (res['RS'][0], '%dgb' % int(np.ceil(need / a.rs_nodes)), res['RS'][2], a.rs_nodes)
+        if need / a.rs_nodes > int(RS_NODE_MEM[:-2]):
+            sys.exit('--rs-nodes %d: %.0f GB per node, more than %s' % (a.rs_nodes, need / a.rs_nodes, RS_NODE_MEM))
     wall_h = int(res['SIM'][2].split(':')[0])
     # pkdgrav3 stops this long before the PBS wall time: the staging drain must still copy the last checkpoint
     # (48 B/particle; ~52 GB at 1024^3, ~35 min at the ~25 MB/s of /storage) and snapshot to NFS
@@ -534,6 +549,7 @@ SIM_NCPU=%(sim_n)d;  SIM_MEM=%(sim_m)s;  SIM_WALL=%(sim_w)s    # iWallRunTime in
 %(site_block)s
 SIM_KEEPCHK=2           # keep the newest 2 complete checkpoints in checkpoints/ (0 = all)
 RS_NCPU=%(rs_n)d;    RS_MEM=%(rs_m)s;   RS_WALL=%(rs_w)s
+RS_NODES=%(rs_nodes)d              # Rockstar nodes: RS_NCPU cores, RS_MEM and RS_NCPU writers on each (server on the first, a client per node)
 CT_NCPU=%(ct_n)d;    CT_MEM=%(ct_m)s;   CT_WALL=%(ct_w)s
 PP_NCPU=%(pp_n)d;    PP_MEM=%(pp_m)s;   PP_WALL=%(pp_w)s
 FITS_NCPU=%(fi_n)d;  FITS_MEM=%(fi_m)s; FITS_WALL=%(fi_w)s
@@ -569,7 +585,7 @@ FITS_DELETE_ASCII=0     # keep 0 with the manager: verify reads the ASCII catalo
 ''' % dict(name=name, now=now, sandbox=SANDBOX, pkd=a.pkd_io_root, codes=a.codes, root=a.root, sdir=sdir, hdir=hdir,
            archive=a.archive, keepz=a.keep_full_z, keeppct=a.keep_pct,
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
-           sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2],
+           sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2], rs_nodes=(R['RS'][3] if len(R['RS']) > 3 else 1),
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
            site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
            rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'])

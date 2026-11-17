@@ -176,7 +176,8 @@ def job_coreh(E, stage):
         return n('SIM_NODES', 1) * n('SIM_NCPU', 1) * hours(E.get('SIM_WALL', '0'))
     pre = dict(rockstar='RS', ctrees='CT', vahc='PP', vpot='PP', fits='FITS', verify='VF', xcorr='XC', archive='AR')[stage]
     dflt = dict(VF=(8, '12:00:00'), XC=(16, '02:00:00'), AR=(2, '72:00:00')).get(pre, (1, '0'))
-    return n(pre + '_NCPU', dflt[0]) * hours(E.get(pre + '_WALL') or dflt[1])
+    nodes = n('RS_NODES', 1) if stage == 'rockstar' else 1    # Rockstar over several nodes: RS_NCPU per node
+    return nodes * n(pre + '_NCPU', dflt[0]) * hours(E.get(pre + '_WALL') or dflt[1])
 
 
 class Budgets:
@@ -950,7 +951,7 @@ class Manager:
         args = ['--site', P['site'], '--queue', P['queue'], '--cosmo', P['cosmo'], '--N', str(P['N']), '--L', '%g' % P['L'],
                 '--real', str(P['real']), '--root', root]
         for k, flag in (('archive', '--archive'), ('keep_full_z', '--keep-full-z'), ('keep_pct', '--keep-pct'),
-                        ('nodes', '--sim-nodes'), ('rs_batch', '--rs-batch')):
+                        ('nodes', '--sim-nodes'), ('rs_batch', '--rs-batch'), ('rs_nodes', '--rs-nodes')):
             if k in o:
                 args += [flag, str(o[k])]
         if str(o.get('gpu', '0')).lower() in ('1', 'true', 'yes'):
