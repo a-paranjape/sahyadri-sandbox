@@ -23,7 +23,9 @@ manager.json written here; nothing is lost when the manager stops, it catches up
   * Rockstar in batches (RS_BATCH=1): when RS_BATCH_MIN consecutive snapshots after the last batch are ready, or the
     simulation has finished, one batch job; at most MAX_ROCKSTAR Rockstar jobs over all runs (default 1), taken in
     turn between runs (the run whose next ready snapshot has waited longest goes first)
-  * then ctrees -> vahc -> fits -> verify (one chain, afterok), then archive (copy, check, read-only) automatically
+  * then ctrees -> vahc -> fits -> verify (one chain, afterok), then archive (copy, check, read-only) automatically,
+    as a process on this head node (archive_on_head, default on: /storage at ~430 MB/s from here against ~25-30 MB/s
+    from a compute node, and no compute node taken), one at a time with the pulls of remote runs (max_pulls)
   * a failed job stops the run's automation (shown in red; retry from the page)
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to
     <SCRATCH>/.trash/ (instant, can be undone), then purge; both re-check the archive manifest first
@@ -71,7 +73,7 @@ PBS = '/opt/pbs/bin'
 # waiting-in-PBS < max_sim_queued (and it fits in scratch); a simulation that stops cleanly at its wall time
 # (checkpoint, not all outputs) is scheduled again to restart, at most max_sim_restarts times
 DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, scratch_reserve_gb=2000,
-                   max_sim_running=3, max_sim_queued=1, max_sim_restarts=5, max_pulls=1,
+                   max_sim_running=3, max_sim_queued=1, max_sim_restarts=5, max_pulls=1, archive_on_head=True,
                    # a file system (run SCRATCH, ARCHIVE) that does not answer a small read/write test within
                    # storage_timeout_s is 'not responding': its runs are left alone until it answers again
                    storage_timeout_s=30,
@@ -741,7 +743,10 @@ class Run:
 
     # ------------------------------------------------------------------ submission
     def submit(self, stages, extra=(), what=None, cfg=None):
-        if self.remote and stages == 'archive':
+        # archive as a process on this (head) node: always for a remote run (a pull from its data node), and for a
+        # local run unless archive_on_head is off (the head node writes /storage at ~430 MB/s against ~25-30 MB/s from
+        # a compute node, and no compute node is taken)
+        if stages == 'archive' and (self.remote or (Run.CFG or {}).get('archive_on_head', True)):
             return self.start_pull(what)
         if self.remote:     # qsub on the site's login node, with the run's own run.conf there
             BUDGETS.check(cfg or Run.CFG, self, stages)
@@ -774,7 +779,8 @@ class Run:
         return ids
 
     def start_pull(self, what=None):
-        """Archive of a remote run: job_archive.pbs as a process on this host (archive_run.py pulls from PULL_HOST)."""
+        """Archive as a process on this host: job_archive.pbs run with bash (a remote run: archive_run.py pulls from
+        PULL_HOST; a local run: copies SCRATCH -> ARCHIVE)."""
         jid = 'L%d' % int(now())
         pipe = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline')
         env = dict(os.environ, CONF=self.conf, PIPE_ENV=os.path.join(pipe, 'pipeline_env.sh'), STAGE='archive',
@@ -786,7 +792,8 @@ class Run:
             rec.update(what)
         self.ms['submitted'].append(rec)
         self.save()
-        self.note('archive pull %s started on %s (pid %d) from %s' % (jid, socket.gethostname(), p.pid, self.E['PULL_HOST']))
+        self.note('archive %s %s started on %s (pid %d)%s' % ('pull' if self.remote else 'copy', jid, socket.gethostname(),
+                                                            p.pid, (' from %s' % self.E['PULL_HOST']) if self.remote else ''))
         threading.Thread(target=p.wait, daemon=True).start()     # reap it
         return [('archive', jid)]
 
@@ -1299,6 +1306,11 @@ class Manager:
                     if pulls < int(self.cfg.get('max_pulls', 1)):
                         run.submit('archive', [], dict(after_verify=lv['job']))
             elif la is None or jobnum(la['job']) < jobnum(lv['job']):
+                if self.cfg.get('archive_on_head', True):   # one at a time with the pulls (max_pulls)
+                    pulls = sum(1 for r in self.runs.values() for j in self.derive(r)['active']
+                                if j['job'].startswith('L'))
+                    if pulls >= int(self.cfg.get('max_pulls', 1)):
+                        return 0
                 run.submit('archive', [], dict(after_verify=lv['job']))
         return 0
 
