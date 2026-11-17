@@ -264,8 +264,9 @@ def site_block(a, R):
             'REMOTE_ARCHIVE=1        # verify also writes KEPT_FILES.json (checksums for the pull)',
             'PBS_QUEUE=%s' % a.queue,
             'PBS_PROJECT=            # swarm has no core-hour budgets',
+            # whole nodes only where the simulation needs most of their memory (2048^3); else shared like Rockstar
             'SIM_NODES=%d; SIM_MPIPROCS=2; SIM_PLACE=%s   # SIM_NCPU cores per node; 2 MPI ranks per node' % (
-                R['SIM'][3], 'scatter:excl' if R['SIM'][3] > 1 else 'free'),
+                R['SIM'][3], ('scatter:excl' if int(R['SIM'][1][:-2]) > 300 else 'scatter') if R['SIM'][3] > 1 else 'free'),
             'SIM_ENV=%s/scripts/pkdgrav3_pipeline/swarm/env_swarm.sh   # pkdgrav3 run-time environment (conda MPI, ssh '
             'without the conda library path)' % SANDBOX,
             'SIM_GPU=0',
