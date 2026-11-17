@@ -67,6 +67,19 @@ else
   NS=$(grep -c . "$SIM_DIR/snapnames.txt"); FIRST=0; LAST=$((NS - 1)); NAMES=; FIRST0=0; NAMEF=$SIM_DIR/snapnames.txt
 fi
 NW=${PBS_NCPUS:-${NCPUS:-$RS_NCPU}}; [ "${RS_WRITERS_FIXED:-0}" = 1 ] && NW=$RS_WRITERS
+# Several nodes (RS_NODES > 1, submit_pipeline.sh asks for select=RS_NODES:ncpus=RS_NCPU): Rockstar's server runs here
+# and listens on this node's name; one client per node (ssh to the other nodes of the job) forks PER_NODE writers, so
+# the particles (and the memory) are spread over the nodes. The halo files go straight to $HALO_DIR (shared): every
+# node writes its own writers' files. No MPI: Rockstar talks over TCP sockets, the single-node build is used as is.
+NODES=("$(hostname -s)")
+[ -n "${PBS_NODEFILE:-}" ] && [ -f "$PBS_NODEFILE" ] && mapfile -t NODES < <(sed 's/\..*//' "$PBS_NODEFILE" | awk '!s[$0]++')
+NNODE=${#NODES[@]}
+PER_NODE=$NW
+if [ "$NNODE" -gt 1 ]; then
+  PER_NODE=${RS_WRITERS_PER_NODE:-$NW}; NW=$((PER_NODE * NNODE))
+  [ "${RS_LOCAL_OUT:-1}" = 1 ] && { stamp "RS_LOCAL_OUT=1 with $NNODE nodes: the nodes need a shared OUTBASE (set RS_LOCAL_OUT=0)"; exit 1; }
+  stamp "Rockstar on $NNODE nodes (${NODES[*]}): $PER_NODE writers each, $NW in all"
+fi
 OUT=$HALO_DIR
 if [ "${RS_LOCAL_OUT:-1}" = 1 ]; then
   OUT=${RS_LOCAL_DIR:-/var/tmp}/${USER}_rockstar_${PBS_JOBID%%.*}
@@ -122,7 +135,11 @@ fi
 # the configuration this job runs: writers and output directory set here (the rest as written in advance)
 RUNCFG=$HALO_DIR/rs_job.cfg
 sed -e '/^ *NUM_WRITERS *=/d' -e '/^ *FORK_PROCESSORS_PER_MACHINE *=/d' -e '/^ *OUTBASE *=/d' "$CFG" > "$RUNCFG"
-printf 'NUM_WRITERS = %s\nFORK_PROCESSORS_PER_MACHINE = %s\nOUTBASE = "%s"\n' "$NW" "$NW" "$OUT" >> "$RUNCFG"
+printf 'NUM_WRITERS = %s\nFORK_PROCESSORS_PER_MACHINE = %s\nOUTBASE = "%s"\n' "$NW" "$PER_NODE" "$OUT" >> "$RUNCFG"
+if [ "$NNODE" -gt 1 ]; then   # the clients on the other nodes must reach the server: this node's name, not localhost
+  sed -i '/^ *PARALLEL_IO_SERVER_ADDRESS *=/d' "$RUNCFG"
+  printf 'PARALLEL_IO_SERVER_ADDRESS = "%s"\n' "${NODES[0]}" >> "$RUNCFG"
+fi
 if [ -n "$NAMES" ]; then   # batch: cut snapshot list, restart at FIRST
   sed -i -e '/^ *SNAPSHOT_NAMES *=/d' -e '/^ *NUM_SNAPS *=/d' -e '/^ *STARTING_SNAP *=/d' -e '/^ *RESTART_SNAP *=/d' "$RUNCFG"
   printf 'SNAPSHOT_NAMES = "%s"\nSTARTING_SNAP = 0\n' "$NAMES" >> "$RUNCFG"
@@ -159,8 +176,16 @@ for _ in $(seq 1 600); do [ -f auto-rockstar.cfg ] && break; sleep 0.5; done
 cp -p auto-rockstar.cfg "$HALO_DIR"/
 ( while kill -0 $SPID 2>/dev/null; do sleep "${RS_SYNC_S:-600}"; sync_out; done ) &
 SYNCPID=$!
+RPIDS=()
+for nd in "${NODES[@]:1}"; do   # clients on the other nodes (same paths: shared file systems)
+  ssh -o StrictHostKeyChecking=no -o BatchMode=yes "$nd" "cd '$OUT' && /usr/bin/time -v '$RS' -c auto-rockstar.cfg" \
+      > "$HALO_DIR/${CLOG%.log}.$nd.log" 2> "$HALO_DIR/client.$nd.time" < /dev/null &
+  RPIDS+=($!)
+done
 /usr/bin/time -v "$RS" -c auto-rockstar.cfg > "$HALO_DIR/$CLOG" 2> "$HALO_DIR/client.time"
 wait $SPID; rc=$?
+for p_ in "${RPIDS[@]}"; do wait "$p_" || { stamp "a remote client ended with an error (client.<node>.time)"; rc=1; }; done
+for nd in "${NODES[@]:1}"; do echo "client on $nd: $(grep -E "Elapsed|Maximum resident" "$HALO_DIR/client.$nd.time" | sed 's/^[[:space:]]*//' | tr '\n' ';')"; done
 kill $SYNCPID 2>/dev/null; wait $SYNCPID 2>/dev/null
 ts=$(date +%s); sync_out
 # after a successful run the last snapshot is complete too (restart.cfg still names it): keep its binaries,
