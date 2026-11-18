@@ -2,7 +2,8 @@
 """Scratch operations on the site where a run is computed, for the run manager on another host (it calls this over
 ssh, e.g. pawna -> pegasus). Prints one JSON object.
 
-  scratch_ops.py stat  <run.conf>            size and mtime of every kept file (retention.py; not logs/events)
+  scratch_ops.py stat  <run.conf>            size and mtime of every kept file (retention.py; not logs/events),
+                                             content hash of the cosmology files
   scratch_ops.py usage <run.conf>            bytes in the run's sim and halo directories; free/total of SCRATCH
   scratch_ops.py trash <run.conf> <stamp>    move the sim and halo directories to SCRATCH/.trash/<run>_<stamp>/
   scratch_ops.py undo  <run.conf> <dir>      move them back
@@ -50,13 +51,15 @@ def main():
     P = retention.paths(E)
     out = dict(ok=True)
     if cmd == 'stat':
-        files = {}
+        files, content = {}, {}
         for cat, _s, src, rel in retention.kept_files(E):
             if cat in ('log', 'events') or rel.endswith('verify.json'):
                 continue
             st = os.stat(src)
             files[rel] = [st.st_size, st.st_mtime]
-        out['files'] = files
+            if cat == 'cosmo':      # shared by the realisations, rewritten by each set-up: compared by content
+                content[rel] = retention.content_sha(src)
+        out['files'], out['content'] = files, content
     elif cmd == 'usage':
         out['bytes'] = sum(du(P[k]) for k in ('sim', 'halo') if os.path.isdir(P[k]))
         u = shutil.disk_usage(E['SCRATCH'])

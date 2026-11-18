@@ -1741,21 +1741,30 @@ class Manager:
                 nbad += 1
                 msgs.append('archive copy wrong or missing: %s' % r['path'])
         # every file the retention plan keeps now must be in the manifest, unchanged
+        # (the cosmology files are shared by the realisations and rewritten by each set-up, with its time in a
+        # comment: they count as unchanged when their content without comment lines equals the archived copy's)
         if run.remote:      # listed on the run's site
-            now_files = {rel: tuple(v) for rel, v in self.remote_ops(run, 'stat')['files'].items()}
+            st_out = self.remote_ops(run, 'stat')
+            now_files = {rel: tuple(v) for rel, v in st_out['files'].items()}
+            content = st_out.get('content', {})
         else:
-            now_files = {}
+            now_files, content = {}, {}
             for cat, _s, src, rel in retention.kept_files(E):
                 if cat in ('log', 'events') or rel.endswith('verify.json'):
                     continue
                 st = os.stat(src)
                 now_files[rel] = (st.st_size, st.st_mtime)
+                if cat == 'cosmo':
+                    content[rel] = retention.content_sha(src)
         for rel, (size, mtime) in now_files.items():
             r = rows.get(rel)
             if r is None:
                 nbad += 1
                 msgs.append('kept file not in the manifest: %s' % rel)
             elif r['size'] != size or abs(r['mtime'] - mtime) > 1e-6:
+                arch = os.path.join(E['ARCHIVE'], rel)
+                if rel in content and os.path.isfile(arch) and retention.content_sha(arch) == content[rel]:
+                    continue
                 nbad += 1
                 msgs.append('kept file changed after the archive: %s' % rel)
         if nbad:

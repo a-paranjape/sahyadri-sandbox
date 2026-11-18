@@ -259,6 +259,28 @@ def fmt_l(L):
     return ('%d' % L) if float(L).is_integer() else ('%g' % L).replace('.', 'p')
 
 
+def same_content(path, text):
+    """path exists and holds text, apart from '#' comment lines (the set-up time)."""
+    if not os.path.isfile(path):
+        return False
+    strip = lambda lines: [x for x in lines if not x.lstrip().startswith('#')]   # noqa: E731
+    with open(path) as f:
+        return strip(f.read().splitlines()) == strip(text.splitlines())
+
+
+def write_shared(path, text):
+    """A file of the set-up directory, shared by its realisations (archived with each run): left untouched (and its
+    mtime with it) when only its comments would change, so setting up another realisation does not make the kept
+    files of the runs already verified or archived look changed."""
+    if same_content(path, text):
+        return False
+    with open(path + '.tmp', 'w') as f:
+        f.write(text)
+    os.chmod(path + '.tmp', 0o644)
+    os.replace(path + '.tmp', path)
+    return True
+
+
 def write(path, text, force, mode=0o644):
     if os.path.exists(path) and not force:
         sys.exit('%s exists; use --force to overwrite the configuration files' % path)
@@ -444,22 +466,20 @@ def setup_cosmo(a, cosmo):
     os.makedirs(cdir, exist_ok=True)
     pk_copy = os.path.join(cdir, 'class_pk_z%g.dat' % zstart)
     tf = os.path.join(cdir, 'transfer_pkdgrav3.dat')
-    shutil.copyfile(c['PK_FILE'], pk_copy)
-    with open(tf, 'w') as f:
-        f.write('# pkdgrav3 transfer table for %s: k [h/Mpc], T = sqrt(P_CLASS(k, z=%g) / k^ns), ns = %s\n'
-                '# from %s; use with dSpectral = %s, dSigma8 = %.8f\n' % (cname, zstart, c['NS'], c['PK_FILE'], c['NS'], s8))
-        for kk, tt in zip(k, T):
-            f.write('%.12e %.12e\n' % (kk, tt))
-    with open(os.path.join(cdir, 'outputs_a.txt'), 'w') as f:
-        f.write('# output scale factors (from %s)\n' % a.outputs)
-        f.write(''.join('%.16e\n' % x for x in a_out))
-    write(os.path.join(cdir, 'cosmology.txt'), (
+    with open(c['PK_FILE']) as f:
+        write_shared(pk_copy, f.read())
+    write_shared(tf, '# pkdgrav3 transfer table for %s: k [h/Mpc], T = sqrt(P_CLASS(k, z=%g) / k^ns), ns = %s\n'
+                 '# from %s; use with dSpectral = %s, dSigma8 = %.8f\n' % (cname, zstart, c['NS'], c['PK_FILE'], c['NS'], s8)
+                 + ''.join('%.12e %.12e\n' % (kk, tt) for kk, tt in zip(k, T)))
+    write_shared(os.path.join(cdir, 'outputs_a.txt'), '# output scale factors (from %s)\n' % a.outputs
+                 + ''.join('%.16e\n' % x for x in a_out))
+    write_shared(os.path.join(cdir, 'cosmology.txt'), (
         '# %s, written by setup_production.py %s from %s\n' % (cname, now, c['file']) +
         ''.join('%s=%s\n' % (kk, c[kk]) for kk in ('OMEGA_M', 'OMEGA_B', 'OMEGA_K', 'HUBBLE', 'NS', 'AS', 'Z_START')) +
         ('OMEGA_L=%.7f\n' % ol if lcdm else 'OMEGA_L=0\nOMEGA_DE=%.7f\n' % ol) + 'W0=%r\nWA=%r\n' % (w0, wa) +
         'SIGMA8_ZSTART=%.8f   # of the CLASS P(k) at Z_START\n'
         'SIGMA8_LINEAR_Z0=%.8f   # the same, scaled to z = 0 with the no-radiation growth factor (= pkdgrav3 dSigma8)\n'
-        % (s8_start, s8)), True)
+        % (s8_start, s8)))
 
     print('%s: %d outputs (z = %.3f ... 0), %d top-level steps from z = %g; softening %.6g Mpc/h (1/%g of the spacing);'
           ' sigma8 = %.5f' % (stem, len(a_out), z_out[0], steps[-1], zstart, force_res, 1 / a.soft_frac, s8))

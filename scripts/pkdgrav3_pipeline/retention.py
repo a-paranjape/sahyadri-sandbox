@@ -17,6 +17,7 @@ Settings (run.conf; defaults in brackets):
 usage: retention.py <run.conf> [--list] [--json]     print the resolved plan (and with --list every file)
 """
 import glob
+import hashlib
 import json
 import os
 import re
@@ -221,6 +222,17 @@ def scales_file(P):
     shared <halo dir>/../scales.txt of older runs (overwritten by every realisation's ctrees stage)."""
     own = os.path.join(P['halo'], 'scales.txt')
     return own if os.path.isfile(own) else os.path.join(os.path.dirname(P['halo']), 'scales.txt')
+
+
+def content_sha(path):
+    """SHA-256 of a text file without its '#' comment lines: the cosmology files shared by the realisations carry the
+    time of the set-up that wrote them in a comment, which says nothing about their content."""
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for line in f:
+            if not line.lstrip().startswith(b'#'):
+                h.update(line)
+    return h.hexdigest()
 
 
 def human(n):
