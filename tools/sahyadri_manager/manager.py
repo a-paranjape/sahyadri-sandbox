@@ -1717,6 +1717,10 @@ class Manager:
     # ------------------------------------------------------------------ deletion (after approval only)
     def cleanup_check(self, run):
         """(ok, message): may the run's scratch data be moved to the trash?"""
+        if run.ms.get('purged'):
+            return False, 'already purged: %s' % run.ms['purged'].get('dir')
+        if run.ms.get('trash'):
+            return False, 'already in the trash: %s' % run.ms['trash'].get('dir')
         E, P = run.E, run.P
         D = self.derive(run)
         if D['active']:
