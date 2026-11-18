@@ -88,7 +88,7 @@ section[data-tab] { display: none; } section[data-tab].on { display: block; }
 </main>
 <div id="toast"></div>
 <script>
-const STAGES = ['sim','rockstar','ctrees','vahc','fits','verify','archive'];
+const STAGES = ['sim','rockstar','ctrees','vahc','fits','parquet','verify','archive'];
 let S = null, openDetails = new Set();
 function h(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function hum(b){ if(b==null) return '?'; const u=['B','KB','MB','GB','TB','PB']; let i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return b.toFixed(i?1:0)+' '+u[i]; }
@@ -292,7 +292,7 @@ function renderTabs(){
   const sites=[...new Set((S.runs||[]).map(r=>r.site))].sort();
   const cnt=(site,f)=>(S.runs||[]).filter(r=>r.site===site&&f(r)).length;
   const rows=sites.map(st=>`<tr><td><b>${h(st)}</b></td>${[
-      r=>cat(r)==='upcoming', r=>r.phase==='simulation'||r.phase==='waiting to restart', r=>['rockstar','post','ctrees','vahc','fits','verify','archive'].includes(r.phase),
+      r=>cat(r)==='upcoming', r=>r.phase==='simulation'||r.phase==='waiting to restart', r=>['rockstar','post','ctrees','vahc','fits','parquet','verify','archive'].includes(r.phase),
       r=>r.phase==='failed', r=>r.phase==='archived'||r.phase==='in trash', r=>r.phase==='purged'].map(f=>`<td class="num">${cnt(st,f)||''}</td>`).join('')}</tr>`).join('');
   const bud=(S.budgets||[]).map(b=>`<tr><td>${h(b.site)}</td><td>${h(b.kind)} ${h(b.name)} ${h(b.period||'')}</td><td class="num"><b>${Math.round(b.coreh).toLocaleString()}</b></td><td class="small muted">${ago(b.t)}</td></tr>`).join('');
   const pl=S.plan||[], plErr=pl.filter(p=>p.state==='error').length;

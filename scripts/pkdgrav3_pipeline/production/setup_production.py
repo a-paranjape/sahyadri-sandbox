@@ -148,6 +148,17 @@ def rockstar_mem(N):
     return '%dgb' % (16 * int(np.ceil(gb / 16.0)))
 
 
+def parquet_resources(N):
+    """Stage parquet (fits_to_parquet.py, streams in row blocks: ~1 GB per process at most). Measured on pawna, L500N512:
+    13.7 GB of FITS in 156 s on 8 processes (631 CPU-s; the tree file alone 155 s, one process). The halo rows grow
+    ~8x per factor 8 in particles at fixed box; the tree file is converted by one process (gzip is sequential)."""
+    if N <= 512:
+        return 8, '16gb', '02:00:00'
+    if N <= 1024:
+        return 16, '32gb', '06:00:00'
+    return 32, '64gb', '24:00:00'
+
+
 def resources(N):
     """Default PBS resources by size (edit run.conf to change). Measured: 512^3 sim 25 GB / 80 min on 64 cores for 60
     steps; Rockstar see rockstar_mem (one writer per core: 64 writers 2.9x faster than 16 at 512^3 with the output
@@ -287,7 +298,7 @@ def site_block(a, R):
         'SIM_ENV=%s/pkdgrav3/tools/pegasus/env_pegasus.sh   # pkdgrav3 run-time environment (conda MPI)' % a.pkd_io_root,
         'SIM_GPU=%d               # 1: GPU nodes (ngpus=1 per node) and the CUDA build $PKD_IO_ROOT/build_gpu' % (1 if a.sim_gpu else 0),
         'SIM_STAGING=0           # snapshots and checkpoints written straight to SCRATCH (Lustre)']
-                     + (['VF_WALL=04:00:00; XC_WALL=02:00:00   # debug queue: at most 4 h'] if a.queue == 'debug' else []))
+                     + (['VF_WALL=04:00:00; XC_WALL=02:00:00; PQ_WALL=02:00:00   # debug queue: at most 4 h'] if a.queue == 'debug' else []))
 
 
 def schedule_run(conf, name, priority):
@@ -601,6 +612,7 @@ RS_NODES=%(rs_nodes)d              # Rockstar nodes: RS_NCPU cores, RS_MEM and R
 CT_NCPU=%(ct_n)d;    CT_MEM=%(ct_m)s;   CT_WALL=%(ct_w)s
 PP_NCPU=%(pp_n)d;    PP_MEM=%(pp_m)s;   PP_WALL=%(pp_w)s
 FITS_NCPU=%(fi_n)d;  FITS_MEM=%(fi_m)s; FITS_WALL=%(fi_w)s
+PQ_NCPU=%(pq_n)d;    PQ_MEM=%(pq_m)s;   PQ_WALL=%(pq_w)s
 
 # halo finding: Rockstar reads the .pkc files; full configuration in the halo directory
 RS_CFG=%(hdir)s/rockstar_input.cfg
@@ -630,21 +642,26 @@ PK_DELTA2_LIN=0.01      # growth checked only on bins with Delta^2_lin(k, z) <= 
 # FITS
 FITS_NPROC=16
 FITS_DELETE_ASCII=0     # keep 0 with the manager: verify reads the ASCII catalogues (deleted from SCRATCH after the archive)
+
+# Parquet copy of the FITS tables and trees (stage parquet after fits: <halo dir>/parquet/, same names; archived and
+# verified like the FITS). 0: no Parquet (stage skipped, nothing archived; the directory can then be deleted)
+PARQUET=1
 ''' % dict(name=name, now=now, sandbox=SANDBOX, pkd=a.pkd_io_root, codes=a.codes, root=a.root, sdir=sdir, hdir=hdir,
            archive=a.archive, keepz=a.keep_full_z, keeppct=a.keep_pct,
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
            sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2], rs_nodes=(R['RS'][3] if len(R['RS']) > 3 else 1),
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
-           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], fr=force_res, rsb=R['RS_BLOCKS'],
+           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], pq_n=parquet_resources(N)[0], pq_m=parquet_resources(N)[1],
+           pq_w=parquet_resources(N)[2], fr=force_res, rsb=R['RS_BLOCKS'],
            rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'])
         write(os.path.join(sdir, 'run.conf'), conf, a.force)
         sub = '''#!/bin/bash
 # Submit %(name)s (written by setup_production.py %(now)s). Check run.conf, p.par and
 # %(hdir)s/rockstar_input.cfg first.
-#   ./submit.sh            whole chain: sim -> rockstar -> ctrees -> vahc -> fits (each after the previous succeeded)
+#   ./submit.sh            whole chain: sim -> rockstar -> ctrees -> vahc -> fits -> parquet (each after the previous succeeded)
 #   ./submit.sh dry        print the qsub commands only
 #   ./submit.sh restart    continue the simulation from the newest checkpoint, then the rest of the chain
-#   ./submit.sh halos      rockstar -> ctrees -> vahc -> fits (simulation finished)
+#   ./submit.sh halos      rockstar -> ctrees -> vahc -> fits -> parquet (simulation finished)
 #   ./submit.sh <options>  any submit_pipeline.sh options, e.g. --stages vahc,fits
 SUB=%(pipe)s/submit_pipeline.sh
 CONF=%(sdir)s/run.conf
@@ -652,7 +669,7 @@ case "${1:-all}" in
   all)     exec "$SUB" "$CONF" ;;
   dry)     exec "$SUB" "$CONF" --dry-run ;;
   restart) exec "$SUB" "$CONF" --restart latest ;;
-  halos)   exec "$SUB" "$CONF" --stages rockstar,ctrees,vahc,fits ;;
+  halos)   exec "$SUB" "$CONF" --stages rockstar,ctrees,vahc,fits,parquet ;;
   *)       exec "$SUB" "$CONF" "$@" ;;
 esac
 ''' % dict(name=name, now=now, hdir=hdir, pipe=PIPE, sdir=sdir)

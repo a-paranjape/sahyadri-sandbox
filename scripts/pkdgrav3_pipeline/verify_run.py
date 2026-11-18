@@ -14,6 +14,8 @@ Checks (failures block the archive; warnings are reported only):
               as the .trees, the same halo IDs in the same order
   fits        the fits stage ended with 0 check failures after the last vahc; every kept FITS table and the
               tree FITS present and non-empty
+  parquet     (PARQUET=1) every kept FITS file has its Parquet copy (stage parquet, after the last fits, passed its
+              DATASUM and read-back checks), made from the current FITS file, with its rows and columns
   halos       halo counts per snapshot (warning when they jump by more than a factor 1.5 between neighbours)
   pk          (PP_PK=1) every output's matter P(k) against CLASS: absolute and growth ratios, CLASS vs the IC
               table, halo bias (pk_check.py); writes <halo dir>/pk/pk_summary.png
@@ -242,6 +244,9 @@ def main():
         for n in ('locations', 'forests', 'tree_'):
             if not glob.glob(os.path.join(comp, 'trees', n + '*.fits*')):
                 R.fail('fits', 'no compressed/trees/%s*.fits*' % n)
+    # ------------------------------------------------------------ parquet (PARQUET=1)
+    if pl.get('parquet'):
+        check_parquet(R, ev, P, pl, comp)
     # ------------------------------------------------------------ power spectra (pk_check.py)
     if E.get('PP_PK', '1') == '1':
         import pk_check
@@ -270,6 +275,59 @@ def main():
     print('verify %s in %.0f s -> %s' % ('PASSED' if R.ok() else 'FAILED', time.time() - t0,
                                          os.path.join(P['state'], 'verify.json')))
     sys.exit(0 if R.ok() else 1)
+
+
+def check_parquet(R, ev, P, pl, comp):
+    """The Parquet copy (stage parquet) of every kept FITS file: made after the last fits stage, by a parquet stage
+    that passed its own checks (DATASUM, read-back hashes), from the FITS file as it is now (size and mtime recorded
+    in the Parquet), with the FITS table's rows and columns."""
+    import pyarrow.parquet as pq
+    import fits_to_parquet as f2p
+    c = R.check('parquet')
+    pe = sorted([e for e in ev if e.get('ev') == 'parquet_done'], key=lambda e: e.get('t', 0))
+    fe = sorted([e for e in ev if e.get('ev') == 'fits_done'], key=lambda e: e.get('t', 0))
+    if not pe:
+        R.fail('parquet', 'no parquet_done event (stage parquet)')
+    else:
+        last = pe[-1]
+        if int(last.get('rc', 1)) != 0 or int(last.get('nfail', 0) or 0) != 0 or last.get('skipped'):
+            R.fail('parquet', 'last parquet stage (job %s): rc %s, %s failures%s (%s)' % (
+                last['job'], last.get('rc'), last.get('nfail'), ', skipped' if last.get('skipped') else '', last.get('log')))
+        if fe and fe[-1].get('t', 0) > last.get('t', 0):
+            R.fail('parquet', 'fits stage (job %s) ran after the last parquet stage (job %s)' % (fe[-1]['job'], last['job']))
+        c['info']['job'] = last['job']
+    pqd = os.path.join(P['halo'], 'parquet')
+    srcs = []
+    for t in pl['tables']:
+        srcs += glob.glob(os.path.join(comp, 'out_*_%s.fits.gz' % t))
+    if pl['trees']:
+        srcs += glob.glob(os.path.join(comp, 'trees', '*.fits.gz'))
+    n_ok, nb = 0, 0
+    for src in sorted(srcs):
+        rel = os.path.relpath(src, comp)[:-len('.fits.gz')] + '.parquet'
+        dst = os.path.join(pqd, rel)
+        if not os.path.isfile(dst):
+            R.fail('parquet', 'no parquet/%s' % rel)
+            continue
+        try:
+            md = pq.read_metadata(dst)
+            m = md.metadata or {}
+            st = os.stat(src)
+            if (m.get(b'source_size') != str(st.st_size).encode() or m.get(b'source_mtime') != repr(st.st_mtime).encode()):
+                R.fail('parquet', 'parquet/%s was not made from the current %s (size/mtime differ)' % (rel, os.path.basename(src)))
+                continue
+            rows, cols = f2p.table_rows(src)
+            if md.num_rows != rows or md.num_columns != cols:
+                R.fail('parquet', 'parquet/%s: %d rows x %d columns, FITS %d x %d' % (rel, md.num_rows, md.num_columns, rows, cols))
+                continue
+            n_ok += 1
+            nb += os.path.getsize(dst)
+        except Exception as e:  # noqa: BLE001
+            R.fail('parquet', 'parquet/%s unreadable: %s' % (rel, e))
+    c['info']['files'] = n_ok
+    c['info']['bytes'] = nb
+    if not srcs:
+        R.fail('parquet', 'no FITS files to compare with')
 
 
 def jobnum(j):

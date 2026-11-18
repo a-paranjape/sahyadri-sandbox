@@ -130,7 +130,7 @@ def plan(E):
     subs = kept_subsamples(E)
     tables = [t.strip() for t in E.get('KEEP_HALO_TABLES', '').split(',') if t.strip()]
     return dict(outputs=outs, full=full, subsamples=subs, subsample_pct=sum(subs), tables=tables,
-                trees=E.get('KEEP_TREES', '1') == '1', checkpoint=E.get('KEEP_CHECKPOINT', '0') == '1',
+                trees=E.get('KEEP_TREES', '1') == '1', parquet=E.get('PARQUET', '0') == '1', checkpoint=E.get('KEEP_CHECKPOINT', '0') == '1',
                 full_z=[(s, outs[s][3]) for s in full], paths=P)
 
 
@@ -167,6 +167,15 @@ def kept_files(E, pl=None):
     if pl['trees']:
         for f in sorted(glob.glob(os.path.join(glob.escape(comp), 'trees', '*'))):
             add('trees_fits', None, f)
+    if pl['parquet']:      # the Parquet copy (stage parquet) of the same tables and trees
+        pqd = os.path.join(P['halo'], 'parquet')
+        for f in sorted(glob.glob(os.path.join(glob.escape(pqd), 'out_*_*.parquet'))):
+            m = re.match(r'out_(\d+)_(\w+)\.parquet$', os.path.basename(f))
+            if m and m.group(2) in pl['tables']:
+                add('halo_parquet', int(m.group(1)), f)
+        if pl['trees']:
+            for f in sorted(glob.glob(os.path.join(glob.escape(pqd), 'trees', '*.parquet'))):
+                add('trees_parquet', None, f)
     for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), 'xcorr', '*'))):
         add('xcorr', None, f)
     for f in sorted(glob.glob(os.path.join(glob.escape(P['halo']), 'vprof', '*.npz'))):   # stacked profiles

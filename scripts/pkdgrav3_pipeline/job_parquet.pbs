@@ -1,0 +1,25 @@
+#!/bin/bash -l
+# Stage parquet (after fits): a Parquet copy of every FITS table and tree file, in a parallel directory with the same
+# names (fits_to_parquet.py: streamed in row blocks, low memory; each file checked against the FITS DATASUM and
+# read back with per-column hashes):
+#   $HALO_DIR/compressed/out_<snap>_<table>.fits.gz -> $HALO_DIR/parquet/out_<snap>_<table>.parquet
+#   $HALO_DIR/compressed/trees/*.fits.gz            -> $HALO_DIR/parquet/trees/*.parquet
+# Archived with the FITS (retention.py) and checked in stage verify. PARQUET=0 in run.conf: nothing to do.
+# Restart: rerun; files already converted from the current FITS (size and mtime recorded in the Parquet) are skipped.
+set -u
+source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
+if [ "${PARQUET:-0}" != 1 ]; then
+  stamp "PARQUET=${PARQUET:-0} in run.conf: no Parquet copy"
+  event parquet_done rc=0 skipped=1
+  exit 0
+fi
+cd "$HALO_DIR" || exit 1
+LOG=$LOGS/parquet.${PBS_JOBID%%.*}.log
+"$PY" "$PP/fits_to_parquet.py" compressed parquet --procs "${PBS_NCPUS:-${PQ_NCPU:-8}}" > "$LOG" 2>&1
+rc=$?
+tail -3 "$LOG"
+nfail=$(grep -c '^FAIL' "$LOG")
+du -sh parquet
+event parquet_done rc="$rc" nfail="$nfail" log="$LOG"
+stamp "Parquet stage exit $rc"
+exit $rc

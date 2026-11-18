@@ -315,6 +315,33 @@ the cosmology, Rockstar and consistent-trees settings and the `.pkc` simulation 
 using node-local `/var/tmp` for temporary files, then `check_compressed_halos.py` compares every column with
 the ASCII. `readers.HaloReader.prep_halos(use_fits=True)` reads the result.
 
+### 5.6 parquet — `job_parquet.pbs` → `scripts/post-process/fits_to_parquet.py` (`PARQUET=1`)
+A Parquet copy of every FITS table and tree file in a parallel directory, same names:
+`compressed/out_<snap>_<table>.fits.gz → parquet/out_<snap>_<table>.parquet`, `compressed/trees/*.fits.gz →
+parquet/trees/*.parquet`. FITS stays the reference and is not touched; `PARQUET=0` in run.conf turns the stage off
+(nothing converted or archived; the directory can then be deleted).
+
+- **Low memory at any size:** each `.fits.gz` is decompressed as a stream and the binary table converted in blocks
+  of about 256 MB (`--block-mb`), each written as one Parquet row group. Nothing holds a whole file.
+- **Checks per file:** the decompressed data unit against the FITS `DATASUM`; the Parquet file read back row group
+  by row group, with per-column BLAKE2b hashes equal to those of the values converted (numbers bit for bit, strings
+  by value). The decoder (TFORM/TZERO → types) matches fitsio on every column (`fits_to_parquet.py --selftest`).
+- **Metadata** (Parquet footer): the primary and table FITS headers, the PROVENANCE table, and the source name,
+  size and mtime. A file whose Parquet records the current FITS size and mtime is skipped, so a restart is a rerun.
+- **Encodings:** zstd level 3; dictionary for basic, extended and trees; no dictionary plus BYTE_STREAM_SPLIT on
+  the float columns of tens and vahc (the smaller choice per table, `parquet_layout_test.py`).
+- **Archive and verify:** the Parquet files are kept files (`retention.py`: `halo_parquet`, `trees_parquet`),
+  copied and read back like the FITS. Stage verify fails unless every kept FITS file has its Parquet copy from the
+  current FITS (size, mtime), with the same rows and columns, made by a parquet stage that passed, after the last
+  fits stage. So nothing is trashed or purged before the Parquet copy is archived and checked.
+- **Cost** (pawna, L500N512 r1, 8 processes, 18 Nov 2026): 379 files, 13.7 GB FITS → 11.5 GB Parquet, 81 s wall,
+  391 CPU-s, largest process 1.4 GB. The tree file (2.3 GB Parquet, 19.2 M rows) takes 81 s in one process, as gzip
+  is sequential. Expected about 100 GB / 1.5 core-h at 1024^3, about 0.8 TB / 12 core-h at 2048^3 (L200).
+- **Resources** (`setup_production.py`): 8 cores / 16 GB / 2 h up to 512^3, 16 / 32 GB / 6 h at 1024^3,
+  32 / 64 GB / 24 h above.
+- **Manager:** with `PARQUET=1` the chain is `ctrees → vahc → fits → parquet → verify`; a run whose FITS were made
+  before the stage existed gets `parquet → verify` before its archive. Runs already archived are left as they are.
+
 ## 6. Other post-processing (`postprocess.py`)
 
 `postprocess.py` (P(k), mass functions, VVF, kNN, 2PCF; flags at the top of the file) also reads `.pkc`
@@ -650,7 +677,8 @@ Two new stages, both submitted by the manager:
 The manager runs on the head node, because compute nodes cannot `qsub`, `qrls` or `qalter`. It:
 
 - reacts to the jobs' event files through `inotifywait`, and runs `qstat` only every 30 min;
-- submits Rockstar in batches while the simulation runs, then `ctrees → vahc → fits → verify`, then `archive`;
+- submits Rockstar in batches while the simulation runs, then `ctrees → vahc → fits → parquet → verify` (parquet
+  with `PARQUET=1`, section 5.6), then `archive`;
 - moves the scratch data to a trash directory, then purges it, only after you approve each step in its web page.
 
 The page is opened on the Mac with `tools/sahyadri_manager/open_gui.sh`. See `tools/sahyadri_manager/README.md`.

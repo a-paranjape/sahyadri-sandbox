@@ -112,6 +112,12 @@ LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rock
 SITE_LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb',
                    'max_pbs_queued')
 POST = ['ctrees', 'vahc', 'fits', 'verify']
+
+
+def post_of(E):
+    """Post-processing stages of a run, in order: with PARQUET=1 in run.conf, stage parquet (Parquet copy of the FITS,
+    archived and verified with them) between fits and verify."""
+    return ['ctrees', 'vahc', 'fits', 'parquet', 'verify'] if E.get('PARQUET', '0') == '1' else POST
 LOCAL = 'pawna'
 SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=30', '-o', 'ServerAliveInterval=30',
             '-o', 'ControlMaster=auto', '-o', 'ControlPersist=600']
@@ -126,7 +132,7 @@ def scratch_estimate(E, n_out):
     snaps = 10.5 * n3 * n_out
     chk = 48.0 * n3 * int(E.get('SIM_KEEPCHK', '2') or 2)
     return int(1.10 * (snaps * 1.15 + chk))
-STAGES = ['sim', 'rockstar', 'ctrees', 'vahc', 'fits', 'verify', 'archive']
+STAGES = ['sim', 'rockstar', 'ctrees', 'vahc', 'fits', 'parquet', 'verify', 'archive']
 # actions that read the archive on /storage (NFS, can take minutes when it is busy): run in a worker thread, the
 # run marked busy (no automation for it meanwhile), so events of the other runs are still handled
 SLOW = ('check_trash', 'approve_trash', 'undo_trash', 'approve_purge')
@@ -187,8 +193,9 @@ def job_coreh(E, stage):
     n = lambda k, d: int(float(E.get(k) or d))     # noqa: E731
     if stage == 'sim':
         return n('SIM_NODES', 1) * n('SIM_NCPU', 1) * hours(E.get('SIM_WALL', '0'))
-    pre = dict(rockstar='RS', ctrees='CT', vahc='PP', vpot='PP', fits='FITS', verify='VF', xcorr='XC', archive='AR')[stage]
-    dflt = dict(VF=(8, '12:00:00'), XC=(16, '02:00:00'), AR=(2, '72:00:00')).get(pre, (1, '0'))
+    pre = dict(rockstar='RS', ctrees='CT', vahc='PP', vpot='PP', fits='FITS', parquet='PQ', verify='VF', xcorr='XC',
+               archive='AR')[stage]
+    dflt = dict(VF=(8, '12:00:00'), XC=(16, '02:00:00'), AR=(2, '72:00:00'), PQ=(8, '02:00:00')).get(pre, (1, '0'))
     nodes = n('RS_NODES', 1) if stage == 'rockstar' else 1    # Rockstar over several nodes: RS_NCPU per node
     return nodes * n(pre + '_NCPU', dflt[0]) * hours(E.get(pre + '_WALL') or dflt[1])
 
@@ -693,6 +700,7 @@ class Run:
                          or [-1])
         D['kept'] = ok_after('kept_sums')
         D['fits'] = ok_after('fits_done')
+        D['parquet'] = ok_after('parquet_done')
         D['sim_info'] = self.sim_progress()
         return D
 
@@ -740,7 +748,7 @@ class Run:
         if (not self.E.get('ARCHIVE') and v and int(v.get('ok', 0)) and D['sim_done'] and not D['active']
                 and len(D['rs_done']) == len(self.outs)):
             return 'verified (no archive)'
-        for st in ('archive', 'verify', 'vprof', 'xcorr', 'fits', 'vpot', 'vahc', 'ctrees'):
+        for st in ('archive', 'verify', 'vprof', 'xcorr', 'parquet', 'fits', 'vpot', 'vahc', 'ctrees'):
             j = D['last'].get(st)
             if j and j['status'] in ('submitted', 'queued', 'held', 'running', 'exiting'):
                 return st
@@ -1262,7 +1270,7 @@ class Manager:
         if waiting_gone:     # e.g. a remote job ended and its end event is not in the mirror yet
             return 0
         self.archive_batch(run, D)
-        if D['active'] and any(j['stage'] in ('ctrees', 'vahc', 'vpot', 'fits', 'xcorr', 'vprof', 'verify', 'archive')
+        if D['active'] and any(j['stage'] in ('ctrees', 'vahc', 'vpot', 'fits', 'parquet', 'xcorr', 'vprof', 'verify', 'archive')
                                for j in D['active']):
             return 0
         if self.qinfo(run)['state'] == 'closed':     # nothing new into a closed queue (drain: post-processing goes on)
@@ -1300,10 +1308,12 @@ class Manager:
         if not D['sim_done']:
             return 0
         lv = D['last'].get('verify')
+        archived = bool(D['archive'] and int(D['archive'].get('ok', 0)))
+        post = [s for s in post_of(E) if not (archived and s == 'parquet')]   # an archived run stays as archived
         if site_cfg(self.cfg, run.site).get('max_pbs_queued') is not None:
             # one stage at a time: the first whose newest job is not a success newer than the previous stage's
             prev = None
-            for st in POST:
+            for st in post:
                 j = D['last'].get(st)
                 if j is None or j['status'] != 'done' or (prev and jobnum(j['job']) < jobnum(prev['job'])):
                     if self.pbs_room(run.site):
@@ -1311,10 +1321,17 @@ class Manager:
                         self.took(run.site)
                     return 0
                 prev = j
-        elif not any(D['last'].get(s) for s in POST):
-            stages = 'ctrees,vahc,fits,verify'
+        elif not any(D['last'].get(s) for s in post):
+            stages = ','.join(post)
             run.submit(stages, [], dict(chain=stages))
             return 0
+        elif 'parquet' in post:
+            # PARQUET=1 on a run whose FITS were made without it (or again after it): parquet, then verify again,
+            # before the archive (which takes the Parquet files as kept files)
+            lf, lp = D['last'].get('fits'), D['last'].get('parquet')
+            if lf and lf['status'] == 'done' and (lp is None or jtime(lp) < jtime(lf)):
+                run.submit('parquet,verify', [], dict(chain='parquet,verify'))
+                return 0
         v = D['verify']
         run.archive_msg = None
         if lv and lv['status'] == 'done' and v and int(v.get('ok', 0)) == 1 and E.get('ARCHIVE'):
@@ -1578,10 +1595,10 @@ class Manager:
             if st == 'rockstar' and f.get('first') is not None:
                 run.submit('rockstar', ['--rs-snaps', '%s-%s' % (f['first'], f['last'])],
                            dict(first=int(f['first']), last=int(f['last']), retry=f.get('job')))
-            elif st in POST and site_cfg(self.cfg, run.site).get('max_pbs_queued') is not None:
+            elif st in post_of(run.E) and site_cfg(self.cfg, run.site).get('max_pbs_queued') is not None:
                 run.submit(st, [], dict(chain=st, sequential=True, retry=f.get('job')))     # the rest follows
-            elif st in POST:
-                rest = POST
+            elif st in post_of(run.E):
+                rest = post_of(run.E)
                 stages = ','.join(rest[rest.index(st):])
                 run.submit(stages, [], dict(chain=stages, retry=f.get('job')))
             elif st == 'archive':
@@ -1595,6 +1612,8 @@ class Manager:
             # they change kept files, and the archive is read-only once checked
             chains = dict(vpot='vpot,fits,verify', xcorr='xcorr,verify', vprof='vprof,verify',
                           all='vpot,fits,xcorr,vprof,verify')
+            if run.E.get('PARQUET', '0') == '1':      # FITS written again: the Parquet copy too
+                chains = {k: v.replace('fits,', 'fits,parquet,') for k, v in chains.items()}
             what = a.get('what')
             if what not in chains:
                 raise ValueError('what must be one of %s' % ', '.join(chains))

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Submit the Sahyadri pkdgrav3 pipeline for one run as a chain of PBS jobs:
-#   sim -> rockstar -> ctrees -> vahc -> fits     (each starts only if the previous one succeeded: afterok)
+#   sim -> rockstar -> ctrees -> vahc -> fits -> parquet   (each starts only if the previous one succeeded: afterok;
+#   parquet only with PARQUET=1 in run.conf: Parquet copy of the FITS in <halo dir>/parquet, job_parquet.pbs)
 #   optional, only when named in --stages: vpot (halo potential profiles, job_vpot.pbs; then fits again),
 #   xcorr (halo-halo potential cross-correlation, job_xcorr.pbs), vprof (stacked volume-weighted potential profiles
 #   around halos, job_vprof.pbs), ximult (halo correlation multipoles in real/redshift space with
@@ -9,7 +10,7 @@
 #   (tools/sahyadri_manager submits them itself)
 # Rockstar batch: --stages rockstar --rs-snaps A-B (snapshots A..B, see job_rockstar.pbs)
 #
-# usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits] [--after JOBID] [--hold] [--restart CHK] [--dry-run]
+# usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits,parquet] [--after JOBID] [--hold] [--restart CHK] [--dry-run]
 #   --stages  any subset, in pipeline order (e.g. "ctrees,vahc,fits" to redo the later stages)
 #   --after   make the first stage wait for an existing job (afterok), e.g. a running simulation
 #   --hold    submit the first job held (qrls <id> to start the chain)
@@ -19,7 +20,7 @@
 set -eu
 [ $# -ge 1 ] || { sed -n '2,12p' "$0"; exit 1; }
 CONF=$(readlink -f "$1"); shift
-STAGES=sim,rockstar,ctrees,vahc,fits; AFTER=; HOLD=; DRY=; RESTART=; RSSNAPS=
+STAGES=sim,rockstar,ctrees,vahc,fits,parquet; AFTER=; HOLD=; DRY=; RESTART=; RSSNAPS=
 while [ $# -gt 0 ]; do
   case $1 in
     --stages) STAGES=$2; shift 2 ;;
@@ -39,8 +40,9 @@ QSUB=$(command -v qsub || echo /opt/pbs/bin/qsub)
 RUN=$(echo "$STEM" | tr / _)_r$REAL
 CHAIN=$LOGS/chain.$RUN.$(date +%Y%m%d_%H%M%S).txt
 prev=$AFTER
-for st in sim rockstar ctrees vahc vpot fits xcorr ximult vprof verify archive; do
+for st in sim rockstar ctrees vahc vpot fits parquet xcorr ximult vprof verify archive; do
   case ",$STAGES," in *",$st,"*) ;; *) continue ;; esac
+  [ "$st" = parquet ] && [ "${PARQUET:-0}" != 1 ] && { echo "parquet: skipped (PARQUET=${PARQUET:-0} in run.conf)"; continue; }
   case $st in
     sim)      # SIM_NODES > 1 or SIM_MPIPROCS > 1 (pegasus): pkdgrav3 with MPI ranks over the nodes (job_sim.pbs)
               # SIM_GPU=1 (pegasus GPU nodes): one GPU per node (ngpus=1), job_sim.pbs then runs build_gpu
@@ -61,6 +63,7 @@ for st in sim rockstar ctrees vahc vpot fits xcorr ximult vprof verify archive; 
     vahc)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
     vpot)     R="select=1:ncpus=$PP_NCPU:mem=$PP_MEM";     W=$PP_WALL ;;
     fits)     R="select=1:ncpus=$FITS_NCPU:mem=$FITS_MEM"; W=$FITS_WALL ;;
+    parquet)  R="select=1:ncpus=${PQ_NCPU:-8}:mem=${PQ_MEM:-16gb}"; W=${PQ_WALL:-02:00:00} ;;
     xcorr)    R="select=1:ncpus=${XC_NCPU:-16}:mem=${XC_MEM:-16gb}"; W=${XC_WALL:-24:00:00} ;;
     ximult)   R="select=1:ncpus=${XM_NCPU:-32}:mem=${XM_MEM:-32gb}"; W=${XM_WALL:-06:00:00} ;;
     vprof)    R="select=1:ncpus=${VPROF_NCPU:-32}:mem=${VPROF_MEM:-160gb}"; W=${VPROF_WALL:-48:00:00} ;;
