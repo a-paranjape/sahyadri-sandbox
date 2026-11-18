@@ -501,6 +501,12 @@ def atomic_json(path, obj):
     os.replace(tmp, path)
 
 
+def jtime(j):
+    """When a job was submitted (the manager's clock), else started: orders PBS jobs and head-node processes
+    (L<epoch>) alike, which job numbers cannot."""
+    return j.get('submitted') or j.get('start') or 0
+
+
 def jobnum(j):
     """PBS job number; local processes (archive pulls) are 'L<epoch>'."""
     try:
@@ -1210,6 +1216,7 @@ class Manager:
         SC = site_cfg(self.cfg, run.site)
         qtime = self.qsite.get(run.site, ({}, 0.0))[1] if run.remote else self.qtime
         # failures and vanished jobs
+        waiting_gone = False
         for j in D['jobs']:
             if (j['status'] == 'failed' and j['stage'] == 'sim' and j['job'] in D['sim_clean_stop']
                     and not self.acked(run, j)):
@@ -1241,6 +1248,7 @@ class Manager:
                 run.note('%s job %s failed (rc %s); automation stopped' % (j['stage'], j['job'], j.get('rc')))
                 return 0
             if j['status'] == 'gone' and not self.acked(run, j):
+                waiting_gone = True      # not in qstat and no end event (yet): submit nothing until it is resolved
                 g = run.ms.setdefault('gone', {})
                 first_seen = g.setdefault(j['job'], now())
                 run.save()
@@ -1251,6 +1259,8 @@ class Manager:
                     run.note('%s job %s vanished from PBS without an end event; automation stopped' % (j['stage'], j['job']))
                     return 0
                 self.recheck_at = min(self.recheck_at or 1e30, first_seen + self.cfg['lost_grace_s'] + 5)
+        if waiting_gone:     # e.g. a remote job ended and its end event is not in the mirror yet
+            return 0
         self.archive_batch(run, D)
         if D['active'] and any(j['stage'] in ('ctrees', 'vahc', 'vpot', 'fits', 'xcorr', 'vprof', 'verify', 'archive')
                                for j in D['active']):
@@ -1310,7 +1320,7 @@ class Manager:
         if lv and lv['status'] == 'done' and v and int(v.get('ok', 0)) == 1 and E.get('ARCHIVE'):
             la = D['last'].get('archive')   # one archive job per passed verify (PBS ids increase; node clocks differ)
             due = not any(j['stage'] in ('archive', 'archb') for j in D['active']) and (
-                (la is None or jobnum(la['job']) < jobnum(lv['job'])) if not run.remote else
+                (la is None or jtime(la) < jtime(lv)) if not run.remote else
                 lv['job'] not in {s.get('after_verify') for s in run.ms['submitted'] if s['stage'] == 'archive'})
             if due:
                 run.archive_msg = self.archive_wait(run)
@@ -1327,7 +1337,7 @@ class Manager:
                                 if j['job'].startswith('L'))
                     if pulls < int(self.cfg.get('max_pulls', 1)):
                         run.submit('archive', [], dict(after_verify=lv['job']))
-            elif la is None or jobnum(la['job']) < jobnum(lv['job']):
+            elif la is None or jtime(la) < jtime(lv):
                 if self.cfg.get('archive_on_head', True):   # one at a time with the pulls (max_pulls)
                     pulls = sum(1 for r in self.runs.values() for j in self.derive(r)['active']
                                 if j['job'].startswith('L'))
@@ -1575,7 +1585,8 @@ class Manager:
                 stages = ','.join(rest[rest.index(st):])
                 run.submit(stages, [], dict(chain=stages, retry=f.get('job')))
             elif st == 'archive':
-                run.submit('archive', [], dict(retry=f.get('job')))
+                lv = self.derive(run)['last'].get('verify')
+                run.submit('archive', [], dict(retry=f.get('job'), after_verify=lv['job'] if lv else None))
             elif st == 'sim':
                 return 'acknowledged; use "restart simulation" to continue from the newest checkpoint'
             return 'resubmitted %s' % st

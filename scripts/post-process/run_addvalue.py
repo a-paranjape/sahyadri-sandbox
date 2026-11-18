@@ -27,6 +27,8 @@ import argparse
 import gc
 import multiprocessing as mp
 import os
+import glob
+import re
 import sys
 import time
 
@@ -113,6 +115,13 @@ def do_snap(snap, args):
     if not os.path.isfile(base + '.trees'):
         if todo == ['pk'] or (args.pk and 'pk' in todo):
             return _pk_only(snap, args, base, t0)
+        # consistent-trees writes no catalogue for the earliest outputs (no halos yet): normal before the first
+        # snapshot with a .trees file (e.g. on a rerun, when the P(k) of those snapshots already exists); an error after
+        first = min((int(m.group(1)) for m in (re.search(r'out_(\d+)\.trees$', f) for f in
+                                                glob.glob(os.path.join(glob.escape(hr.halo_path), 'out_*.trees'))) if m),
+                    default=None)
+        if first is not None and snap < first:
+            return '%d: skipped (before the first halos, snapshot %d; no .trees)' % (snap, first)
         return '%d: no %s.trees' % (snap, base)
     sr = SnapshotReader(sim_stem=args.stem, real=args.real, snap=snap, verbose=False)
     if 'vpot' in todo and not (getattr(getattr(sr, 'pkc', None), 'has_potential', False) or _hdf5_pot(sr)):
