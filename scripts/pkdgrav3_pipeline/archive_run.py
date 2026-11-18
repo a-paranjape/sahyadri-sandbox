@@ -155,9 +155,21 @@ def locked_complete(M, man_path, wanted):
     print('already archived and locked: %s (%d files, every kept data file of the current verify)' % (man_path, len(M['files'])))
 
 
+def same_source(man_path, src_scratch):
+    """Exit if ARCHIVE already holds this run name from another run (another site's SCRATCH): the archive path has no
+    site in it (pegasus and swarm L100N128/default128/r1 both archived to the same directory)."""
+    if not os.path.isfile(man_path):
+        return
+    other = json.load(open(man_path)).get('scratch')
+    if other and os.path.normpath(other) != os.path.normpath(src_scratch):
+        sys.exit('%s belongs to the run computed in %s, not to this one (%s): same stem and realisation on two sites; '
+                 'give one of them another ARCHIVE or realisation number' % (man_path, other, src_scratch))
+
+
 def copy_local(E, pl, P, V, files, dry):
     adir = os.path.join(E['ARCHIVE'], P['rel']['state'])
     man_path = os.path.join(adir, 'MANIFEST.json')
+    same_source(man_path, E['SCRATCH'])
     if os.path.isfile(man_path) and not os.access(adir, os.W_OK):
         M = json.load(open(man_path))
         if M.get('complete'):
@@ -195,6 +207,13 @@ def copy_local(E, pl, P, V, files, dry):
             h = sha_copy(src, dst)
             copied += st.st_size
             row = dict(path=rel, cat=cat, snap=snap, size=st.st_size, mtime=st.st_mtime, sha256=h)
+        st2 = os.stat(src)
+        if (st2.st_size, st2.st_mtime) != (st.st_size, st.st_mtime):
+            # written while it was copied (L100N64 r9: run.conf appended to during its archive; the manifest got the
+            # new content's checksum with the old size): not recorded; the archive is run again
+            json.dump(done, open(partial, 'w'))
+            sys.exit('%s changed while it was archived (size %d -> %d); run the archive again'
+                     % (src, st.st_size, st2.st_size))
         rows.append(row)
         done[rel] = row
         if len(done) % 50 == 0:
@@ -317,6 +336,7 @@ def pull(E, dry):
         sys.exit('KEPT_FILES.json (verify %s) is not from the newest verify (%s)' % (K.get('verify_time'), V.get('time')))
     adir = os.path.join(E['ARCHIVE'], P['rel']['state'])
     man_path = os.path.join(adir, 'MANIFEST.json')
+    same_source(man_path, rscr)
     if os.path.isfile(man_path) and not os.access(adir, os.W_OK):
         M = json.load(open(man_path))
         if M.get('complete'):

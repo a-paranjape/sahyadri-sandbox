@@ -1701,6 +1701,13 @@ class Manager:
         same = [r for r in self.runs.values() if r.name == new.name and r.conf != conf]
         if same:           # run names are how the page, the CLI and the plan file address runs
             raise ValueError('a run named %s is already registered (%s); not adding %s' % (new.name, same[0].conf, conf))
+        # the archive path is <ARCHIVE>/{sims,halos,state}/<stem>/r<real>, without the site: one per stem and realisation
+        clash = [r for r in self.runs.values() if r.conf != conf and r.E.get('ARCHIVE') and
+                 (r.E.get('ARCHIVE'), r.E['STEM'], r.E['REAL']) == (new.E.get('ARCHIVE'), new.E['STEM'], new.E['REAL'])]
+        if clash:
+            raise ValueError('%s would archive to the same place as %s (%s/.../%s/r%s); not adding it: use another '
+                             'realisation number or ARCHIVE' % (new.name, clash[0].name, new.E['ARCHIVE'],
+                                                                 new.E['STEM'], new.E['REAL']))
         if not any(r['conf'] == conf for r in self.cfg['runs']):
             self.cfg['runs'].append(dict(conf=conf, paused=paused, added=iso()))
             save_cfg(self.cfg)
