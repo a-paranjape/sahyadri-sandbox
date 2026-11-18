@@ -84,7 +84,10 @@ def delete_run(E, plan_only):
         guard(E, p, E['SCRATCH'])
     for p in shared:
         guard(E, p, E['SCRATCH'])
-    out = dict(own=[[p, du(p)] for p in own], shared=[[p, du(p)] for p in shared])
+    sizes = {p: du(p) for p in own}
+    inner = lambda d: sum(b for p, b in sizes.items() if p.startswith(d.rstrip('/') + '/'))   # noqa: E731
+    # a shared directory's size without the run's own directories inside it (counted once, above)
+    out = dict(own=[[p, sizes[p]] for p in own], shared=[[p, du(p) - inner(p)] for p in shared])
     if plan_only:
         return out
     for p in own + shared:
