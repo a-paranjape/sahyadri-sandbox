@@ -1581,6 +1581,9 @@ class Manager:
                     raise ValueError('not submitted: ' + msg)
             extra = ['--restart', 'latest'] if a.get('restart') else []
             ids = run.submit('sim', extra, dict(restart=bool(a.get('restart'))))
+            if run.ms.get('scheduled'):     # submitted by hand: the queue entry is served (the page showed it waiting)
+                run.ms['scheduled'] = None
+                run.note('removed from the simulation queue: simulation submitted by hand')
             return 'submitted %s' % ids
         if act == 'retry':
             f = run.ms.get('failed')
