@@ -4,7 +4,8 @@
   manager.py serve                 the manager (in `screen`; start_manager.sh); page on ~/.sahyadri_mgr/gui.sock
   manager.py add <run.conf> [--paused]   register a run (the running manager picks it up at once)
   manager.py add <site>:<run.conf>       register a run computed on another site (pegasus): conf path there
-  manager.py remove <stem/rN>      forget a run (nothing is deleted)
+  manager.py remove <stem/rN>      forget a run (nothing is deleted); its plan line is then not set up again
+  manager.py unretire <name>       set up and schedule a removed/deleted run's plan line again
   manager.py delete <stem/rN> [--yes]   show (and with --yes do) the complete clean-up of a run: removed from the manager,
                                    its scratch data deleted (sim, halo, state, trash; mirror for a remote run); the
                                    archive is never touched, only shown
@@ -136,6 +137,22 @@ def scratch_estimate(E, n_out):
     snaps = 10.5 * n3 * n_out
     chk = 48.0 * n3 * int(E.get('SIM_KEEPCHK', '2') or 2)
     return int(1.10 * (snaps * 1.15 + chk))
+def archive_estimate(E, plan):
+    """Bytes a run's archive will hold (retention plan): full snapshots 10.5 B/particle each, the other outputs at the
+    subsample fractions of that, halo catalogues + trees as FITS 106 B/particle and as Parquet 88 B/particle more,
+    48 B/particle with the checkpoint. Calibrated on today's 512^3 archives (L200/L500/L1000: estimate 55.5 / 54 / 52
+    GB, archived 53.0 / 54.1 / 48.9 GB; halo products from L200, the largest)."""
+    if not plan:
+        return None
+    n3 = float(E.get('NPART', 0)) ** 3
+    nf, no = len(plan['full']), len(plan['outputs'])
+    b = 10.5 * n3 * (nf + (no - nf) * sum(plan['subsamples']) / 100.0)
+    b += 106.0 * n3 + (88.0 * n3 if plan.get('parquet') else 0)
+    if plan.get('checkpoint'):
+        b += 48.0 * n3
+    return int(b)
+
+
 STAGES = ['sim', 'rockstar', 'ctrees', 'vahc', 'fits', 'parquet', 'verify', 'archive']
 # actions that read the archive on /storage (NFS, can take minutes when it is busy): run in a worker thread, the
 # run marked busy (no automation for it meanwhile), so events of the other runs are still handled
@@ -1030,7 +1047,12 @@ class Manager:
             run = next((r for r in self.runs.values() if r.name == P['name']), None)
             v = dict(line=P['line'], lineno=P['lineno'], name=P['name'], site=P['site'], queue=P['queue'], priority=P['priority'],
                      hold=bool(P['opts'].get('hold')))
-            if run is None and key in self.plan_errors:
+            retired = (self.cfg.get('plan_retired') or {}).get(P['name'])
+            if run is None and retired:
+                # removed or deleted from the manager: done with; not set up and scheduled again
+                v.update(state='retired', msg='%s %s; not set up again (manager.py unretire %s to run it again)'
+                         % (retired.get('why', 'removed'), retired.get('t', ''), P['name']))
+            elif run is None and key in self.plan_errors:
                 v.update(state='error', msg=self.plan_errors[key])
             elif run is None:
                 if P['site'] != LOCAL and P['site'] not in self.cfg['sites']:
@@ -1493,6 +1515,11 @@ class Manager:
         name, act = a.get('run'), a.get('action')
         if act == 'add_run':
             return self.add_run(a['conf'], a.get('paused', True))
+        if act == 'unretire':
+            if not (self.cfg.get('plan_retired') or {}).pop(a.get('name'), None):
+                raise ValueError('%s is not retired' % a.get('name'))
+            save_cfg(self.cfg)
+            return 'unretired %s: its plan line is set up and scheduled again at the next plan check' % a['name']
         if act == 'refresh':
             self.next_hb = 0
             return 'refreshing'
@@ -1537,6 +1564,7 @@ class Manager:
             return self.delete_run(run)
         if act == 'remove_run':
             self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
+            self.retire(run.name, 'removed from the manager')
             save_cfg(self.cfg)
             self.load_runs()
             return 'removed %s from the manager (no files touched)' % run.name
@@ -1832,6 +1860,10 @@ class Manager:
         run.note('moved to trash %s: %s' % (tdir, ', '.join(m[0] for m in moved)))
         return 'moved to %s (undo possible until purged)' % tdir
 
+    def retire(self, name, why):
+        """Remember a run taken out of the manager (removed or deleted): its plan line, if any, is not set up again."""
+        self.cfg.setdefault('plan_retired', {})[name] = dict(t=iso(), why=why)
+
     # ------------------------------------------------------------------ delete a run completely (not its archive)
     def delete_plan(self, run):
         """What `delete_run` removes: on the run's site, its sim, halo and state directories and trash directories, and
@@ -1910,6 +1942,7 @@ class Manager:
         if os.path.isfile(saved):
             os.unlink(saved)
         self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
+        self.retire(run.name, 'deleted (scratch data)')
         save_cfg(self.cfg)
         self.load_runs()
         log('deleted %s:\n%s' % (run.name, text))
@@ -1965,11 +1998,26 @@ class Manager:
         return 'purged %s' % tdir
 
     # ------------------------------------------------------------------ state for the page
+    def archive_pending(self, run, D):
+        """(estimate, bytes still to come) of the run's archive: the estimate minus the particle batches archived
+        already (archive_partial.json); nothing once archived, in the trash or purged."""
+        est = archive_estimate(run.E, run.plan) if run.E.get('ARCHIVE') else None
+        if est is None or (D['archive'] and int(D['archive'].get('ok', 0))) or run.ms.get('trash') or run.ms.get('purged'):
+            return est, 0
+        done = 0
+        f = os.path.join(run.P['state'], 'archive_partial.json')
+        try:
+            done = sum(int(r.get('size', 0)) for r in json.load(open(f)).values())
+        except (OSError, ValueError, AttributeError):
+            pass
+        return est, max(0, est - done)
+
     def build_snapshot(self, derived):
         runs = []
         for run in self.runs.values():
             D = derived.get(run.conf) or self.derive(run)
             pl = run.plan
+            a_est, a_pend = self.archive_pending(run, D)
             runs.append(dict(
                 name=run.name, conf=run.conf, site=run.site, remote_conf=run.E.get('REMOTE_CONF'), phase=run.phase(D), paused=run.ms.get('paused'), failed=run.ms.get('failed'), busy=run.busy,
                 err=run.err, n_out=D['n_out'], ready=D['ready'], rs_done=D['rs_done'], archived_upto=D['archb'], sim_done=D['sim_done'],
@@ -1984,6 +2032,7 @@ class Manager:
                 outputs=[[o[0], o[1], o[3]] for o in run.outs], scratch_bytes=run.scratch_bytes,
                 scratch_estimate=scratch_estimate(run.E, len(run.outs)), outstanding=self.outstanding(run, D),
                 scratch=run.E.get('REMOTE_SCRATCH') or run.E.get('SCRATCH'), archive_root=run.E.get('ARCHIVE'), npart=run.E.get('NPART'),
+                archive_estimate=a_est, archive_pending=a_pend,
                 rs_batch=run.E.get('RS_BATCH', '0'), rs_batch_min=run.E.get('RS_BATCH_MIN', '10'),
                 events=[dict(t=e['t'], stage=e['stage'], job=e['job'], ev=e['ev'],
                              info={k: v for k, v in e.items() if k not in ('t', 'time', 'run', 'stage', 'job', 'host', 'ev', 'conf')})
@@ -2279,6 +2328,8 @@ def main():
             c['runs'].append(dict(conf=conf, paused='--paused' in sys.argv, added=iso()))
             save_cfg(c)
         print('registered %s%s' % (conf, ' (paused)' if '--paused' in sys.argv else ''))
+    elif cmd == 'unretire':
+        sys.exit(call(dict(action='unretire', name=sys.argv[2])))
     elif cmd == 'delete':
         # preview; with --yes: delete (the run must be named exactly)
         if '--yes' in sys.argv:
@@ -2296,6 +2347,8 @@ def main():
                 nm = r['conf']
             if sys.argv[2] not in (nm, r['conf']):
                 keep.append(r)
+            else:
+                c.setdefault('plan_retired', {})[nm] = dict(t=iso(), why='removed from the manager')
         c['runs'] = keep
         save_cfg(c)
         print('%d runs registered' % len(keep))

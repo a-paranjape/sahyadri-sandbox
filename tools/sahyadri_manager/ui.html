@@ -259,28 +259,35 @@ function diskTable(){
     const runs = (S.runs||[]).filter(r=>(r.site||S.local_site)===site && (d.paths||[p]).includes(r.scratch)
                                        && !['purged','in trash'].includes(r.phase));
     const live = runs.filter(r=>r.outstanding>0);
-    const toCome = live.reduce((a,r)=>a+r.outstanding,0);
+    // archives still to come into this file system, from runs on every site (estimate minus particle batches done)
+    const arch = (S.runs||[]).filter(r=>r.archive_pending>0 && (d.paths||[p]).includes(r.archive_root));
+    const archCome = arch.reduce((a,r)=>a+r.archive_pending,0);
+    const toCome = live.reduce((a,r)=>a+r.outstanding,0) + archCome;
     const lim = ((S.sites||{})[site]||{}).limits||{};
     const reserve = 1e9*(+(lim.scratch_reserve_gb ?? S.reserve_gb ?? 0));
-    return {p, d, site, storage, runs, live, toCome, reserve, after: d.free - toCome};
+    return {p, d, site, storage, runs, live, arch, archCome, toCome, reserve, after: d.free - toCome};
   }).sort((a,b)=>(a.storage-b.storage) || (a.site===S.local_site?-1:b.site===S.local_site?1:a.site.localeCompare(b.site)));
   const pct = x=>(100*x).toFixed(0)+'%';
   const rows = ents.map(e=>{
     const d=e.d, used=d.used/d.total, fill=(d.used+e.toCome)/d.total;
     const label = e.storage ? `<b>${h(e.site)} storage</b> <span class="muted">(archive)</span>` : `<b>${h(e.site)} scratch</b>`;
-    const tip = (d.paths||[e.p]).join('\n') + (e.live.length ? '\n\nstill to write:\n' + e.live.map(r=>`${r.name}: ${hum(r.outstanding)} more (${hum(r.scratch_bytes)} now, up to ${hum(r.scratch_estimate)})`).join('\n') : '');
+    const tip = (d.paths||[e.p]).join('\n') + (e.live.length ? '\n\nsimulations still to write:\n' + e.live.map(r=>`${r.name}: ${hum(r.outstanding)} more (${hum(r.scratch_bytes)} now, up to ${hum(r.scratch_estimate)})`).join('\n') : '')
+      + (e.arch.length ? '\n\narchives still to come:\n' + e.arch.map(r=>`${r.name}: ${hum(r.archive_pending)} (archive ~${hum(r.archive_estimate)})`).join('\n') : '');
+    const parts = [];
+    if(e.live.length) parts.push(`${hum(e.toCome-e.archCome)} <span class="muted">(${e.live.length} sim${e.live.length>1?'s':''})</span>`);
+    if(e.arch.length) parts.push(`${hum(e.archCome)} <span class="muted">(${e.arch.length} archive${e.arch.length>1?'s':''})</span>`);
     const short = e.after < e.reserve;
     return `<tr title="${h(tip)}"><td>${label}</td>
       <td class="num">${hum(d.total)}</td><td class="num">${hum(d.used)} <span class="muted">(${pct(used)})</span></td>
       <td class="num"><b>${hum(d.free)}</b></td>
-      <td class="num">${e.live.length?`${hum(e.toCome)} <span class="muted">(${e.live.length} sim${e.live.length>1?'s':''})</span>`:'<span class="muted">—</span>'}</td>
+      <td class="num">${parts.length?parts.join(' + '):'<span class="muted">—</span>'}</td>
       <td class="num" style="${short?'color:var(--bad);font-weight:600':''}">${hum(e.after)}${short?' ⚠':''}</td>
       <td class="num muted">${e.storage?'—':hum(e.reserve)}</td>
       <td><div class="bar" style="width:160px" title="used ${pct(used)}; with the running simulations ${pct(fill)}"><div style="width:${pct(Math.min(1,used))};float:left;background:${used>0.9?'var(--bad)':'var(--run)'}"></div><div style="width:${pct(Math.max(0,Math.min(1,fill)-used))};float:left;background:var(--wait,#e0a800);opacity:.7"></div></div></td></tr>`;
   }).join('');
-  return `<div class="row"><b>Disk space</b><span class="muted small">"still to write": what the running simulations add to scratch until they finish (their estimate minus what they use now); hover a row for the paths and the runs</span></div>
+  return `<div class="row"><b>Disk space</b><span class="muted small">"still to write": what the running simulations add until they finish (their estimate minus what they use now) and, on storage, the archives of the runs not archived yet, from every site (estimate from the retention plan minus particle batches already archived); hover a row for the paths and the runs</span></div>
     <table style="margin-top:6px"><tr><th>file system</th><th class="num">size</th><th class="num">used</th><th class="num">free now</th>
-    <th class="num">running sims still to write</th><th class="num">free after they finish</th><th class="num">reserve</th><th></th></tr>${rows}</table>`;
+    <th class="num">still to write</th><th class="num">free afterwards</th><th class="num">reserve</th><th></th></tr>${rows}</table>`;
 }
 function render(){
   if(!S) return;
@@ -324,7 +331,7 @@ function setTab(t){ TAB=t; history.replaceState(null,'','#'+t); render(); }
 function renderTabs(){
   const groups={active:[],upcoming:[],finished:[]};
   (S.runs||[]).forEach((r,i)=>groups[cat(r)].push([r,i]));
-  const planPending=(S.plan||[]).filter(p=>p.state!=='registered').length;
+  const planPending=(S.plan||[]).filter(p=>!['registered','retired'].includes(p.state)).length;
   const n={summary:'', active:groups.active.length, upcoming:groups.upcoming.length+planPending, finished:groups.finished.length};
   document.getElementById('tabs').innerHTML = TABS.map(([k,l])=>`<button class="${k===TAB?'on':''}" onclick="setTab('${k}')">${l}${n[k]!==''?`<span class="n">${n[k]}</span>`:''}</button>`).join('');
   document.querySelectorAll('section[data-tab]').forEach(sct=>sct.classList.toggle('on', sct.dataset.tab===TAB));
@@ -354,9 +361,9 @@ function renderTabs(){
         `<td class="num">${x.sims_running}</td><td class="num">${x.sims_waiting}</td><td class="num">${x.scheduled||''}</td><td class="num">${x.runs}</td>`}
         <td class="small">${x.max_running!=null?'running ≤ '+x.max_running:''}${x.max_waiting!=null?' waiting ≤ '+x.max_waiting:''}${x.note?' <span class="muted">'+h(x.note)+'</span>':''}</td>
         <td>${['open','drain','closed'].filter(st=>st!==x.state).map(st=>`<button onclick="setQueue('${h(x.site)}','${h(x.queue)}','${st}')">${st}</button>`).join('')}</td></tr>`).join('')}</table></div>
-    <div style="margin-top:12px"><b>Plan file</b> <span class="muted small">${h(S.plan_file||'—')}</span>: ${pl.length} planned runs, ${pl.filter(p=>p.state==='registered').length} set up${plErr?`, <b style="color:var(--bad)">${plErr} with errors</b> (Upcoming)`:''}</div>`;
+    <div style="margin-top:12px"><b>Plan file</b> <span class="muted small">${h(S.plan_file||'—')}</span>: ${pl.length} planned runs, ${pl.filter(p=>p.state==='registered').length} set up${pl.some(p=>p.state==='retired')?', '+pl.filter(p=>p.state==='retired').length+' retired (removed or deleted; not set up again)':''}${plErr?`, <b style="color:var(--bad)">${plErr} with errors</b> (Upcoming)`:''}</div>`;
   // plan card (upcoming)
-  const prow=pl.filter(p=>p.state!=='registered').map(p=>`<tr><td>${p.lineno}</td><td>${h(p.name||p.line)}</td><td>${h(p.queue||'')}</td><td>${h(p.priority??'')}</td><td>${p.state==='error'?'<b style="color:var(--bad)">error</b>':h(p.state)}${p.hold?' · hold':''}</td><td class="small">${h(p.msg||'')}</td></tr>`).join('');
+  const prow=pl.filter(p=>!['registered','retired'].includes(p.state)).map(p=>`<tr><td>${p.lineno}</td><td>${h(p.name||p.line)}</td><td>${h(p.queue||'')}</td><td>${h(p.priority??'')}</td><td>${p.state==='error'?'<b style="color:var(--bad)">error</b>':h(p.state)}${p.hold?' · hold':''}</td><td class="small">${h(p.msg||'')}</td></tr>`).join('');
   document.getElementById('plancard').innerHTML = `<div class="row"><b>Planned runs not yet set up</b><span class="muted small">${h(S.plan_file||'')} (read every few minutes)</span></div>
     ${prow?`<table style="margin-top:6px"><tr><th>line</th><th>run</th><th>queue</th><th>priority</th><th>state</th><th></th></tr>${prow}</table>`:'<div class="muted small" style="margin-top:6px">every planned run is set up</div>'}`;
 }
