@@ -43,6 +43,21 @@ sys.path.insert(0, HERE)
 import retention  # noqa: E402
 
 CHUNK = 16 << 20
+# files and directories in ARCHIVE are group-readable from the moment they are copied (the source modes are kept
+# otherwise; pkdgrav3 and Rockstar write 0600), not only once the finished archive is locked read-only
+GROUP_READ = 0o040
+RSYNC_CHMOD = '--chmod=Dg+rx,Fg+r'
+
+
+def makedirs_g(d):
+    """os.makedirs, with group read and search on every directory it creates (whatever the umask)."""
+    new = []
+    while d and not os.path.isdir(d):
+        new.append(d)
+        d = os.path.dirname(d)
+    for x in reversed(new):
+        os.makedirs(x, exist_ok=True)
+        os.chmod(x, (os.stat(x).st_mode & 0o7777) | 0o050)
 
 
 def sha_copy(src, dst):
@@ -58,6 +73,7 @@ def sha_copy(src, dst):
         fo.flush()
         os.fsync(fo.fileno())
     shutil.copystat(src, tmp)
+    os.chmod(tmp, (os.stat(tmp).st_mode & 0o7777) | GROUP_READ)   # group-readable while the archive is filled
     os.replace(tmp, dst)
     return h.hexdigest()
 
@@ -166,7 +182,7 @@ def copy_local(E, pl, P, V, files, dry):
                 and os.path.getsize(dst) == st.st_size and prev.get('sha256_dst') == prev['sha256']):
             rows.append(prev)
             continue
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        makedirs_g(os.path.dirname(dst))
         if os.path.exists(dst) and not os.access(dst, os.W_OK):
             # already archived by another run (shared cosmology files) or an earlier archive: must be identical
             h = sha_file(src)
@@ -223,7 +239,7 @@ def finish(E, P, V, rows, adir, man_path, partial, source=None):
              sandbox=git_head(), files=rows)
     if source:
         M.update(source)
-    os.makedirs(adir, exist_ok=True)
+    makedirs_g(adir)
     with open(os.path.join(adir, 'SHA256SUMS.part'), 'w') as f:
         for r in rows:
             f.write('%s  %s\n' % (r['sha256'], r['path']))
@@ -332,7 +348,7 @@ def pull(E, dry):
         return r['path']
 
     def rsync(args):
-        cmd = ['rsync', '-tpW', '--partial', '-e', 'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10'] + args
+        cmd = ['rsync', '-tpW', RSYNC_CHMOD, '--partial', '-e', 'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10'] + args
         print(' '.join(cmd), flush=True)
         for attempt in range(1, 6):
             rc = subprocess.run(cmd).returncode
@@ -344,7 +360,7 @@ def pull(E, dry):
     t0 = time.time()
     same = [r for r in todo if src_of(r) == r['path']]
     moved = [r for r in todo if src_of(r) != r['path']]
-    os.makedirs(E['ARCHIVE'], exist_ok=True)
+    makedirs_g(E['ARCHIVE'])
     if same:
         lst = os.path.join(P['state'], 'pull_files.txt')
         with open(lst, 'w') as f:
@@ -353,7 +369,7 @@ def pull(E, dry):
         rsync(['--files-from=' + lst, '%s:%s/' % (host, rscr), E['ARCHIVE'].rstrip('/') + '/'])
     for r in moved:              # stored under another name in the archive: one file at a time
         dst = os.path.join(E['ARCHIVE'], r['path'])
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        makedirs_g(os.path.dirname(dst))
         rsync(['%s:%s/%s' % (host, rscr, src_of(r)), dst])
     nb = sum(r['size'] for r in todo)
     t1 = time.time()
@@ -452,7 +468,7 @@ def particles_batch(E, upto, dry):
         lst = os.path.join(P['state'], 'pull_files.batch.txt')
         with open(lst, 'w') as fh:
             fh.write(''.join(f['path'] + '\n' for f in todo))
-        cmd = ['rsync', '-tpW', '--partial', '-e', 'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10',
+        cmd = ['rsync', '-tpW', RSYNC_CHMOD, '--partial', '-e', 'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10',
                '--files-from=' + lst, '%s:%s/' % (host, rscr), E['ARCHIVE'].rstrip('/') + '/']
         for attempt in range(1, 6):
             rc = subprocess.run(cmd).returncode
@@ -465,7 +481,7 @@ def particles_batch(E, upto, dry):
     else:
         for f in todo:
             dst = os.path.join(E['ARCHIVE'], f['path'])
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            makedirs_g(os.path.dirname(dst))
             f['sha256'] = sha_copy(f['src'], dst)
     t2 = time.time()
     print('%s %s in %.0f s (%.0f MB/s)' % ('pulled' if remote else 'copied', retention.human(nb), t2 - t1,
