@@ -1110,13 +1110,15 @@ class Manager:
                 if k == 'ARCHIVE' and p and PROBE.down('archive ' + p):
                     continue
                 if p and p not in d and os.path.isdir(p):
-                    key = (os.stat(p).st_dev, k)
+                    key = os.stat(p).st_dev        # one entry per file system (pawna /storage: archive and a scratch)
                     if key in seen:
                         if p not in seen[key]['paths']:
                             seen[key]['paths'].append(p)
+                        if k not in seen[key]['kinds']:
+                            seen[key]['kinds'].append(k)
                         continue
                     u = shutil.disk_usage(p)
-                    d[p] = seen[key] = dict(total=u.total, used=u.used, free=u.free, kind=k, paths=[p])
+                    d[p] = seen[key] = dict(total=u.total, used=u.used, free=u.free, kind=k, kinds=[k], paths=[p])
             if run.remote:
                 continue
             tot = 0

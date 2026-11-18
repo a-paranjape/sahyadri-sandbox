@@ -65,10 +65,10 @@ section[data-tab] { display: none; } section[data-tab].on { display: block; }
   <h1>Sahyadri runs</h1>
   <span id="hdr" class="muted small"></span>
   <span class="sp"></span>
-  <span id="disk" class="row small"></span>
   <button onclick="act({action:'refresh'})" title="qstat and disk now">Check now</button>
 </header>
 <main>
+  <div class="card" id="disk"></div>
   <nav class="tabs" id="tabs"></nav>
   <section data-tab="summary">
     <div class="card" id="summarycard"></div>
@@ -250,12 +250,43 @@ function purge(name){
   const t=prompt('Permanently delete the trash of '+name+'?\nThe archive copy stays. Type the run name to confirm:');
   if(t===name) act({run:name, action:'approve_purge'}); else if(t!==null) toast('name did not match; nothing deleted', false);
 }
+function diskTable(){
+  // one row per file system: scratch of each machine, then pawna storage (the archive) on its own line
+  const ents = Object.entries(S.disk||{}).map(([p,d])=>{
+    const site = d.site || S.local_site;
+    const kinds = d.kinds || [d.kind];
+    const storage = !d.site && kinds.includes('ARCHIVE');
+    const runs = (S.runs||[]).filter(r=>(r.site||S.local_site)===site && (d.paths||[p]).includes(r.scratch)
+                                       && !['purged','in trash'].includes(r.phase));
+    const live = runs.filter(r=>r.outstanding>0);
+    const toCome = live.reduce((a,r)=>a+r.outstanding,0);
+    const lim = ((S.sites||{})[site]||{}).limits||{};
+    const reserve = 1e9*(+(lim.scratch_reserve_gb ?? S.reserve_gb ?? 0));
+    return {p, d, site, storage, runs, live, toCome, reserve, after: d.free - toCome};
+  }).sort((a,b)=>(a.storage-b.storage) || (a.site===S.local_site?-1:b.site===S.local_site?1:a.site.localeCompare(b.site)));
+  const pct = x=>(100*x).toFixed(0)+'%';
+  const rows = ents.map(e=>{
+    const d=e.d, used=d.used/d.total, fill=(d.used+e.toCome)/d.total;
+    const label = e.storage ? `<b>${h(e.site)} storage</b> <span class="muted">(archive)</span>` : `<b>${h(e.site)} scratch</b>`;
+    const tip = (d.paths||[e.p]).join('\n') + (e.live.length ? '\n\nstill to write:\n' + e.live.map(r=>`${r.name}: ${hum(r.outstanding)} more (${hum(r.scratch_bytes)} now, up to ${hum(r.scratch_estimate)})`).join('\n') : '');
+    const short = e.after < e.reserve;
+    return `<tr title="${h(tip)}"><td>${label}</td>
+      <td class="num">${hum(d.total)}</td><td class="num">${hum(d.used)} <span class="muted">(${pct(used)})</span></td>
+      <td class="num"><b>${hum(d.free)}</b></td>
+      <td class="num">${e.live.length?`${hum(e.toCome)} <span class="muted">(${e.live.length} sim${e.live.length>1?'s':''})</span>`:'<span class="muted">—</span>'}</td>
+      <td class="num" style="${short?'color:var(--bad);font-weight:600':''}">${hum(e.after)}${short?' ⚠':''}</td>
+      <td class="num muted">${e.storage?'—':hum(e.reserve)}</td>
+      <td><div class="bar" style="width:160px" title="used ${pct(used)}; with the running simulations ${pct(fill)}"><div style="width:${pct(Math.min(1,used))};float:left;background:${used>0.9?'var(--bad)':'var(--run)'}"></div><div style="width:${pct(Math.max(0,Math.min(1,fill)-used))};float:left;background:var(--wait,#e0a800);opacity:.7"></div></div></td></tr>`;
+  }).join('');
+  return `<div class="row"><b>Disk space</b><span class="muted small">"still to write": what the running simulations add to scratch until they finish (their estimate minus what they use now); hover a row for the paths and the runs</span></div>
+    <table style="margin-top:6px"><tr><th>file system</th><th class="num">size</th><th class="num">used</th><th class="num">free now</th>
+    <th class="num">running sims still to write</th><th class="num">free after they finish</th><th class="num">reserve</th><th></th></tr>${rows}</table>`;
+}
 function render(){
   if(!S) return;
   document.querySelectorAll('details[data-k]').forEach(d=>{ if(d.open) openDetails.add(d.dataset.k); else openDetails.delete(d.dataset.k); });
   document.getElementById('hdr').innerHTML = `${h(S.host)} · qstat ${S.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(S.qtime)} · next check ${ago(S.next_heartbeat)} · page ${new Date().toLocaleTimeString()}`;
-  const toCome = (S.runs||[]).reduce((a,r)=>a+(r.outstanding||0),0);
-  document.getElementById('disk').innerHTML = (toCome?`<span class="muted">running simulations will add <b>${hum(toCome)}</b> · reserve ${S.reserve_gb} GB</span>`:'') + Object.entries(S.disk||{}).map(([p,d])=>`<span title="${h((d.paths||[p]).join('\n'))}">${h(d.site?d.site+' scratch':(d.kind==='SCRATCH'?'scratch':'archive'))} <b>${hum(d.free)}</b> free of ${hum(d.total)}</span><div class="bar" style="width:90px;min-width:90px"><div style="width:${(100*d.used/d.total).toFixed(0)}%;background:${d.used/d.total>0.9?'var(--bad)':'var(--run)'}"></div></div>`).join('');
+  document.getElementById('disk').innerHTML = diskTable();
   const L=S.limits||{};
   const q=(S.queue||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${h(x.site||'')}</td><td>${h(x.queue||'')}</td><td>${h(x.run)}</td><td>${x.restart?'restart':'new'}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`).join('');
   const lim=(k,label,w,src,pre)=>`<label class="small">${label} <input name="${(pre||'')+k}" value="${h((src||L)[k])}" style="width:${w||60}px" type="text"></label>`;
