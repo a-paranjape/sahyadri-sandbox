@@ -118,7 +118,7 @@ def do_snap(snap, args):
         # consistent-trees writes no catalogue for the earliest outputs (no halos yet): normal before the first
         # snapshot with a .trees file (e.g. on a rerun, when the P(k) of those snapshots already exists); an error after
         first = min((int(m.group(1)) for m in (re.search(r'out_(\d+)\.trees$', f) for f in
-                                                glob.glob(os.path.join(glob.escape(hr.halo_path), 'out_*.trees'))) if m),
+                                                glob.glob(os.path.join(glob.escape(os.path.dirname(base)), 'out_*.trees'))) if m),
                     default=None)
         if first is not None and snap < first:
             return '%d: skipped (before the first halos, snapshot %d; no .trees)' % (snap, first)
