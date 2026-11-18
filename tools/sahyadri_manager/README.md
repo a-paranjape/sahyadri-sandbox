@@ -122,7 +122,7 @@ The kept data are set in `run.conf` (written by `setup_production.py`). `scripts
 run.conf` prints the resolved plan:
 
 ```bash
-KEEP_FULL_Z="0 0.5 1 2 3 5 7"     # full snapshots: the planned output nearest each redshift
+KEEP_FULL_Z="0 0.05 0.1 0.15 0.2 0.3 0.5 0.7137 0.8 1.0 1.9821 2.9563 4.9089"     # full snapshots: the planned output nearest each redshift
 KEEP_FULL_SNAPS=""                # ... or explicit Rockstar snapshot numbers
 KEEP_SUBSAMPLE_PCT=1              # % of the particles of every other snapshot: 1, 4, 9, 18, ... (leading SUBSAMPLES)
 KEEP_HALO_TABLES="basic,extended,tens,vahc"

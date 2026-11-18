@@ -34,7 +34,7 @@ Simulation settings:
   --schedule [P]  also register every realisation with the run manager (tools/sahyadri_manager, must be running)
                   and put its simulation in the manager's queue with priority P (default 0; lower runs first); the
                   manager submits them within max_sim_running / max_sim_queued
-usage: setup_production.py [--schedule [P]] [--root DIR] [--archive DIR|''] [--keep-full-z "0 0.5 1 2 3 5 7"] [--keep-pct 1] [--L 200] [--N 1024] [--cosmo default|a,b|var_*|all] [--real 1|1,2|1-5]
+usage: setup_production.py [--schedule [P]] [--root DIR] [--archive DIR|''] [--keep-full-z "0 0.05 ... 4.9089"] [--keep-pct 9] [--L 200] [--N 1024] [--cosmo default|a,b|var_*|all] [--real 1|1,2|1-5]
                            [--codes DIR] [--pkd-io-root DIR] [--step-da 4.6154e-4] [--check-interval 250] [--force]
 Run with the pipeline's Python (numpy, scipy), e.g. /storage/shadab/pipeline_test/codes/venv/bin/python.
 """
@@ -281,6 +281,9 @@ def write_shared(path, text):
     return True
 
 
+KEEP_FULL_Z_PROD = '0 0.05 0.1 0.15 0.2 0.3 0.5 0.7137 0.8 1.0 1.9821 2.9563 4.9089'
+
+
 def write(path, text, force, mode=0o644):
     if os.path.exists(path) and not force:
         sys.exit('%s exists; use --force to overwrite the configuration files' % path)
@@ -343,8 +346,9 @@ def main():
     ap.add_argument('--root', default=None, help='working area (SCRATCH) while the run is computed (site default)')
     ap.add_argument('--archive', default=None,
                     help="long-term copy of the kept data, on pawna ('' = no archive stage; site default)")
-    ap.add_argument('--keep-full-z', default='0 0.5 1 2 3 5 7', help='full snapshots kept: outputs nearest these z')
-    ap.add_argument('--keep-pct', type=float, default=1, help='percent of the particles kept of the other snapshots')
+    # the production retention (2048^3 runs r2-r5, r10; the 512^3 runs): 13 full snapshots, 9 % (1+3+5) of the others
+    ap.add_argument('--keep-full-z', default=KEEP_FULL_Z_PROD, help='full snapshots kept: outputs nearest these z')
+    ap.add_argument('--keep-pct', type=float, default=9, help='percent of the particles kept of the other snapshots')
     ap.add_argument('--L', type=float, default=200.0, help='box size [Mpc/h]')
     ap.add_argument('--N', type=int, default=1024, help='particles per side')
     ap.add_argument('--cosmo', default='default',
