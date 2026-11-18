@@ -5,6 +5,9 @@
   manager.py add <run.conf> [--paused]   register a run (the running manager picks it up at once)
   manager.py add <site>:<run.conf>       register a run computed on another site (pegasus): conf path there
   manager.py remove <stem/rN>      forget a run (nothing is deleted)
+  manager.py delete <stem/rN> [--yes]   show (and with --yes do) the complete clean-up of a run: removed from the manager,
+                                   its scratch data deleted (sim, halo, state, trash; mirror for a remote run); the
+                                   archive is never touched, only shown
   manager.py list                  registered runs
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
   manager.py unschedule <stem/rN>
@@ -65,6 +68,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline'))
 import retention  # noqa: E402
+import scratch_ops  # noqa: E402
 
 HOME = os.environ.get('SAHYADRI_MGR_HOME', os.path.expanduser('~/.sahyadri_mgr'))
 CONFIG = os.path.join(HOME, 'config.json')
@@ -1523,6 +1527,12 @@ class Manager:
             raise ValueError('%s: %s; try again when it answers' % (run.name, run.stalled))
         if run is None:
             raise ValueError('no run %s' % name)
+        if act == 'delete_preview':
+            return self.delete_text(run, self.delete_plan(run))
+        if act == 'delete_run':
+            if a.get('confirm') != run.name:
+                raise ValueError('not deleted: type the run name (%s) to confirm' % run.name)
+            return self.delete_run(run)
         if act == 'remove_run':
             self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
             save_cfg(self.cfg)
@@ -1819,6 +1829,89 @@ class Manager:
         run.ms['trash'] = dict(dir=tdir, moved=moved, t=now(), check=msg)
         run.note('moved to trash %s: %s' % (tdir, ', '.join(m[0] for m in moved)))
         return 'moved to %s (undo possible until purged)' % tdir
+
+    # ------------------------------------------------------------------ delete a run completely (not its archive)
+    def delete_plan(self, run):
+        """What `delete_run` removes: on the run's site, its sim, halo and state directories and trash directories, and
+        the set-up's shared directories when it is their last realisation (scratch_ops.delete_targets); for a run of
+        another site also the mirror here. The archive is only looked at."""
+        D = self.derive(run)
+        if D['active']:
+            raise ValueError('jobs of %s are queued or running (%s): stop them first'
+                             % (run.name, ', '.join(j['job'] for j in D['active'])))
+        E = run.E
+        out = dict(site=run.site or LOCAL, remote=None, local=None, conf=None)
+        if run.remote:
+            base = dict(SCRATCH=E['REMOTE_SCRATCH'], STEM=E['STEM'], REAL=E['REAL'])
+            out['remote'] = self.remote_ops(run, 'delete_plan', json.dumps(base))
+        out['local'] = scratch_ops.delete_run(E, plan_only=True)     # the run's SCRATCH here (mirror of a remote run)
+        if run.remote and os.path.isfile(run.conf):
+            out['conf'] = run.conf                                     # mirror config, written by the manager
+        # the archive: shown, never touched
+        A = []
+        if E.get('ARCHIVE'):
+            P = retention.paths(E)
+            for k in ('sim', 'halo', 'state'):
+                d = P['archive'][k]
+                A.append(dict(kind=k, path=d, exists=os.path.isdir(d)))
+            man = os.path.join(P['archive']['state'], 'MANIFEST.json')
+            if os.path.isfile(man):
+                try:
+                    M = json.load(open(man))
+                    src = M.get('scratch')
+                    mine = os.path.normpath(src or '') == os.path.normpath(E.get('REMOTE_SCRATCH') or E['SCRATCH'])
+                    out['manifest'] = dict(path=man, files=len(M.get('files', [])), bytes=M.get('bytes'),
+                                           complete=bool(M.get('complete')), time=M.get('time'), source=src, mine=mine)
+                except ValueError:
+                    out['manifest'] = dict(path=man, unreadable=True)
+        out['archive'] = A
+        return out
+
+    def delete_text(self, run, pl):
+        hm = retention.human
+        lines = ['Delete %s completely: remove it from the manager and delete from scratch:' % run.name]
+        tot = 0
+        for where, part in (('%s' % pl['site'], pl.get('remote')), ('this host' if pl.get('remote') else pl['site'], pl['local'])):
+            if not part:
+                continue
+            for p, b in part['own']:
+                lines.append('  %s:%s  (%s)' % (where, p, hm(b)))
+                tot += b
+            for p, b in part['shared']:
+                lines.append('  %s:%s  (%s; shared set-up files, no other realisation left)' % (where, p, hm(b)))
+                tot += b
+        if pl.get('conf'):
+            lines.append('  mirror config %s' % pl['conf'])
+        lines.append('  total %s' % hm(tot))
+        lines.append('The archive is NOT touched:')
+        M = pl.get('manifest')
+        if M and not M.get('unreadable'):
+            lines.append('  archived %s: %d files, %s, %s%s' % (
+                M['time'], M['files'], hm(M['bytes'] or 0), 'complete' if M['complete'] else 'INCOMPLETE',
+                '' if M['mine'] else ' -- from ANOTHER run (%s)' % M['source']))
+        else:
+            lines.append('  no archive manifest: the data is NOT archived and will be gone')
+        for a in pl.get('archive', []):
+            lines.append('  %-5s %s%s' % (a['kind'], a['path'], '' if a['exists'] else '  (not there)'))
+        return '\n'.join(lines)
+
+    def delete_run(self, run):
+        pl = self.delete_plan(run)           # checks again: no active job
+        text = self.delete_text(run, pl)
+        if run.remote:
+            base = dict(SCRATCH=run.E['REMOTE_SCRATCH'], STEM=run.E['STEM'], REAL=run.E['REAL'])
+            self.remote_ops(run, 'delete', json.dumps(base), timeout=7200)
+        scratch_ops.delete_run(run.E, plan_only=False)
+        if pl.get('conf') and os.path.isfile(pl['conf']):
+            os.unlink(pl['conf'])
+        saved = os.path.join(HOME, 'confs', run.conf.strip('/').replace('/', '__'))   # the manager's copy of run.conf
+        if os.path.isfile(saved):
+            os.unlink(saved)
+        self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
+        save_cfg(self.cfg)
+        self.load_runs()
+        log('deleted %s:\n%s' % (run.name, text))
+        return 'deleted %s (archive untouched)\n%s' % (run.name, text)
 
     def undo_trash(self, run):
         T = run.ms.get('trash')
@@ -2184,6 +2277,13 @@ def main():
             c['runs'].append(dict(conf=conf, paused='--paused' in sys.argv, added=iso()))
             save_cfg(c)
         print('registered %s%s' % (conf, ' (paused)' if '--paused' in sys.argv else ''))
+    elif cmd == 'delete':
+        # preview; with --yes: delete (the run must be named exactly)
+        if '--yes' in sys.argv:
+            sys.exit(call(dict(action='delete_run', run=sys.argv[2], confirm=sys.argv[2])))
+        rc = call(dict(action='delete_preview', run=sys.argv[2]))
+        print('\nto delete: manager.py delete %s --yes' % sys.argv[2])
+        sys.exit(rc)
     elif cmd == 'remove':
         c = load_cfg()
         keep = []

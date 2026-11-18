@@ -168,6 +168,7 @@ function renderRun(r, idx){
      <button onclick="submitSim('${h(r.name)}')" title="submit now, outside the queue limits">Submit now</button>
      <button onclick="if(confirm('Restart the simulation of ${h(r.name)} from its newest checkpoint?')) act({run:'${h(r.name)}',action:'submit_sim',restart:true})">Restart from checkpoint</button>
      <button onclick="act({run:'${h(r.name)}',action:'reload_conf'})" title="read run.conf again">Reload config</button>
+     <button class="danger" onclick="delRun('${h(r.name)}')" title="remove from the manager and delete its scratch data; the archive is not touched">Delete run…</button>
      ${r.sim_done && !['archived','in trash','purged'].includes(r.phase) ? `<span class="muted small">post-processing:</span>
        <button onclick="postproc('${h(r.name)}','vpot')" title="halo potentials (.vpot), FITS again, verify; only if vahc ran with PP_POT=0">vpot</button>
        <button onclick="postproc('${h(r.name)}','xcorr')" title="halo-halo potential cross-correlation at every output with .vpot, then verify">xcorr</button>
@@ -229,6 +230,20 @@ function trash(name){
   if(!confirm('Move the scratch data of '+name+' to the trash?\n\nThe manager first re-checks that every kept file is in the archive and unchanged. The move can be undone until you purge.')) return;
   act({run:name, action:'approve_trash'});
 }
+async function delRun(name){
+  // preview from the manager (what is deleted where, and the archive, which stays), then the run name to confirm
+  let j;
+  try {
+    const r = await fetch('/api/action', {method:'POST', headers:{'Content-Type':'application/json','X-Sahyadri':'1'},
+                                           body: JSON.stringify({run:name, action:'delete_preview'})});
+    j = await r.json();
+  } catch(e){ toast(String(e), false); return; }
+  if(!j.ok){ toast(j.result, false); return; }
+  const t = prompt(j.result+'\n\nThis cannot be undone. Type the run name to delete it:');
+  if(t===null) return;
+  if(t.trim()!==name){ toast('not deleted: the name did not match', false); return; }
+  act({run:name, action:'delete_run', confirm:name});
+}
 function postproc(name,what){ if(confirm('Submit post-processing "'+what+'" for '+name+'?')) act({run:name, action:'postprocess', what:what}); }
 function setQueue(site,q,st){ if(confirm('Set queue '+site+':'+q+' to '+st+'?')) act({action:'set_queue', site:site, queue:q, state:st}); }
 function purge(name){
@@ -268,9 +283,10 @@ function renderFinished(r, i){
   const btn = r.phase==='verified (no archive)' ? '<span class="muted small">no ARCHIVE in run.conf: nothing to delete</span>' : r.phase==='in trash'
     ? `<button onclick="act({run:'${nm}',action:'undo_trash'})">Undo (move back)</button><button class="danger" onclick="purge('${nm}')">Purge permanently…</button>`
     : `<button onclick="act({run:'${nm}',action:'check_trash'})">Check</button><button class="danger" onclick="trash('${nm}')">Move scratch data to the trash…</button>`;
+  const del = `<button class="danger" onclick="delRun('${nm}')" title="remove from the manager and delete its scratch data; the archive is not touched">Delete run…</button>`;
   return `<div class="card"><div class="row"><b>${nm}</b>${r.site&&r.site!==S.local_site?`<span class="badge b-wait">${h(r.site)}</span>`:''}${phaseBadge(r)}
     <span class="muted small">${h(r.npart)}³ · archive ${A.manifest?h(A.manifest.replace(/\/state\/.*$/,'')):h(r.archive_root||'')} · archived ${A.t?when(A.t):'—'} · scratch ${hum(r.scratch_bytes)}</span>
-    <span class="sp"></span>${btn}</div>
+    <span class="sp"></span>${btn}${del}</div>
     <details data-k="f${i}" ${openDetails.has('f'+i)?'open':''}><summary>details</summary>${renderRun(r, i)}</details></div>`;
 }
 function setTab(t){ TAB=t; history.replaceState(null,'','#'+t); render(); }
