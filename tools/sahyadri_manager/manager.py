@@ -1589,6 +1589,12 @@ class Manager:
             run.ms.setdefault('acked', [])
             if f.get('job'):
                 run.ms['acked'].append(f['job'])
+            # the other failed (or vanished) jobs of the same stage are superseded by this retry too: acknowledging
+            # only the newest left an older one (e.g. a duplicate submission) to stop the run again right away
+            for j in self.derive(run)['jobs']:
+                if (j['stage'] == f.get('stage') and j['status'] in ('failed', 'gone')
+                        and j['job'] not in run.ms['acked']):
+                    run.ms['acked'].append(j['job'])
             run.ms['failed'] = None
             run.note('retry after failure of %s job %s (acknowledged)' % (f.get('stage'), f.get('job')))
             st = f.get('stage')
