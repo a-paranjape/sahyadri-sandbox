@@ -1784,6 +1784,8 @@ class Manager:
         return rp
 
     def to_trash(self, run):
+        if run.ms.get('trash'):     # e.g. a second click: the run directory is gone, the check below cannot run
+            raise ValueError('already in the trash: %s (undo, or approve the purge)' % run.ms['trash']['dir'])
         ok, msg = self.cleanup_check(run)
         if not ok:
             raise ValueError('not moved: ' + msg)
