@@ -123,13 +123,29 @@ def checked_files(E, pl):
     return V, files
 
 
+VOLATILE = ('log', 'events', 'meta')     # written again after an archive (job logs, events, verify.json)
+
+
+def locked_complete(M, man_path, wanted):
+    """A complete, read-only archive counts as this run's archive only if it holds every kept data file of the
+    current verify; otherwise (kept files added since, e.g. the Parquet copy of stage parquet) fail: it is not
+    extended in place, so nothing is trashed or purged on the strength of an archive that lacks files."""
+    have = {r['path'] for r in M['files']}
+    missing = [p for p in wanted if p not in have]
+    if missing:
+        sys.exit('%s: archive complete and read-only, but %d kept files of the current verify are not in it (%s%s); '
+                 'it is not extended in place: make it writable (chmod u+w on its directories) and run the archive '
+                 'again to add them' % (man_path, len(missing), ', '.join(missing[:3]), ', ...' if len(missing) > 3 else ''))
+    print('already archived and locked: %s (%d files, every kept data file of the current verify)' % (man_path, len(M['files'])))
+
+
 def copy_local(E, pl, P, V, files, dry):
     adir = os.path.join(E['ARCHIVE'], P['rel']['state'])
     man_path = os.path.join(adir, 'MANIFEST.json')
     if os.path.isfile(man_path) and not os.access(adir, os.W_OK):
         M = json.load(open(man_path))
         if M.get('complete'):
-            print('already archived and locked: %s (%d files)' % (man_path, len(M['files'])))
+            locked_complete(M, man_path, [rel for cat, _s, _src, rel in files if cat not in VOLATILE])
             return 0
     partial = os.path.join(P['state'], 'archive_partial.json')
     done = json.load(open(partial)) if os.path.isfile(partial) else {}
@@ -288,7 +304,7 @@ def pull(E, dry):
     if os.path.isfile(man_path) and not os.access(adir, os.W_OK):
         M = json.load(open(man_path))
         if M.get('complete'):
-            print('already archived and locked: %s (%d files)' % (man_path, len(M['files'])))
+            locked_complete(M, man_path, [r['path'] for r in K['files'] if r['cat'] not in VOLATILE])
             return 0
     partial = os.path.join(P['state'], 'archive_partial.json')
     done = json.load(open(partial)) if os.path.isfile(partial) else {}
