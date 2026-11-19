@@ -58,3 +58,16 @@ else
   memmon_report() { :; }
 fi
 trap _on_exit EXIT
+# A simulation job without RESTART starts from the ICs. Refuse that when the run already has checkpoints or
+# snapshots: e.g. PBS re-running a first job after a node or power failure (jobs are rerunnable by default) would
+# otherwise write over the run's outputs and rotate away its good checkpoints. Restart from a checkpoint instead
+# (manager: "Restart from checkpoint"; submit_pipeline.sh --restart latest); SIM_FROM_IC=1 to really start again.
+if [ "${STAGE:-}" = sim ] && [ -z "${RESTART:-}" ] && [ "${SIM_FROM_IC:-0}" != 1 ]; then
+  _nchk=$(ls "$SIM_DIR"/checkpoints/*.chk 2>/dev/null | wc -l)
+  _nsnap=$(ls "$PKC_DIR"/snap.*.pkc 2>/dev/null | head -1 | wc -l)
+  if [ "$_nchk" -gt 0 ] || [ "$_nsnap" -gt 0 ]; then
+    stamp "refusing to start the simulation from the ICs: $SIM_DIR has $_nchk checkpoint(s) and snapshots ($_nsnap); restart from a checkpoint (RESTART=latest) or set SIM_FROM_IC=1"
+    event sim_refused reason="checkpoints or snapshots exist; not started from the ICs" nchk="$_nchk"
+    exit 3
+  fi
+fi
