@@ -244,7 +244,7 @@ this box, +40% with 64) plus an 8-byte group index per particle; at z = 0 the pr
 merger tree) add ~0.5 GB. Peak = 1.75-1.9 x the particle array. The job requests `RS_MEM`; `setup_production.py`
 sets it to 1.7 x 32 B x N^3 + 8 GB, rounded up to 16 GB (`rockstar_mem`): 16 GB at 128^3, 16 GB at 512^3, 80 GB at
 1024^3, 480 GB at 2048^3 (measured 422-430 GB on pawna, L200N2048 r3-r5 Rockstar batches of snapshots 0-34, Nov 2026). 3200^3
-would need ~2.3 TB, more than one pawna node.
+would need ~1.8 TB, more than one pawna node.
 
 ### 5.3 ctrees — `job_ctrees.pbs`
 `gen_merger_cfg.pl rockstar.cfg` (writes `outputs/merger_tree.cfg` with Om, Ol, h0 and w0, wa from the
