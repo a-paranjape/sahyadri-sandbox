@@ -242,8 +242,8 @@ the particle array (4.21 GB = 134M x 32 B), the FoF step 6.9-7.4 GB, halo findin
 the particles plus their copies in the writers' overlap shells (`OVERLAP_LENGTH = 3`; +26% with 16 writers in
 this box, +40% with 64) plus an 8-byte group index per particle; at z = 0 the previous output's halos (for the
 merger tree) add ~0.5 GB. Peak = 1.75-1.9 x the particle array. The job requests `RS_MEM`; `setup_production.py`
-sets it to 2.2 x 32 B x N^3 + 8 GB, rounded up to 16 GB (`rockstar_mem`): 16 GB at 128^3, 32 GB at 512^3, 96 GB at
-1024^3, 624 GB at 2048^3 (estimate: one node, 755 GB, should suffice; to be checked with the 1024^3 run). 3200^3
+sets it to 1.7 x 32 B x N^3 + 8 GB, rounded up to 16 GB (`rockstar_mem`): 16 GB at 128^3, 16 GB at 512^3, 80 GB at
+1024^3, 480 GB at 2048^3 (measured 422-430 GB on pawna, L200N2048 r3-r5 Rockstar batches of snapshots 0-34, Nov 2026). 3200^3
 would need ~2.3 TB, more than one pawna node.
 
 ### 5.3 ctrees — `job_ctrees.pbs`
@@ -395,7 +395,7 @@ run: at the same `PP_GRID` a 2048^3 run needs the same ~26 GB per process as the
 the density is built block by block); only a larger grid raises it (768: ~87 GB per process). Not measured
 above 512^3: a 2048^3 run has 64 times the particles. From 128^3 to 512^3 the simulation grew by a factor
 4.3 (fixed overhead at 128^3) and Rockstar by 40. Rockstar needs 1.75-1.9 times its particle array (32 B per
-particle; section 5.2): ~0.5 TB at 2048^3 of a node's 755 GB (requested: 624 GB), to be checked with the 1024^3 run.
+particle; section 5.2): 422-430 GB measured at 2048^3 of a node's 755 GB (requested: 480 GB; was 624 GB).
 Rockstar time at 512^3: 64 s for two z ~ 0 outputs with 64 writers and the output on the node's disk, 188 s with 16
 writers writing to `/storage` (section 5.2); give large runs many cores (`RS_NCPU`) and a long `RS_WALL`. Plots and the
 full measurement: [report](report/pkdgrav3_pipeline_report.pdf), section 6.
@@ -819,7 +819,7 @@ tools/sahyadri_manager/manager.py schedule pegasus:Sahyadri_L200N2048/var_Om_p20
 tools/sahyadri_manager/manager.py limits pegasus.max_sim_running=2 pegasus.max_sim_queued=1
 ```
 The pegasus queues allow per user: `debug` 2 running jobs, 128 cores, 4 h; `project` 4 running jobs, 2048 cores;
-`regular` 4 jobs, 1280 cores, 48 h (`qstat -Qf`, 13 Nov 2026). Rockstar at 2048³ needs about 624 GB, more
+`regular` 4 jobs, 1280 cores, 48 h (`qstat -Qf`, 13 Nov 2026). Rockstar at 2048³ needs about 430 GB (480 GB requested), more
 than one pegasus node: run it over several nodes with `RS_NODES` (below).
 
 **Rockstar over several nodes (`RS_NODES`).** Rockstar has no MPI: its server and clients talk over TCP sockets, so the
@@ -834,7 +834,7 @@ repeated 1-node runs differ from each other (Rockstar is not deterministic run t
 50 kpc/h, 89–92 % with identical Mvir, counts above 1e11–1e14 within 0.5 %), so the multi-node mode adds nothing
 beyond that. `setup_production.py --site pegasus` sets `RS_NODES` itself: the fewest nodes that hold 1.1 × Rockstar's memory
 estimate (which already has a margin over the measured peak) at most 360 GB each (`--rs-nodes N` or plan option
-`rs_nodes=N` to choose): 2048³ (624 GB) → 2 nodes × 344 GB, 64 writers; up to 1024³ one node. The manager's core-hour estimate counts every node.
+`rs_nodes=N` to choose): 2048³ (480 GB) → 2 nodes × 264 GB, 64 writers; up to 1024³ one node. The manager's core-hour estimate counts every node.
 
 **Simulations on the pegasus GPU nodes.** pegasus has four GPU nodes (`gpu001`–`gpu004`): one Tesla P100 (16 GB,
 compute capability 6.0, driver 525 = CUDA 12.0) each, with the same 32 Skylake cores and ~370 GB as the CPU nodes.

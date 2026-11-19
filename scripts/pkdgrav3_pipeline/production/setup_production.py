@@ -140,11 +140,14 @@ def steps_plan(a_out, a_start, step_da):
 
 
 def rockstar_mem(N):
-    """PBS memory for Rockstar: 2.2 x its particle array (32 B per particle) + 8 GB, rounded up to 16 GB.
-    Measured peak 1.75-1.9 x the array at 512^3 (16-64 writers, two z~0 snapshots, pawna job 2536781): particles,
-    their overlap copies (+26% at 16 writers, +40% at 64) and an 8-byte FoF index per particle, plus the previous
-    snapshot's halos. 128^3: 16gb, 512^3: 32gb, 1024^3: 96gb, 2048^3: 624gb (of a 755 GB node)."""
-    gb = 2.2 * 32.0 * float(N)**3 / 1e9 + 8.0
+    """PBS memory for Rockstar: 1.7 x its particle array (32 B per particle) + 8 GB, rounded up to 16 GB.
+    Measured peak 1.75-1.9 x the array at 512^3 (16-64 writers, two z~0 snapshots, pawna job 2536781; 7.1-8.5 GB in
+    all 11 batches of L200N512, z = 12 to 0, no trend with z): particles, their overlap copies (+26% at 16 writers,
+    +40% at 64) and an 8-byte FoF index per particle, plus the previous snapshot's halos. At 2048^3 (64 writers,
+    32 readers, pawna, L200N2048 r3-r5 batches of snapshots 0-34, 18-19 Nov 2026): 422-430 GB = 1.56 x the array.
+    128^3: 16gb, 512^3: 16gb, 1024^3: 80gb, 2048^3: 480gb (was 2.2 x: 624gb; at 480gb a 250 GB vahc job fits on the
+    same 755 GB pawna node)."""
+    gb = 1.7 * 32.0 * float(N)**3 / 1e9 + 8.0
     return '%dgb' % (16 * int(np.ceil(gb / 16.0)))
 
 
@@ -217,7 +220,7 @@ def resources_pegasus(N, queue):
                  PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=8)
     # Rockstar over several nodes when one node cannot hold it (RS_NODES, job_rockstar.pbs): the fewest nodes that hold
     # 1.1 x rockstar_mem (which already has a margin: 2.2 x the particle array against 1.75-1.9 x measured; the 10 %
-    # covers unequal shares of the writers) at most RS_NODE_MEM each; 2048^3: 624 GB -> 2 nodes x 344 GB
+    # covers unequal shares of the writers) at most RS_NODE_MEM each; 2048^3: 480 GB -> 2 nodes x 264 GB
     r['RS'] = r['RS'] + (1,)
     need = RS_MARGIN * int(rsm[:-2])
     if need > int(RS_NODE_MEM[:-2]):
