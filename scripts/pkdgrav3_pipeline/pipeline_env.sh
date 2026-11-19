@@ -9,6 +9,7 @@ PIPE=$SANDBOX/scripts/pkdgrav3_pipeline
 PP=$SANDBOX/scripts/post-process
 PY=$CODES/venv/bin/python
 export SAHYADRI_SCRATCH=$SCRATCH SAHYADRI_LIBDIR=$CODES/lib
+[ -d "$CODES/bin" ] && export PATH=$CODES/bin:$PATH   # tools built for the pipeline (e.g. pigz on swarm)
 [ -z "$FORCE_RES" ] && export FORCE_RES=$(awk -v l=$LBOX -v n=$NPART 'BEGIN{printf "%.6g", l/n/50}')
 mkdir -p "$LOGS"
 # own log file (PBS -o copy-back is unreliable on pawna): $LOGS/<stage>.<run>.<jobid>.log

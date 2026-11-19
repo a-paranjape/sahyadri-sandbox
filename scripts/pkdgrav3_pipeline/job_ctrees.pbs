@@ -23,7 +23,14 @@ fi
 perl "$GEN" rockstar.cfg > ctrees_gen.log 2>&1 || { cat ctrees_gen.log; exit 1; }
 stamp "$(grep -c . outputs/scales.txt) of $(ls out_*.list | wc -l) catalogues used (gen_merger_cfg.pl threshold ${CT_MIN_LIST_BYTES:-20000} bytes)"
 MT=$HALO_DIR/outputs/merger_tree.cfg
-grep -E "^(Om|Ol|h0|w0|wa|BOX_WIDTH|FORCE_RES|PARTICLE_MASS)" "$MT"
+if [ -n "${CT_BOX_DIVISIONS:-}" ]; then
+  # BOX_DIVISIONS^3 tree files (gen_merger_cfg.pl writes 1): halo_trees_to_catalog.pl converts the tree files in
+  # parallel, one process per file (up to 20), so with one file the catalogue step is serial. The FITS stage merges
+  # the files into one tree_0_0_0.fits.gz again (FITS_MERGE_TREES=1).
+  sed -i "s/^BOX_DIVISIONS *=.*/BOX_DIVISIONS=$CT_BOX_DIVISIONS/" "$MT"
+  grep -q "^BOX_DIVISIONS=$CT_BOX_DIVISIONS\$" "$MT" || { stamp "could not set BOX_DIVISIONS=$CT_BOX_DIVISIONS in $MT"; exit 1; }
+fi
+grep -E "^(Om|Ol|h0|w0|wa|BOX_WIDTH|BOX_DIVISIONS|FORCE_RES|PARTICLE_MASS)" "$MT"
 ( cd "$CT" && perl do_merger_tree.pl "$MT" "$CT" ) > ctrees_trees.log 2>&1 || { stamp "do_merger_tree failed"; tail ctrees_trees.log; exit 1; }
 ( cd "$CT" && perl halo_trees_to_catalog.pl "$MT" "$CT" ) > ctrees_cat.log 2>&1 || { stamp "halo_trees_to_catalog failed"; tail ctrees_cat.log; exit 1; }
 nh=$(ls hlists/hlist_*.list 2>/dev/null | wc -l)

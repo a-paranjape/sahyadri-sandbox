@@ -11,6 +11,7 @@ SIM_STEM, SIM_REAL, SIM_IC_SEED). Run it before deleting any ASCII file.
 usage: check_compressed_halos.py <run dir with out_*.trees> [--snaps 0,5,99] [--outdir DIR] [--trees]
 """
 import argparse
+import itertools
 import os
 import sys
 
@@ -98,30 +99,97 @@ def check_snapshot(R, out, snap):
         print('skip readers.py access check (ConvertToFITS not importable)')
 
 
-def check_trees(T, out):
-    for name in sorted(f for f in os.listdir(T) if f.startswith('tree_') and f.endswith('.dat')):
-        cols, _, nskip, ntrees = C.parse_tree_header(os.path.join(T, name))
-        with open(os.path.join(T, name)) as fh:
-            rows = [l.split() for i, l in enumerate(fh) if i >= nskip and l.strip() and not l.startswith('#')]
-        A = np.array(rows, dtype=float).reshape(len(rows), len(cols))
-        with fitsio.FITS(os.path.join(out, name.replace('.dat', '.fits.gz'))) as f:
-            d = f[1].read()
-        nb = [c for j, c in enumerate(cols) if not same(d[c], A[:, j])]
-        ok(len(d) == len(A) and not nb, '%s: %d rows x %d columns equal the ASCII (%s trees)' % (name, len(A), len(cols), ntrees))
+def tree_plan(T, out):
+    """[(FITS tree file, [(ASCII tree file, first row, rows or None)])]: one tree_X_Y_Z.fits.gz per tree_X_Y_Z.dat,
+    or the merged tree_0_0_0.fits.gz (header MERGED, TILEnnnn cards) holding several."""
+    dats = sorted(f for f in os.listdir(T) if f.startswith('tree_') and f.endswith('.dat'))
+    merged = os.path.join(out, C.MERGED_NAME)
+    if len(dats) > 1 and os.path.isfile(merged):
+        st = C.StreamTable(merged)
+        if st.card('MERGED'):
+            tiles = [str(st.card('TILE%04d' % i)).split() for i in range(int(st.card('NTILES') or 0))]
+            st.s.close()
+            return [(C.MERGED_NAME, [(f, int(a), int(n)) for f, a, n, _t in tiles])], dats
+        st.s.close()
+    return [(d.replace('.dat', '.fits.gz'), [(d, 0, None)]) for d in dats], dats
+
+
+def ascii_tree_chunks(path, nskip, ncol, chunk):
+    """Rows of a tree_X_Y_Z.dat parsed with numpy (independent of the converter's pandas), chunk lines at a time."""
+    with open(path) as fh:
+        for _ in range(nskip):
+            fh.readline()
+        while True:
+            lines = list(itertools.islice(fh, chunk))
+            if not lines:
+                return
+            rows = [l for l in lines if l.strip() and not l.startswith('#')]
+            if rows:
+                yield np.loadtxt(rows, ndmin=2).reshape(len(rows), ncol)
+
+
+def check_trees(T, out, chunk=1000000):
+    """Every tree file against the ASCII, both read a chunk at a time (memory bounded: the tree files of a 2048^3 run
+    hold ~1e9 rows); the FITS file through C.StreamTable (its DATASUMs checked too). Then locations (FitsRow,
+    FitsRows select exactly each tree: a run of equal Tree_root_ID starting there, of that length) and forests."""
+    plan, dats = tree_plan(T, out)
+    covered = sorted(d for _f, tl in plan for d, _a, _n in tl)
+    ok(covered == dats, 'trees: %d ASCII tree files, all in %d FITS file(s)' % (len(dats), len(plan)))
+    runs = {}                                   # FITS file -> (roots, first rows, lengths) of the runs of Tree_root_ID
+    for fits, tiles in plan:
+        p = os.path.join(out, fits)
+        if not os.path.isfile(p):
+            ok(False, '%s missing' % fits)
+            continue
+        st = C.StreamTable(p)
+        roots, starts, lens = [], [], []
+        for name, first, nrows in tiles:
+            cols, _, nskip, ntrees = C.parse_tree_header(os.path.join(T, name))
+            if st.nrows - st.left != first:
+                ok(False, '%s: starts at row %d of %s, expected %d' % (name, st.nrows - st.left, fits, first))
+                break
+            n, nb = 0, set()
+            for A in ascii_tree_chunks(os.path.join(T, name), nskip, len(cols), chunk):
+                d = st.read(len(A))
+                if len(d) != len(A):
+                    nb.add('(rows)')
+                    break
+                nb |= {c for j, c in enumerate(cols) if not same(d[c], A[:, j])}
+                r = d['Tree_root_ID'].astype(np.int64)
+                new = np.flatnonzero(np.r_[True, r[1:] != r[:-1]])
+                for k, i in enumerate(new):
+                    j = new[k + 1] if k + 1 < len(new) else len(r)
+                    if lens and roots[-1] == r[i] and starts[-1] + lens[-1] == first + n + i and i == 0:
+                        lens[-1] += j - i          # a tree continued from the previous chunk
+                    else:
+                        roots.append(int(r[i])); starts.append(first + n + i); lens.append(j - i)
+                n += len(A)
+            if nrows is not None and n != nrows:
+                nb.add('(%d rows, TILE card %d)' % (n, nrows))
+            ok(not nb, '%s: %d rows x %d columns equal the ASCII (%s trees)%s' % (
+                name, n, len(cols), ntrees, (' (differ: %s)' % sorted(nb)) if nb else ''))
+        rest = st.left
+        bad_sum = st.finish()
+        ok(rest == 0 and not bad_sum, '%s: no rows beyond the ASCII (%d), DATASUM of every HDU%s' % (
+            fits, rest, (' (differs in HDU %s)' % bad_sum) if bad_sum else ''))
+        runs[fits] = (np.array(roots, np.int64), np.array(starts, np.int64), np.array(lens, np.int64))
     with fitsio.FITS(os.path.join(out, 'locations.fits.gz')) as f:
         L = f[1].read()
-    good = True
-    for fname in np.unique(L['Filename']):
-        fn = fname.decode() if isinstance(fname, bytes) else str(fname)
-        p = os.path.join(out, fn.replace('.dat', '.fits.gz'))
-        if not os.path.isfile(p):
-            continue
-        with fitsio.FITS(p) as f:
-            root = f[1]['Tree_root_ID'][:]
-        sel = L['Filename'] == fname
-        for t, r, n in zip(L['TreeRootID'][sel], L['FitsRow'][sel], L['FitsRows'][sel]):
-            good &= bool(r >= 0 and np.all(root[r:r + n] == t) and (r + n == len(root) or root[r + n] != t))
-    ok(good, 'locations: FitsRow/FitsRows select exactly each tree (%d trees)' % len(L))
+    ff = (L['FitsFile'] if 'FitsFile' in L.dtype.names else
+          np.char.replace(L['Filename'].astype('S'), b'.dat', b'.fits.gz'))
+    good, ntree = True, 0
+    for fits, (roots, starts, lens) in runs.items():
+        sel = np.char.strip(ff.astype('S')) == fits.encode()
+        o = np.argsort(starts)
+        i = np.searchsorted(starts[o], L['FitsRow'][sel])
+        i = np.clip(i, 0, max(len(o) - 1, 0))
+        j = o[i] if len(o) else i
+        nr = L['FitsRows'][sel]                  # -1 when locations.dat has no Num_Halos: not checked
+        good &= bool(len(o) and np.all(starts[j] == L['FitsRow'][sel]) and np.all(roots[j] == L['TreeRootID'][sel])
+                     and np.all((nr < 0) | (lens[j] == nr)))
+        good &= int(sel.sum()) == len(roots)        # every run of Tree_root_ID is one tree of locations
+        ntree += int(sel.sum())
+    ok(good and ntree == len(L), 'locations: FitsRow/FitsRows select exactly each tree (%d trees)' % len(L))
     with fitsio.FITS(os.path.join(out, 'forests.fits.gz')) as f:
         Fo = f[1].read()
     FA = np.loadtxt(os.path.join(T, 'forests.list'), dtype=np.int64, ndmin=2)

@@ -12,6 +12,8 @@ layout and column names are those of the existing files, so readers.py (prep_hal
          .vpot (mean particle potential, vahc_fast.py; only snapshots with the potential): its columns except
          haloID are appended to the vahc file (header card HAS_VPOT)
   trees  <treedir>/tree_X_Y_Z.dat  ->  <outdir>/tree_X_Y_Z.fits.gz      (rows in file order, HDU "HALOS")
+         (--merge-trees with several tree_X_Y_Z.dat: all in one tree_0_0_0.fits.gz, files in name order; header
+          MERGED, NTILES, TILEnnnn; locations.fits.gz then has FitsFile; verified by streaming, not in memory)
          <treedir>/locations.dat ->  <outdir>/locations.fits.gz       (all 6 columns + FitsRow, FitsRows)
          <treedir>/forests.list  ->  <outdir>/forests.fits.gz         (TreeRootID, ForestID)
 
@@ -290,6 +292,87 @@ def gzip_file(src, dst, level, threads):
     return how
 
 
+def add_sums(arr, sums, nnan):
+    """Per-column sums of a chunk of rows, added to sums / nnan (the write-side and read-back verification)."""
+    for n in arr.dtype.names:
+        if arr.dtype[n].kind == 'S':  # strings: running CRC of the bytes
+            sums[n] = zlib.crc32(np.ascontiguousarray(arr[n]).tobytes(), sums[n])
+        elif arr.dtype[n].kind in 'iu':
+            sums[n] += int(arr[n].astype(np.int64).sum())
+        else:
+            v = arr[n].astype(np.float64)
+            nnan[n] += int(np.isnan(v).sum())
+            sums[n] += float(np.nansum(v))
+
+
+class StreamTable:
+    """HDU 1 of a .fits(.gz) read sequentially, a chunk of rows at a time (the gzip stream is never held in memory:
+    fitsio/cfitsio decompresses a whole .gz file into memory, too much for the merged tree file of a 2048^3 run).
+    Rows come back as numpy records in the FITS byte order; finish() reads the rest of the file and compares the
+    DATASUM of every HDU with the sum of its bytes. Decoding: fits_to_parquet.py (checked against fitsio by its
+    --selftest)."""
+
+    def __init__(self, path):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import fits_to_parquet as FP
+        self.FP, self.path = FP, path
+        self.s = FP.Stream(path)
+        with open(path, 'rb') as fh:
+            gz = fh.read(2) == b'\x1f\x8b'
+        if gz and not path.endswith('.gz'):          # e.g. finish()'s <out>.part: gzip by content, not by name
+            import pyarrow as pa
+            self.s.f.close()
+            self.s.f = pa.CompressedInputStream(pa.OSFile(path, 'rb'), 'gzip')
+        self.datasums = []                                   # (hdu, computed, header) for every HDU
+        self.s.mark()
+        self.cards0, H0 = FP.read_header(self.s)
+        self.s.mark()
+        self._read_data(0, H0)
+        self.cards, self.H = FP.read_header(self.s)
+        cols = FP.columns(self.H)
+        self.dtype = np.dtype(dict(names=[c[0] for c in cols], formats=[c[1] for c in cols],
+                                   offsets=[c[2] for c in cols], itemsize=self.H['NAXIS1']))
+        self.nrows = self.left = int(self.H['NAXIS2'])
+        self.s.mark()
+
+    def _read_data(self, hdu, H):
+        n = self.FP.data_bytes(H)
+        self.s.read(self.FP.padded(n), checksum=True)
+        self._sum(hdu, H)
+
+    def _sum(self, hdu, H):
+        if 'DATASUM' in H:
+            self.datasums.append((hdu, self.s.datasum(), int(H['DATASUM'])))
+
+    def card(self, key):
+        return self.H.get(key)
+
+    def read(self, n):
+        n = min(int(n), self.left)
+        raw = self.s.read(n * self.dtype.itemsize, checksum=True) if n else b''
+        self.left -= n
+        return np.frombuffer(raw, dtype=self.dtype)
+
+    def finish(self):
+        """Rest of HDU 1 and all later HDUs; returns the list of HDUs whose DATASUM does not match."""
+        while self.left:
+            self.read(min(self.left, 1 << 20))
+        n = self.FP.data_bytes(self.H)
+        self.s.read(self.FP.padded(n) - self.nrows * self.dtype.itemsize, checksum=True)   # heap + padding
+        self._sum(1, self.H)
+        hdu = 2
+        while True:
+            try:
+                _c, H = self.FP.read_header(self.s)
+            except EOFError:
+                break
+            self.s.mark()
+            self._read_data(hdu, H)
+            hdu += 1
+        self.s.close()
+        return [h for h, got, want in self.datasums if got != want]
+
+
 class TableWriter:
     """Writes HDU 0 (header), HDU 1 (table, appended chunk by chunk), HDU 2 (provenance) to an uncompressed
     temporary file, keeping per-column sums of what was written for the verification."""
@@ -308,15 +391,7 @@ class TableWriter:
         if len(arr) == 0:
             return
         self.chunks.append(len(arr))
-        for n in arr.dtype.names:
-            if arr.dtype[n].kind == 'S':  # strings: running CRC of the bytes
-                self.sums[n] = zlib.crc32(np.ascontiguousarray(arr[n]).tobytes(), self.sums[n])
-            elif arr.dtype[n].kind in 'iu':
-                self.sums[n] += int(arr[n].astype(np.int64).sum())
-            else:
-                v = arr[n].astype(np.float64)
-                self.nnan[n] += int(np.isnan(v).sum())
-                self.sums[n] += float(np.nansum(v))
+        add_sums(arr, self.sums, self.nnan)
         if not self.started:
             self.f.write(arr, extname=self.extname, header=self.cards)
             self.started = True
@@ -337,15 +412,38 @@ class TableWriter:
         self.f.close()
 
 
-def finish(writer, prov_arr, out, args, extra_cards=()):
-    """Close, compress, verify, move into place. Returns a summary dict."""
+def verify_stream(part, writer):
+    """finish()'s read-back check without reading the file into memory: row count, the per-column sums in the
+    write-side chunks, and the DATASUM of every HDU (StreamTable)."""
+    st = StreamTable(part)
+    if st.nrows != writer.nrows:
+        raise RuntimeError('%s: %d rows read back, %d written' % (part, st.nrows, writer.nrows))
+    if list(st.dtype.names) != list(writer.dtype.names):
+        raise RuntimeError('%s: columns read back differ from those written' % part)
+    sums = {n: 0 for n in writer.dtype.names}
+    nnan = {n: 0 for n in writer.dtype.names}
+    for m in writer.chunks:
+        add_sums(st.read(m), sums, nnan)
+    badsum = st.finish()
+    for name, s in writer.sums.items():
+        if sums[name] != s or nnan[name] != writer.nnan[name]:
+            raise RuntimeError('%s: column %s does not read back identically' % (part, name))
+    if badsum:
+        raise RuntimeError('%s: DATASUM does not match in HDU %s' % (part, badsum))
+
+
+def finish(writer, prov_arr, out, args, extra_cards=(), stream=False):
+    """Close, compress, verify, move into place. Returns a summary dict. stream: verify with StreamTable (large
+    files), else fitsio."""
     writer.close(prov_arr, extra_cards)
     part = out + '.part'
     t = time.time()
     how = gzip_file(writer.tmp, part, args.level, args.threads)
     tz = time.time() - t
     os.remove(writer.tmp)
-    if not args.no_verify:
+    if stream and not args.no_verify:
+        verify_stream(part, writer)
+    elif not args.no_verify:
         with fitsio.FITS(part) as f:
             n = f[1].get_nrows()
             if n != writer.nrows:
@@ -555,13 +653,26 @@ def convert_tree_file(task):
     prov_arr = provenance_table(run_prov + [(name + ' header', '\n'.join(lines))])
     tmp = os.path.join(args.tmpdir or args.outdir, '.tmp_%s_%d.fits' % (name, os.getpid()))
     w = TableWriter(tmp, dt, 'HALOS', cards)
-    itree = cols.index('Tree_root_ID') if 'Tree_root_ID' in cols else None
-    roots, starts = [], []
-    last = None
     t0 = time.time()
-    # '#tree <id>' separator lines are comments; the tree a row belongs to is in Tree_root_ID
+    roots, starts = [], []
+    for arr in tree_rows(path, cols, dt, nskip, args.chunk, roots, starts, lambda: w.nrows):
+        w.append(arr)
+    tread = time.time() - t0
+    check_ntrees(name, ntrees, cols, roots)
+    res = finish(w, prov_arr, out, args)
+    res.update(read_s=tread, tile=tile, roots=np.array(roots, dtype=np.int64), starts=np.array(starts, dtype=np.int64))
+    return [res]
+
+
+def tree_rows(path, cols, dt, nskip, chunk_rows, roots, starts, nbefore):
+    """Rows of a tree_X_Y_Z.dat as arrays of dtype dt, chunk_rows at a time; appends the root ID and the first row
+    (nbefore() + row in the chunk) of every tree to roots / starts (trees are contiguous; '#tree <id>' separator
+    lines are comments, the tree a row belongs to is in Tree_root_ID)."""
+    name = os.path.basename(path)
+    itree = 'Tree_root_ID' in cols
+    last = None
     for chunk in pd.read_csv(path, sep=r'\s+', comment='#', header=None, skiprows=nskip, dtype=np.float64,
-                             engine='c', chunksize=args.chunk):
+                             engine='c', chunksize=chunk_rows):
         v = chunk.values
         if v.shape[1] != len(cols):
             raise RuntimeError('%s: %d columns, header has %d' % (name, v.shape[1], len(cols)))
@@ -573,23 +684,138 @@ def convert_tree_file(task):
                 arr[c] = v[:, j].astype(np.int64)
             else:
                 arr[c] = v[:, j]
-        if itree is not None and len(arr):  # first row of every tree (trees are contiguous)
+        if itree and len(arr):
             r = arr['Tree_root_ID']
             new = np.flatnonzero(np.r_[last is None or r[0] != last, r[1:] != r[:-1]])
             roots.extend(r[new].tolist())
-            starts.extend((new + w.nrows).tolist())
+            starts.extend((new + nbefore()).tolist())
             last = r[-1]
-        w.append(arr)
-    tread = time.time() - t0
-    if ntrees is not None and itree is not None and len(roots) != ntrees:
+        yield arr
+
+
+def check_ntrees(name, ntrees, cols, roots):
+    if ntrees is not None and 'Tree_root_ID' in cols and len(roots) != ntrees:
         raise RuntimeError('%s: %d trees found in the rows, header says %d' % (name, len(roots), ntrees))
-    res = finish(w, prov_arr, out, args)
-    res.update(read_s=tread, tile=tile, roots=np.array(roots, dtype=np.int64), starts=np.array(starts, dtype=np.int64))
-    return [res]
 
 
-def convert_tree_aux(args, run_cards, run_prov, tile_rows):
-    """locations.dat and forests.list (small) in the main process."""
+# merged tree file: consistent-trees with BOX_DIVISIONS > 1 writes BOX_DIVISIONS^3 tree_X_Y_Z.dat; with --merge-trees
+# they become one tree_0_0_0.fits.gz (the name of the single file of BOX_DIVISIONS = 1), the files' rows one after
+# the other in the order of their names. Header cards MERGED = T, NTILES, TILEnnnn = '<file> <first row> <rows>
+# <trees>'; locations.fits.gz gets the column FitsFile (the FITS file of the tree) next to Filename (its ASCII file).
+MERGED_NAME = 'tree_0_0_0.fits.gz'
+
+
+def parse_tree_tile(task):
+    """--merge-trees, worker: one tree_X_Y_Z.dat -> its rows in FITS byte order in a temporary raw file."""
+    path, args = task
+    name = os.path.basename(path)
+    cols, lines, nskip, ntrees = parse_tree_header(path)
+    if not cols:
+        raise RuntimeError('no column header in ' + name)
+    dt = np.dtype([(c, col_dtype(c)) for c in cols])
+    raw = os.path.join(args.tmpdir or args.outdir, '.tile_%s_%d.raw' % (name, os.getpid()))
+    roots, starts, n = [], [], [0]
+    t0 = time.time()
+    with open(raw, 'wb') as fo:
+        for arr in tree_rows(path, cols, dt, nskip, args.chunk, roots, starts, lambda: n[0]):
+            fo.write(arr.tobytes())
+            n[0] += len(arr)
+    check_ntrees(name, ntrees, cols, roots)
+    return [{'tile': name, 'raw': raw, 'rows': n[0], 'cols': cols, 'lines': lines, 'ntrees': ntrees,
+             'roots': np.array(roots, dtype=np.int64), 'starts': np.array(starts, dtype=np.int64),
+             'read_s': time.time() - t0}]
+
+
+def convert_trees_merged(files, args, run_cards, run_prov):
+    """--merge-trees: all tree_X_Y_Z.dat -> one tree_0_0_0.fits.gz. The files are parsed in parallel (--nproc)
+    into temporary raw files, appended here in name order (each removed once appended), compressed once (pigz,
+    --threads) and verified by streaming (StreamTable). Returns (results, {tile: (roots, first rows in the merged
+    file)})."""
+    out = os.path.join(args.outdir, MERGED_NAME)
+    if os.path.isfile(out) and not args.overwrite:
+        return [{'out': out, 'skipped': 'exists'}], merged_tile_rows(out)
+    w, dt, tiles, tile_rows, raws, err = None, None, [], {}, [], None
+    tread = 0.0
+    t0 = time.time()
+    with mp.get_context('fork').Pool(max(1, args.nproc)) as pool:
+        for r in pool.imap(Safe(parse_tree_tile), [(p, args) for p in files]):   # in file order
+            r = r[0]
+            if 'raw' in r:
+                raws.append(r['raw'])
+            if err:
+                continue
+            if 'error' in r:
+                err = r
+                continue
+            if w is None:
+                dt = np.dtype([(c, col_dtype(c)) for c in r['cols']])
+                _, hdr_cards = ascii_header(files[0])
+                cards = run_cards + hdr_cards + [card('SRCFILE', 'tree_*.dat (%d files, merged)' % len(files)),
+                                                 card('MERGED', True, 'rows of several tree_X_Y_Z.dat, see TILEnnnn')]
+                prov = run_prov + [(r['tile'] + ' header', '\n'.join(r['lines']))]
+                tmp = os.path.join(args.tmpdir or args.outdir, '.tmp_%s_%d.fits' % (MERGED_NAME, os.getpid()))
+                w = TableWriter(tmp, dt, 'HALOS', cards)
+                cols0 = r['cols']
+            elif r['cols'] != cols0:
+                err = {'error': '%s: columns differ from %s' % (r['tile'], tiles[0][0]), 'task': r['tile']}
+                continue
+            first = w.nrows
+            for i0 in range(0, r['rows'], args.chunk):
+                w.append(np.fromfile(r['raw'], dtype=dt, count=min(args.chunk, r['rows'] - i0),
+                                     offset=i0 * dt.itemsize))
+            if w.nrows - first != r['rows']:
+                err = {'error': '%s: %d rows appended, %d parsed' % (r['tile'], w.nrows - first, r['rows']),
+                       'task': r['tile']}
+            os.remove(r['raw'])
+            tiles.append((r['tile'], first, r['rows'], len(r['roots'])))
+            tile_rows[r['tile']] = (r['roots'], r['starts'] + first)
+            tread += r['read_s']
+            log('  %s: %d rows, %d trees -> rows %d-%d' % (r['tile'], r['rows'], len(r['roots']), first,
+                                                         first + r['rows'] - 1))
+    for p in raws:
+        if os.path.isfile(p):
+            os.remove(p)
+    if err or w is None:
+        if w is not None:
+            w.f.close()
+            os.remove(w.tmp)
+        return [err or {'error': 'no tree files', 'task': args.indir}], {}
+    extra = [card('NTILES', len(tiles), 'tree_X_Y_Z.dat files merged'),
+             card('NTREES', sum(t[3] for t in tiles), 'trees in all files')]
+    extra += [card('TILE%04d' % i, '%s %d %d %d' % t, 'file, first row, rows, trees') for i, t in enumerate(tiles)]
+    a = argparse.Namespace(**vars(args))
+    a.threads = max(args.threads, args.nproc)          # one file to compress: all cores for pigz
+    prov_arr = provenance_table(prov + [('merged tree files', '\n'.join(t[0] for t in tiles))])
+    res = finish(w, prov_arr, out, a, extra, stream=True)
+    res.update(read_s=tread, wall_s=time.time() - t0, tiles=len(tiles))
+    return [res], tile_rows
+
+
+def merged_tile_rows(path):
+    """{tile: (roots, first rows)} of an existing merged tree file (restart: locations.fits.gz still to write),
+    from its TILEnnnn cards and its Tree_root_ID column, read by streaming."""
+    st = StreamTable(path)
+    tiles = []
+    for i in range(int(st.card('NTILES') or 0)):
+        f, first, rows, _nt = str(st.card('TILE%04d' % i)).split()
+        tiles.append((f, int(first), int(rows)))
+    out = {}
+    for f, first, rows in tiles:
+        roots, starts, last, k = [], [], None, 0
+        while k < rows:
+            r = st.read(min(rows - k, 1 << 22))['Tree_root_ID']
+            new = np.flatnonzero(np.r_[last is None or r[0] != last, r[1:] != r[:-1]])
+            roots.extend(r[new].tolist())
+            starts.extend((new + first + k).tolist())
+            last, k = r[-1], k + len(r)
+        out[f] = (np.array(roots, dtype=np.int64), np.array(starts, dtype=np.int64))
+    st.s.close()
+    return out
+
+
+def convert_tree_aux(args, run_cards, run_prov, tile_rows, merged=False):
+    """locations.dat and forests.list (small) in the main process. merged: the trees are in tree_0_0_0.fits.gz
+    (--merge-trees; FitsRow is the row in it, column FitsFile)."""
     res = []
     loc = os.path.join(args.indir, 'locations.dat')
     out = os.path.join(args.outdir, 'locations.fits.gz')
@@ -600,14 +826,18 @@ def convert_tree_aux(args, run_cards, run_prov, tile_rows):
         fn_w = max(1, int(df['Filename'].str.len().max())) if len(df) else 1
         dt = [(c, 'S%d' % fn_w) if c == 'Filename' else (c, col_dtype(c)) for c in names]
         dt += [('FitsRow', '>i8'), ('FitsRows', '>i8')]
+        if merged:
+            dt += [('FitsFile', 'S%d' % len(MERGED_NAME))]
         arr = np.zeros(len(df), dtype=dt)
+        if merged:
+            arr['FitsFile'] = MERGED_NAME.encode()
         for c in names:
             arr[c] = df[c].values.astype(np.bytes_) if c == 'Filename' else df[c].values
         # row of each tree in its tree_X_Y_Z.fits.gz (-1 if that tile was not converted in this run)
         arr['FitsRow'] = -1
         arr['FitsRows'] = arr['Num_Halos'] if 'Num_Halos' in names else -1
         tile_rows = dict(tile_rows)
-        for fname in np.unique(arr['Filename']):  # tiles skipped in this run (restart): rows from their FITS file
+        for fname in ([] if merged else np.unique(arr['Filename'])):  # tiles skipped (restart): rows from their FITS
             fname = fname.decode()
             fits_tile = os.path.join(args.outdir, fname.replace('.dat', '.fits.gz'))
             if fname not in tile_rows and os.path.isfile(fits_tile):
@@ -624,7 +854,8 @@ def convert_tree_aux(args, run_cards, run_prov, tile_rows):
             res.append({'error': '%d trees without a row in their tree FITS file; not written' % nbad, 'task': loc})
         else:
             cards = run_cards + [card('SRCFILE', 'locations.dat'),
-                                 card('FITSROW', 'first row of the tree in tree_X_Y_Z.fits.gz (-1: unknown)')]
+                                 card('FITSROW', 'first row of the tree in %s (-1: unknown)'
+                                      % ('FitsFile, all trees in one file' if merged else 'tree_X_Y_Z.fits.gz'))]
             tmp = os.path.join(args.tmpdir or args.outdir, '.tmp_locations_%d.fits' % os.getpid())
             w = TableWriter(tmp, arr.dtype, 'LOCATIONS', cards)
             w.append(arr)
@@ -721,6 +952,8 @@ def main():
     ap.add_argument('--overwrite', action='store_true')
     ap.add_argument('--no-verify', action='store_true')
     ap.add_argument('--delete-ascii', action='store_true', help='remove ASCII inputs after a verified write')
+    ap.add_argument('--merge-trees', action='store_true',
+                    help='several tree_X_Y_Z.dat (BOX_DIVISIONS > 1) -> one %s' % MERGED_NAME)
     args = ap.parse_args()
     args.types = [t.strip() for t in args.types.split(',') if t.strip()]
     if args.tmpdir:
@@ -745,12 +978,18 @@ def main():
             a.outdir = args.outdir or os.path.join(args.indir, 'compressed')
         os.makedirs(a.outdir, exist_ok=True)
         files = sorted(glob.glob(os.path.join(a.indir, 'tree_*.dat')))
-        log('trees: %d tree files -> %s' % (len(files), a.outdir))
-        res = run_pool(convert_tree_file, [(p, a, run_cards, run_prov) for p in files], a.nproc)
-        tile_rows = {os.path.basename(r['out']).replace('.fits.gz', '.dat'): (r['roots'], r['starts'])
-                     for r in res if 'roots' in r}
+        merged = a.merge_trees and len(files) > 1
+        log('trees: %d tree files -> %s%s' % (len(files), a.outdir, (' (merged into %s)' % MERGED_NAME) if merged else ''))
+        if merged:
+            res, tile_rows = convert_trees_merged(files, a, run_cards, run_prov)
+            for r in res:
+                log_result(r)
+        else:
+            res = run_pool(convert_tree_file, [(p, a, run_cards, run_prov) for p in files], a.nproc)
+            tile_rows = {os.path.basename(r['out']).replace('.fits.gz', '.dat'): (r['roots'], r['starts'])
+                         for r in res if 'roots' in r}
         try:
-            aux = convert_tree_aux(a, run_cards, run_prov, tile_rows)
+            aux = convert_tree_aux(a, run_cards, run_prov, tile_rows, merged)
         except Exception as e:  # noqa: BLE001
             aux = [{'error': '%s: %s' % (type(e).__name__, e), 'task': 'locations/forests'}]
         for r in aux:
