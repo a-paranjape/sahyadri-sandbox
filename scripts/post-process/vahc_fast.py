@@ -379,13 +379,18 @@ class FastAddValue(AddValue):
             T['tens'] = time.time() - t
         if 'vahc' in want:
             t = time.time()
-            M = np.empty(comp.shape[:2] + (3, 3))
-            M[..., 0, 0], M[..., 1, 1], M[..., 2, 2] = comp[..., 0], comp[..., 1], comp[..., 2]
-            M[..., 0, 1] = M[..., 1, 0] = comp[..., 3]
-            M[..., 0, 2] = M[..., 2, 0] = comp[..., 4]
-            M[..., 1, 2] = M[..., 2, 1] = comp[..., 5]
-            lam = np.linalg.eigvalsh(M)          # (Nallowed, nS, 3), ascending as scipy.linalg.eigvalsh
-            del M
+            # (Nallowed, nS, 3), ascending as scipy.linalg.eigvalsh; halos in chunks (the 3x3 matrices of all halos
+            # and scales were ~12 GB at 5 M halos; every matrix is independent, so the result is the same)
+            lam = np.empty(comp.shape[:2] + (3,))
+            for i in range(0, comp.shape[0], 200000):
+                c = comp[i:i + 200000]
+                M = np.empty(c.shape[:2] + (3, 3))
+                M[..., 0, 0], M[..., 1, 1], M[..., 2, 2] = c[..., 0], c[..., 1], c[..., 2]
+                M[..., 0, 1] = M[..., 1, 0] = c[..., 3]
+                M[..., 0, 2] = M[..., 2, 0] = c[..., 4]
+                M[..., 1, 2] = M[..., 2, 1] = c[..., 5]
+                lam[i:i + 200000] = np.linalg.eigvalsh(M)
+                del M
             out = np.zeros(self.Nhalo, dtype=self.vadtypelist)
             out['ID'] = self.halos['ID']
             for s, v in zip(self.scale_strings, per_scale(lam)):
