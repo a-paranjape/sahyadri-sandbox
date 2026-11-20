@@ -296,8 +296,10 @@ def resources_pride(N):
     rsm = rockstar_mem(N)
     w = PRIDE_WALL
     if N <= 256:
-        r = dict(SIM=(20, '60gb', w, 1), RS=(10, rsm, '12:00:00'), CT=(2, '16gb', '12:00:00'),
-                 PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=10, PP_NPROC=4)
+        # Rockstar writers (= RS_NCPU): a product of three factors > 1 for periodic boundaries (12 = 2x2x3, 20 = 2x2x5;
+        # 10 = 2x1x5 failed: 128^3 test 764005)
+        r = dict(SIM=(20, '60gb', w, 1), RS=(12, rsm, '12:00:00'), CT=(2, '16gb', '12:00:00'),
+                 PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=12, PP_NPROC=4)
     elif N <= 512:
         r = dict(SIM=(20, '100gb', w, 1), RS=(20, rsm, '24:00:00'), CT=(2, '32gb', '24:00:00'),
                  PP=(20, '220gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=20, PP_NPROC=6)
