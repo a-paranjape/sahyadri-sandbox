@@ -365,7 +365,9 @@ def main():
     ap.add_argument('--soft-frac', type=float, default=1 / 60., help='softening / mean particle spacing')
     ap.add_argument('--pot-zmax', type=float, default=0.5, help='store the potential at z <= this')
     ap.add_argument('--pot-step', type=float, default=100.0, help='potential step [(km/s)^2]')
-    ap.add_argument('--check-interval', type=int, default=250, help='steps between checkpoints')
+    ap.add_argument('--check-interval', type=int, default=None,
+                    help='steps between checkpoints (default: 250 on pawna; 100 on swarm and pegasus, where a 2048^3 job '
+                         'does ~3-7 steps/h and 250 steps are more than one wall time)')
     ap.add_argument('--sim-nodes', type=int, default=None,
                     help='pegasus: nodes of the simulation (default: 1 up to 512^3, 3 above); memory per node then '
                          '1.5 x the expected peak (747 GiB at 2048^3, scaled as N^3) / nodes, at most 480 GB')
@@ -383,6 +385,8 @@ def main():
                     help='register with the run manager and queue the simulations (priority, default 0)')
     a = ap.parse_args()
     S = SITES[a.site]
+    if a.check_interval is None:
+        a.check_interval = 250 if a.site == 'pawna' else 100
     user = os.environ.get('USER', 'shadab')
     for k, sk in (('root', 'root'), ('archive', 'archive'), ('codes', 'codes'), ('pkd_io_root', 'pkd'), ('queue', 'queue')):
         if getattr(a, k) is None:
@@ -634,6 +638,7 @@ SUBSAMPLES="%(sub)s"
 SIM_NCPU=%(sim_n)d;  SIM_MEM=%(sim_m)s;  SIM_WALL=%(sim_w)s    # iWallRunTime in p.par = SIM_WALL - %(margin)d min
 %(site_block)s
 SIM_KEEPCHK=2           # keep the newest 2 complete checkpoints in checkpoints/ (0 = all)
+SIM_CHECK_INTERVAL=%(chk_int)d   # steps between checkpoints (iCheckInterval in p.par; with SIM_STAGING=0 also set on every restart)
 RS_NCPU=%(rs_n)d;    RS_MEM=%(rs_m)s;   RS_WALL=%(rs_w)s
 RS_NODES=%(rs_nodes)d              # Rockstar nodes: RS_NCPU cores, RS_MEM and RS_NCPU writers on each (server on the first, a client per node)
 CT_NCPU=%(ct_n)d;    CT_MEM=%(ct_m)s;   CT_WALL=%(ct_w)s
@@ -678,7 +683,7 @@ PARQUET=1
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
            sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2], rs_nodes=(R['RS'][3] if len(R['RS']) > 3 else 1),
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
-           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], pq_n=parquet_resources(N)[0], pq_m=parquet_resources(N)[1],
+           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, chk_int=a.check_interval, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], pq_n=parquet_resources(N)[0], pq_m=parquet_resources(N)[1],
            pq_w=parquet_resources(N)[2], fr=force_res, rsb=R['RS_BLOCKS'],
            rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'])
         write(os.path.join(sdir, 'run.conf'), conf, a.force)
