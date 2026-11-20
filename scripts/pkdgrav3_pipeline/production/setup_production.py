@@ -171,11 +171,13 @@ def parquet_resources(N):
     ~8x per factor 8 in particles at fixed box; the tree file is converted by one process (gzip is sequential)."""
     if N <= 512:
         return 8, '16gb', '02:00:00'
-    # 2048^3 (profile 20 Nov 2026, swarm, one process: 35 MB/s of .fits.gz): the merged tree file (~225 GB) takes
-    # ~1.8 h in one process; the ~400 halo files (~260 GB) ~20 min on the other 7. ~1 GB per process.
+    # 2048^3 (profile 20 Nov 2026, swarm, one process: 35 MB/s of .fits.gz): the merged tree file (~225 GB) took
+    # ~1.8 h in one process; threaded per file (f0c8c84, swarm compute-1-8, Gadget 2048^3 tree file 1.61 GB gz:
+    # 59.6 s -> 21.9 s, same bytes) ~40 min. The ~400 halo files (~260 GB) on the other 7. Up to 1.7 GB per process
+    # measured (8 processes ~14 GB) -> 24gb.
     if N <= 1024:
-        return 8, '16gb', '06:00:00'
-    return 8, '16gb', '12:00:00'
+        return 8, '24gb', '06:00:00'
+    return 8, '24gb', '12:00:00'
 
 
 def resources(N):
