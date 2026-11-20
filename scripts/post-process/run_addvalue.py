@@ -227,7 +227,7 @@ def _fast_snap(snap, args, hr, sr, ps, base, todo, t0):
     for k in todo:
         if k == 'pk':
             continue
-        av.write(k, res[k], base + '.' + k, binary=not args.text)   # via <file>.part (halo_table_io.write)
+        av.write(k, res[k], base + '.' + k, binary=not getattr(args, 'text', False))   # via <file>.part (halo_table_io.write)
     if 'pk' in todo:   # matter and halo spectra from the same transformed density (pk_measure.py)
         import pk_measure
         t2 = time.time()
