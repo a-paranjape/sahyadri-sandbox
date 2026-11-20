@@ -110,6 +110,15 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                                         sandbox='/user1/shadab/sahyadri_pipeline/sahyadri-sandbox',
                                         mirror='/user/shadab/sahyadri_mirror/swarm', sync_s=120,
                                         max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
+                                        scratch_reserve_gb=2000, max_pbs_queued=4),
+                             # pride (TIFR theory): like swarm (same Lustre /user1, own scratch and install); compute
+                             # nodes cannot qsub (Bad UID): jobs are submitted on the login node
+                             pride=dict(login='shadab@pride.theory.tifr.res.in', data='shadab@pride.theory.tifr.res.in',
+                                        scratch_root='/user1/shadab/sahyadri_scratch_pride',
+                                        python='/user1/shadab/sahyadri_pride/codes/venv/bin/python',
+                                        sandbox='/user1/shadab/sahyadri_pride/sahyadri-sandbox',
+                                        mirror='/user/shadab/sahyadri_mirror/pride', sync_s=120,
+                                        max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
                                         scratch_reserve_gb=2000, max_pbs_queued=4)))
 LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s')
 # max_pbs_queued: our jobs waiting in the site's PBS at most (pegasus queued_jobs_threshold: project 6, debug 2 per
@@ -392,7 +401,7 @@ def read_plan(path):
 
 TEMPLATES = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'production')
 QSTATES = ('open', 'drain', 'closed')
-DEFAULT_QUEUE = {LOCAL: 'workq', 'pegasus': 'project', 'swarm': 'workq'}
+DEFAULT_QUEUE = {LOCAL: 'workq', 'pegasus': 'project', 'swarm': 'workq', 'pride': 'workq'}
 
 
 def read_queues(path):
