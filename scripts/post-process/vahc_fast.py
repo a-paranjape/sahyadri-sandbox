@@ -223,12 +223,14 @@ class FastAddValue(AddValue):
         self.s1 = np.sin(ps.grid_inv * a)
         self.s2 = np.sin(ps.grid_inv * b)
         self.s3 = np.sin(ps.grid_inv * c)
-        self.KK = a**2 + b**2 + c**2          # (N, N, N/2+1) integer
+        # |k|^2 grid (N, N, N/2+1), integer: made in calc_b1_fast only, where it is used (4.3 GB at grid 1024)
         self.timing['rfft'] = time.time() - t
 
     # ------------------------------------------------------------------
     def _irfft(self, H):
-        return sfft.irfftn(H, s=(self.N,) * 3, workers=self.threads)
+        # H is always a temporary product here: overwrite_x lets the transform use it as work space instead of a
+        # copy (8.6 GB at grid 1024); same arithmetic
+        return sfft.irfftn(H, s=(self.N,) * 3, workers=self.threads, overwrite_x=True)
 
     def _kernel(self, Rs):
         """Gaussian smoothing kernel of AddValue (real-space samples, transformed, normalised to 1 at k = 0)."""
@@ -267,7 +269,10 @@ class FastAddValue(AddValue):
         N = self.N
         # P(k) as ps.Pk_grid(FT, input_is_FTdensity=1, nbar=inf): |FT|^2 summed over the modes of each bin
         # (full grid = half grid with weight 2 off the k3 = 0 and k3 = N/2 planes), x Vbox / N_modes
-        kbin = np.searchsorted(ps.k2_compare, self.KK, side='right') - 1
+        kf, kh = self.kf, self.kh
+        KK = kf[:, None, None]**2 + kf[None, :, None]**2 + kh[None, None, :]**2
+        kbin = np.searchsorted(ps.k2_compare, KK, side='right') - 1
+        del KK
         w = np.full(N // 2 + 1, 2.0)
         w[0] = 1.0
         if N % 2 == 0:
