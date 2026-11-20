@@ -8,7 +8,7 @@ Also checks .vahc alignment, readers.py-style access (ConvertToFITS.fits_to_reco
 FitsRow index of locations.fits.gz and forests.fits.gz, and that the headers read back (with the run's
 SIM_STEM, SIM_REAL, SIM_IC_SEED). Run it before deleting any ASCII file.
 
-usage: check_compressed_halos.py <run dir with out_*.trees> [--snaps 0,5,99] [--outdir DIR] [--trees]
+usage: check_compressed_halos.py <run dir with out_*.trees> [--snaps 0,5,99] [--outdir DIR] [--trees] [--nproc N]
 """
 import argparse
 import itertools
@@ -197,18 +197,54 @@ def check_trees(T, out, chunk=1000000):
     ok(np.array_equal(Fo['TreeRootID'], FA[:, 0]) and np.array_equal(Fo['ForestID'], FA[:, 1]), 'forests equal the ASCII')
 
 
+def _task(task):
+    """One snapshot (or 'trees') in a worker: its PASS/FAIL lines and failure count."""
+    global bad
+    import contextlib
+    import io
+    kind, rundir, out, snap = task
+    bad, buf = 0, io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        try:
+            if kind == 'trees':
+                check_trees(os.path.join(rundir, 'trees'), os.path.join(out, 'trees'))
+            else:
+                check_snapshot(rundir, out, snap)
+        except Exception as e:  # a crash in one snapshot is a failure of that snapshot, not of the others
+            ok(False, '%s: check raised %s: %s' % (snap if kind != 'trees' else 'trees', type(e).__name__, e))
+    return buf.getvalue(), bad
+
+
 def main():
+    global bad
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('rundir')
     ap.add_argument('--outdir')
     ap.add_argument('--snaps', default='all')
     ap.add_argument('--trees', action='store_true', help='also check <rundir>/trees against <outdir>/trees')
+    ap.add_argument('--nproc', type=int, default=1,
+                    help='snapshots checked in parallel (the tree check runs as one more task); memory per process '
+                         'is about one snapshot: its .trees parsed as float64 (2048^3: ~15-30 GB)')
     a = ap.parse_args()
     out = a.outdir or os.path.join(a.rundir, 'compressed')
-    for s in C.select_snaps(a.rundir, a.snaps):
-        check_snapshot(a.rundir, out, s)
-    if a.trees:
-        check_trees(os.path.join(a.rundir, 'trees'), os.path.join(out, 'trees'))
+    tasks = ([('trees', a.rundir, out, None)] if a.trees else []) + \
+            [('snap', a.rundir, out, s) for s in C.select_snaps(a.rundir, a.snaps)]
+    if a.nproc <= 1 or len(tasks) <= 1:
+        res = map(_task, tasks)
+    else:
+        import multiprocessing as mp
+        pool = mp.Pool(min(a.nproc, len(tasks)), maxtasksperchild=1)
+        res = pool.imap(_task, tasks)   # in order: the output reads as the serial run
+    total, text_trees = 0, ''
+    for t, (text, nbad) in zip(tasks, res):
+        total += nbad
+        if t[0] == 'trees':
+            text_trees = text          # printed after the snapshots, as before
+        else:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+    sys.stdout.write(text_trees)
+    bad = total
     print('== %d failure(s)' % bad)
     return 1 if bad else 0
 

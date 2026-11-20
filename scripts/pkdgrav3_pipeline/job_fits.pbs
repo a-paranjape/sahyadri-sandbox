@@ -7,7 +7,20 @@
 set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
 cd "$HALO_DIR" || exit 1
-TMP=/var/tmp/${USER}_fits_${PBS_JOBID%%.*}; mkdir -p "$TMP"; EXIT_HOOK='rm -rf "$TMP"'
+# temporary uncompressed FITS: node-local /var/tmp when it has room, else SCRATCH. Room needed: the merged tree file
+# (at most the size of the ASCII trees/tree_*.dat) plus FITS_NPROC halo snapshots in flight (each at most its
+# out_<snap>.trees), +20 %. On pawna /var/tmp is shared with the simulations' staged I/O.
+_J=${PBS_JOBID%%.*}; _J=${_J:-$$}
+_need=$(( ( $(stat -c %s trees/tree_*.dat 2>/dev/null | awk '{s+=$1} END {print s+0}') + FITS_NPROC * $(ls -S out_*.trees 2>/dev/null | head -1 | xargs -r stat -c %s 2>/dev/null || echo 0) ) * 12 / 10 ))
+_free=$(df -B1 --output=avail /var/tmp 2>/dev/null | tail -1)
+if [ -n "$_free" ] && [ "$_free" -gt "$_need" ]; then
+  TMP=/var/tmp/${USER}_fits_$_J
+else
+  TMP=$HALO_DIR/.fits_tmp_$_J
+  stamp "/var/tmp has $(( ${_free:-0} / 1000000000 )) GB free, $(( _need / 1000000000 )) GB needed: temporary FITS in $TMP"
+fi
+mkdir -p "$TMP"; EXIT_HOOK='rm -rf "$TMP"'
+stamp "temporary FITS in $TMP ($(( _need / 1000000000 )) GB needed, $(( ${_free:-0} / 1000000000 )) GB free on /var/tmp)"
 LAST=$(tail -1 "$SIM_DIR/snapnames.txt")
 DEL=; [ "$FITS_DELETE_ASCII" = 1 ] && DEL=--delete-ascii
 WHAT=all; [ -d trees ] || WHAT=halos
@@ -25,7 +38,8 @@ rc=$?
 tail -2 "$LOGS/fits.${PBS_JOBID%%.*}.log"
 if [ -z "$DEL" ]; then  # independent check against the ASCII (impossible once deleted)
   CT=; [ -d trees ] && CT=--trees
-  "$PY" "$PP/check_compressed_halos.py" "$HALO_DIR" $CT > "$LOGS/fits_check.${PBS_JOBID%%.*}.log" 2>&1
+  # FITS_CHECK_NPROC snapshots checked at once (2048^3: ~15-30 GB each), the tree check as one more process
+  "$PY" "$PP/check_compressed_halos.py" "$HALO_DIR" $CT --nproc "${FITS_CHECK_NPROC:-4}" > "$LOGS/fits_check.${PBS_JOBID%%.*}.log" 2>&1
   rc2=$?; grep -c PASS "$LOGS/fits_check.${PBS_JOBID%%.*}.log" | sed 's/^/checks passed: /'; grep FAIL "$LOGS/fits_check.${PBS_JOBID%%.*}.log"
   [ $rc2 -eq 0 ] || rc=1
 fi
