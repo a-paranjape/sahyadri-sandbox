@@ -565,13 +565,14 @@ def convert_halo_snapshot(task):
         writers[t] = (TableWriter(tmp, dt, 'HALOS', cards), cols)
 
     # .trees: text; .vahc/.tens/.vpot: text or binary (halo_table_io), chunks of the same rows
-    readers = {k: (pd.read_csv(src[k], sep=r'\s+', comment='#', header=None, dtype=np.float64, engine='c',
-                               chunksize=args.chunk) if k == 'trees' else halo_table_io.iter_chunks(src[k], args.chunk))
+    readers = {k: ((c.values for c in pd.read_csv(src[k], sep=r'\s+', comment='#', header=None, dtype=np.float64,
+                                                   engine='c', chunksize=args.chunk))
+                   if k == 'trees' else halo_table_io.iter_chunks(src[k], args.chunk))   # float64 arrays
                for k in sources}
     t0 = time.time()
     scale = None
     for chunks in zip(*[readers[k] for k in sources]):
-        data = {k: c.values for k, c in zip(sources, chunks)}
+        data = dict(zip(sources, chunks))
         n = len(next(iter(data.values())))
         for k in sources:
             if data[k].shape != (n, len(names[k])):
