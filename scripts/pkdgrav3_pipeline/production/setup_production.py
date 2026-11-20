@@ -157,9 +157,11 @@ def parquet_resources(N):
     ~8x per factor 8 in particles at fixed box; the tree file is converted by one process (gzip is sequential)."""
     if N <= 512:
         return 8, '16gb', '02:00:00'
+    # 2048^3 (profile 20 Nov 2026, swarm, one process: 35 MB/s of .fits.gz): the merged tree file (~225 GB) takes
+    # ~1.8 h in one process; the ~400 halo files (~260 GB) ~20 min on the other 7. ~1 GB per process.
     if N <= 1024:
-        return 16, '32gb', '06:00:00'
-    return 32, '64gb', '24:00:00'
+        return 8, '16gb', '06:00:00'
+    return 8, '16gb', '12:00:00'
 
 
 def resources(N):
@@ -175,9 +177,12 @@ def resources(N):
                     PP=(32, '300gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=64, PP_NPROC=8)
     # consistent-trees is serial (one process plus a forked writer): 2 cores, so it can share a node.
     # Memory 0.8 GB at 512^3 (6 snapshots), grows with the halos per snapshot: ~8 GB at 1024^3, ~60 GB at 2048^3.
-    ct = (2, '32gb', '48:00:00') if N <= 1024 else (2, '128gb', '168:00:00')
+    # 1024^3 and up: consistent-trees with CT_BOX_DIVISIONS=5 (125 tree files, halo_trees_to_catalog.pl one process
+    # per file up to 20); vahc on grid 1024, 3 snapshots at a time on half a node (measured on swarm, grid 1024,
+    # 3 x 10 threads: 93 GB per process, 240 GB per job; 2048^3 adds ~20 GB per process for the halos)
+    ct = (20, '32gb', '48:00:00') if N <= 1024 else (20, '128gb', '168:00:00')
     return dict(SIM=(192, '700gb', '168:00:00'), RS=(64, rsm, '96:00:00'), CT=ct,
-                PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=64, PP_NPROC=8)
+                PP=(96, '370gb', '72:00:00'), FITS=(16, '160gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=64, PP_NPROC=3)
 
 
 PEG_HOME = '/mnt/home/project/calam.shadab/sahyadri_pipeline'
@@ -216,8 +221,9 @@ def resources_pegasus(N, queue):
         r = dict(SIM=(32, '400gb', '96:00:00', 1), RS=(32, rsm, '24:00:00'), CT=(2, '32gb', '24:00:00'),
                  PP=(32, '300gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=32, PP_NPROC=8)
     else:
-        r = dict(SIM=(32, '480gb', '96:00:00', 3), RS=(32, rsm, '96:00:00'), CT=(2, '128gb', '96:00:00'),
-                 PP=(32, '400gb', '72:00:00'), FITS=(16, '200gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=8)
+        # vahc: one node (32 cores, 385 GB): grid 1024, 3 snapshots x ~10 threads (~290-340 GB at 2048^3)
+        r = dict(SIM=(32, '480gb', '96:00:00', 3), RS=(32, rsm, '96:00:00'), CT=(20, '128gb', '96:00:00'),
+                 PP=(32, '360gb', '96:00:00'), FITS=(16, '160gb', '24:00:00'), RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=3)
     # Rockstar over several nodes when one node cannot hold it (RS_NODES, job_rockstar.pbs): the fewest nodes that hold
     # 1.1 x rockstar_mem (which already has a margin: 2.2 x the particle array against 1.75-1.9 x measured; the 10 %
     # covers unequal shares of the writers) at most RS_NODE_MEM each; 2048^3: 480 GB -> 2 nodes x 264 GB
@@ -248,8 +254,9 @@ def resources_swarm(N):
                  PP=(32, '300gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=32, PP_NPROC=8)
     else:
         sim = (64, '200gb', w, 1) if N <= 1024 else (64, '480gb', w, 2)
-        r = dict(SIM=sim, RS=(32, rsm, w), CT=(2, '128gb', w), PP=(32, '400gb', w), FITS=(16, '200gb', '24:00:00'),
-                 RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=8)
+        # vahc 32 cores: swarm allows 310 running cores per user and two 2048^3 simulations take 256
+        r = dict(SIM=sim, RS=(32, rsm, w), CT=(20, '128gb', w), PP=(32, '400gb', w), FITS=(16, '160gb', '24:00:00'),
+                 RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=3)
     r['RS'] = r['RS'] + (1,)
     need = RS_MARGIN * int(rsm[:-2])
     if need > int(RS_NODE_MEM[:-2]):
@@ -642,6 +649,7 @@ SIM_CHECK_INTERVAL=%(chk_int)d   # steps between checkpoints (iCheckInterval in 
 RS_NCPU=%(rs_n)d;    RS_MEM=%(rs_m)s;   RS_WALL=%(rs_w)s
 RS_NODES=%(rs_nodes)d              # Rockstar nodes: RS_NCPU cores, RS_MEM and RS_NCPU writers on each (server on the first, a client per node)
 CT_NCPU=%(ct_n)d;    CT_MEM=%(ct_m)s;   CT_WALL=%(ct_w)s
+CT_BOX_DIVISIONS=%(ctdiv)s      # consistent-trees BOX_DIVISIONS (empty: 1, one tree file); the FITS stage merges the files into one
 PP_NCPU=%(pp_n)d;    PP_MEM=%(pp_m)s;   PP_WALL=%(pp_w)s
 FITS_NCPU=%(fi_n)d;  FITS_MEM=%(fi_m)s; FITS_WALL=%(fi_w)s
 PQ_NCPU=%(pq_n)d;    PQ_MEM=%(pq_m)s;   PQ_WALL=%(pq_w)s
@@ -658,7 +666,8 @@ MIN_HALO_OUTPUT_SIZE=30; MIN_HALO_PARTICLES=20; UNBOUND_THRESHOLD=0.5
 CLEAN_ROCKSTAR=1        # clean_trees.pl: keep out_<snap>.trees, logs/; delete out_*.list, halos_*, hlists/, outputs/
 
 # value-added catalogs (.vahc, .tens): density on PP_GRID^3 from all particles, built block by block
-PP_GRID=512             # production grid; memory per process ~13 GB (PP_FAST=1, measured), ~26 GB (PP_FAST=0)
+PP_GRID=%(ppgrid)d            # min(N, 1024); memory per process: grid 512 ~13 GB, grid 1024 ~93 GB (PP_FAST=1, measured)
+PP_BINARY=1             # .vahc/.tens/.vpot binary (halo_table_io.py; same header lines and values as the text)
 PP_DOWN_TO=0            # 0 = all particles (no downsampling)
 PP_TENS=1
 PP_FAST=1               # 1: vahc_fast.py (identical .vahc/.tens to AddValue, ~12x faster); 0: original AddValue
@@ -673,6 +682,7 @@ PK_DELTA2_LIN=0.01      # growth checked only on bins with Delta^2_lin(k, z) <= 
 
 # FITS
 FITS_NPROC=16
+FITS_CHECK_NPROC=4      # snapshots checked at once (2048^3: ~15-30 GB each) plus the tree check
 FITS_DELETE_ASCII=0     # keep 0 with the manager: verify reads the ASCII catalogues (deleted from SCRATCH after the archive)
 
 # Parquet copy of the FITS tables and trees (stage parquet after fits: <halo dir>/parquet/, same names; archived and
@@ -685,7 +695,7 @@ PARQUET=1
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
            site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, chk_int=a.check_interval, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], pq_n=parquet_resources(N)[0], pq_m=parquet_resources(N)[1],
            pq_w=parquet_resources(N)[2], fr=force_res, rsb=R['RS_BLOCKS'],
-           rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'])
+           rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'], ppgrid=min(N, 1024), ctdiv='5' if N >= 1024 else '')
         write(os.path.join(sdir, 'run.conf'), conf, a.force)
         sub = '''#!/bin/bash
 # Submit %(name)s (written by setup_production.py %(now)s). Check run.conf, p.par and
