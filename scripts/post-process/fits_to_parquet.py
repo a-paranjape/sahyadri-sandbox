@@ -7,6 +7,7 @@ same names (FITS stays the reference; the Parquet directory can be dropped witho
 
 Memory stays low at any run size: each .fits.gz is decompressed as a stream (pyarrow's zlib) and the binary table
 converted in row blocks of about --block-mb MB, each written as one Parquet row group; nothing holds a whole file.
+Within a file, decompression, decoding/hashing and Parquet encoding overlap (threads; pipeline()).
 
 Checks, per file (a failure leaves no .parquet behind and the exit code is 1):
   * the FITS data unit as read (decompressed bytes) against the table's DATASUM card (FITS checksum convention), so
@@ -25,7 +26,7 @@ BYTE_STREAM_SPLIT (smaller there).
 
 A JSON line per file is appended to <parquet dir>/conversion.jsonl (rows, sizes, seconds, check results).
 
-usage: fits_to_parquet.py <compressed dir> <parquet dir> [--procs N] [--block-mb MB]
+usage: fits_to_parquet.py <compressed dir> <parquet dir> [--procs N] [--block-mb MB] [--threads T]
        fits_to_parquet.py --selftest <fits.gz> [...]      (decoder against fitsio, whole files: small files only)
 """
 import argparse
@@ -36,7 +37,9 @@ import os
 import re
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import queue
+import threading
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pyarrow as pa
@@ -234,8 +237,96 @@ def col_hash_update(h, arr):
         h.update(np.ascontiguousarray(arr.to_numpy(zero_copy_only=False)).tobytes())
 
 
+class _Stopped(Exception):
+    pass
+
+
+def pipeline(s, w, cols, rowbytes, nrows, block, schema, hashes, threads):
+    """The row blocks of one file through three overlapping steps (the C code of each releases the GIL):
+    reader thread (gzip decompression + FITS checksum) -> this thread (decode, byte order, per-column hashes on
+    `threads` threads) -> writer thread (Parquet encoding + zstd). Queues of one block each (memory: ~5 blocks).
+    Blocks keep their order in every step, so the file, the hashes and the checksum are those of the serial loop.
+    An exception in any step stops the others and is raised here."""
+    q_raw, q_tab = queue.Queue(1), queue.Queue(1)
+    stop, err = threading.Event(), []
+
+    def put(q, x):
+        while True:
+            try:
+                q.put(x, timeout=0.2)
+                return True
+            except queue.Full:
+                if stop.is_set():
+                    return False
+
+    def get(q):
+        while True:
+            try:
+                return q.get(timeout=0.2)
+            except queue.Empty:
+                if stop.is_set():
+                    raise _Stopped()
+
+    def fail(e):
+        err.append(e)
+        stop.set()
+
+    def reader():
+        try:
+            done = 0
+            while done < nrows:
+                n = min(block, nrows - done)
+                if not put(q_raw, (n, s.read(n * rowbytes, checksum=True))):
+                    return
+                done += n
+            put(q_raw, None)
+        except BaseException as e:  # noqa: BLE001
+            fail(e)
+
+    def writer():
+        try:
+            while True:
+                x = get(q_tab)
+                if x is None:
+                    return
+                w.write_table(x[1], row_group_size=x[0])
+        except _Stopped:
+            pass
+        except BaseException as e:  # noqa: BLE001
+            fail(e)
+
+    th = [threading.Thread(target=reader, daemon=True), threading.Thread(target=writer, daemon=True)]
+    for t in th:
+        t.start()
+    try:
+        with ThreadPoolExecutor(max(1, threads)) as pool:
+            while True:
+                x = get(q_raw)
+                if x is None:
+                    break
+                n, raw = x
+                cols_ = decode(raw, cols, rowbytes)
+                del raw, x
+                list(pool.map(lambda c: col_hash_update(hashes[c], cols_[c]), cols_))
+                if not put(q_tab, (n, pa.table(cols_, schema=schema))):
+                    break
+                del cols_
+        put(q_tab, None)
+    except _Stopped:
+        pass
+    except BaseException as e:  # noqa: BLE001
+        fail(e)
+    finally:
+        if err:
+            stop.set()
+        for t in th:
+            t.join()
+    if err:
+        raise err[0]
+
+
 # ------------------------------------------------------------------------------------------------ one file
-def convert(src, dst, block_mb):
+def convert(src, dst, block_mb, threads=4):
     t0 = time.time()
     name = os.path.basename(src)
     s = Stream(src)
@@ -274,15 +365,8 @@ def convert(src, dst, block_mb):
         part = dst + '.part'
         w = pq.ParquetWriter(part, schema.with_metadata(meta), **kw)
         s.mark()
-        done = 0
         try:
-            while done < nrows:
-                n = min(block, nrows - done)
-                cols_ = decode(s.read(n * rowbytes, checksum=True), cols, rowbytes)
-                for cname in cols_:
-                    col_hash_update(hashes[cname], cols_[cname])
-                w.write_table(pa.table(cols_, schema=schema), row_group_size=n)
-                done += n
+            pipeline(s, w, cols, rowbytes, nrows, block, schema, hashes, threads)
             rest = padded(nrows * rowbytes) - nrows * rowbytes
             if rest:
                 s.read(rest, checksum=True)
@@ -310,10 +394,10 @@ def convert(src, dst, block_mb):
     # read back, row group by row group
     pf = pq.ParquetFile(part)
     back = {c: hashlib.blake2b(digest_size=16) for c in hashes}
-    for g in range(pf.num_row_groups):
-        T = pf.read_row_group(g)
-        for c in back:
-            col_hash_update(back[c], T[c])
+    with ThreadPoolExecutor(max(1, threads)) as pool:
+        for g in range(pf.num_row_groups):
+            T = pf.read_row_group(g)
+            list(pool.map(lambda c: col_hash_update(back[c], T[c]), back))
     same = [c for c in hashes if hashes[c].digest() == back[c].digest()]
     ok = sum_ok and len(same) == len(hashes) and pf.metadata.num_rows == nrows and pf.metadata.num_columns == len(cols)
     t2 = time.time()
@@ -361,14 +445,14 @@ def main_convert(a):
     for p in glob.glob(os.path.join(a.dst, '*.part')) + glob.glob(os.path.join(a.dst, 'trees', '*.part')):
         os.unlink(p)                             # left by a killed job
     jobs.sort(key=lambda j: -os.path.getsize(j[0]))          # largest (the tree file) first
-    print('%d FITS files, %d to convert (%d up to date), %d processes, blocks of %d MB'
-          % (n_all, len(jobs), n_all - len(jobs), a.procs, a.block_mb), flush=True)
+    print('%d FITS files, %d to convert (%d up to date), %d processes x (%d hash + reader + writer threads), blocks of %d MB'
+          % (n_all, len(jobs), n_all - len(jobs), a.procs, a.threads, a.block_mb), flush=True)
     t0 = time.time()
     bad = 0
     log = os.path.join(a.dst, 'conversion.jsonl')
     os.makedirs(os.path.join(a.dst, 'trees'), exist_ok=True)
     with ProcessPoolExecutor(a.procs) as ex:
-        fut = {ex.submit(convert, f, d, a.block_mb): f for f, d in jobs}
+        fut = {ex.submit(convert, f, d, a.block_mb, a.threads): f for f, d in jobs}
         for x in as_completed(fut):
             try:
                 r = x.result()
@@ -424,6 +508,8 @@ def main():
     ap.add_argument('src'); ap.add_argument('dst')
     ap.add_argument('--procs', type=int, default=4)
     ap.add_argument('--block-mb', type=int, default=256)
+    ap.add_argument('--threads', type=int, default=4, help='per file: column-hash threads (plus a reader and a writer '
+                    'thread); 1 = one hash thread, still overlapped')
     return main_convert(ap.parse_args())
 
 
