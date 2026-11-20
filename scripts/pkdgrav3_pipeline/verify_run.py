@@ -5,13 +5,15 @@
 Checks (failures block the archive; warnings are reported only):
   snapshots   every planned output: all .pkc files complete (header/trailer/particle counts, pkcreader), N^3
               particles, redshift as planned, subsample percents = SUBSAMPLES, the potential where expected;
-              the kept full snapshots also with pkc_check (every particle ID exactly once)
+              the kept full snapshots also with pkc_check (every particle ID exactly once; VF_PKC_NPROC at a time,
+              passes cached by file size/mtime)
   subsample   the kept subsample files hold KEEP_SUBSAMPLE_PCT % of the particles
   rockstar    rockstar_done events (one run or batches) cover every snapshot 0..N-1, each ok
   ctrees      out_<snap>.trees for every snapshot in scales.txt; the snapshots without trees are the first ones
               (too few halos); trees/ tree_*.dat, locations.dat, forests.list (or their FITS) present
   vahc        .vahc (and .tens with PP_TENS=1, .vpot with PP_POT=1 where the .pkc store the potential): as many rows
-              as the .trees, the same halo IDs in the same order
+              as halos (basic FITS table rows; .trees text only without that table), the same halo IDs in the same
+              order in all of them (row-by-row equality with the .trees: the fits stage's check, required below)
   fits        the fits stage ended with 0 check failures after the last vahc; every kept FITS table and the
               tree FITS present and non-empty
   parquet     (PARQUET=1) every kept FITS file has its Parquet copy (stage parquet, after the last fits, passed its
@@ -128,18 +130,50 @@ def main():
             sub_frac.append((snap, n / float(S.npart)))
     c['info']['n_outputs'] = len(outs)
     c['info']['with_potential'] = sorted(s for s, v in has_pot.items() if v)
-    # kept full snapshots: every ID once
+    # kept full snapshots: every ID once. Several snapshots at a time (VF_PKC_NPROC, default 4; the job's threads
+    # shared among them); a snapshot that passed before with the same files (names, sizes, mtimes) is not read again
+    # (<state>/pkc_check_cache.json), so a verify rerun after another failure does not repeat hours of reading.
     pkc_check = os.path.join(E.get('PKD_IO_ROOT', ''), 'build_snapcomp', 'pkc_check')
-    if '--skip-pkc-check' not in sys.argv:
+    if '--skip-pkc-check' not in sys.argv and pl['full']:
+        cache_f = os.path.join(P['state'], 'pkc_check_cache.json')
+        try:
+            cache = json.load(open(cache_f))
+        except (OSError, ValueError):
+            cache = {}
+        todo, sig = [], {}
         for snap in pl['full']:
             pre = os.path.join(P['pkc'], 'snap.%s' % outs[snap][1])
+            sig[snap] = [[os.path.basename(f), os.path.getsize(f), os.path.getmtime(f)] for f in sorted(glob.glob(pre + '*'))]
+            prev = cache.get(str(snap))
+            if prev and prev.get('rc') == 0 and prev.get('files') == sig[snap]:
+                c['info'].setdefault('pkc_check', {})[str(snap)] = dict(prev, cached=True)
+            else:
+                todo.append((snap, pre))
+        nproc = max(1, min(int(E.get('VF_PKC_NPROC') or 4), len(todo) or 1))
+        per = max(1, threads // nproc)
+
+        def run(task):
+            snap, pre = task
             t1 = time.time()
-            r = subprocess.run([pkc_check, '--threads', str(threads), pre], capture_output=True, text=True)
-            tail = (r.stdout + r.stderr).strip().splitlines()[-2:]
-            if r.returncode != 0:
-                R.fail('snapshots', 'pkc_check snapshot %d: rc %d: %s' % (snap, r.returncode, ' | '.join(tail)))
-            c['info'].setdefault('pkc_check', {})[str(snap)] = dict(rc=r.returncode, seconds=round(time.time() - t1, 1),
-                                                                    out=' | '.join(tail))
+            r = subprocess.run([pkc_check, '--threads', str(per), pre], capture_output=True, text=True)
+            return snap, r, time.time() - t1
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(nproc) as ex:
+            for snap, r, dt in ex.map(run, todo):
+                tail = (r.stdout + r.stderr).strip().splitlines()[-2:]
+                if r.returncode != 0:
+                    R.fail('snapshots', 'pkc_check snapshot %d: rc %d: %s' % (snap, r.returncode, ' | '.join(tail)))
+                res = dict(rc=r.returncode, seconds=round(dt, 1), threads=per, out=' | '.join(tail))
+                c['info'].setdefault('pkc_check', {})[str(snap)] = res
+                if r.returncode == 0:
+                    cache[str(snap)] = dict(res, files=sig[snap])
+                else:
+                    cache.pop(str(snap), None)
+        c['info']['pkc_check_parallel'] = [nproc, per]
+        os.makedirs(P['state'], exist_ok=True)
+        with open(cache_f + '.tmp', 'w') as fh:
+            json.dump(cache, fh, indent=1)
+        os.replace(cache_f + '.tmp', cache_f)
     # ------------------------------------------------------------ subsample fraction
     c = R.check('subsample')
     c['info']['kept_pct'] = pl['subsample_pct']
@@ -187,26 +221,49 @@ def main():
     if not (glob.glob(os.path.join(td, 'tree_*.dat')) or glob.glob(os.path.join(tf, 'tree_*.fits*'))):
         R.fail('ctrees', 'no tree_* files (ASCII or FITS)')
     # ------------------------------------------------------------ vahc / tens / vpot  and halo counts
+    # The halo count of a snapshot is the row count of its basic FITS table (header only; the fits stage checked that
+    # table against the .trees row by row, and that every .vahc/.tens/.vpot row is the .trees halo in order). The
+    # .trees text is parsed only when that table is missing (2048^3: ~16 GB of text per snapshot). Here: every
+    # catalogue present, as many rows as halos, and the same halo IDs in .vahc, .tens and .vpot.
+    try:
+        import fits_to_parquet as f2p
+    except ImportError:          # no pyarrow here: counts from the .trees text
+        f2p = None
     c = R.check('vahc')
     want = ['vahc'] + (['tens'] if E.get('PP_TENS', '1') == '1' else [])
-    nh = {}
+    nh, from_text = {}, []
     for s in tree_snaps:
         tr = os.path.join(P['halo'], 'out_%d.trees' % s)
-        if not os.path.isfile(tr):
-            continue
-        tid = ids_of(tr, 1)
-        nh[s] = len(tid)
+        fb = os.path.join(P['halo'], 'compressed', 'out_%d_basic.fits.gz' % s)
+        tid = None
+        try:
+            nh[s] = int(f2p.table_rows(fb)[0])   # AttributeError without f2p
+        except Exception:  # noqa: BLE001  no or unreadable FITS table (the fits check below fails it): the text
+            if not os.path.isfile(tr):
+                continue
+            tid = ids_of(tr, 1)
+            nh[s] = len(tid)
+            from_text.append(s)
         kinds = list(want) + (['vpot'] if E.get('PP_POT', '0') == '1' and has_pot.get(s) else [])
+        ref = None
         for k in kinds:
             f = os.path.join(P['halo'], 'out_%d.%s' % (s, k))
             if not os.path.isfile(f):
                 R.fail('vahc', 'no out_%d.%s' % (s, k))
                 continue
-            vid = ids_of(f, 0) if len(tid) else []
-            if len(vid) != len(tid):
-                R.fail('vahc', 'out_%d.%s: %d rows, .trees %d' % (s, k, len(vid), len(tid)))
-            elif len(tid) and not (vid == tid).all():
+            vid = ids_of(f, 0) if nh[s] else []
+            if len(vid) != nh[s]:
+                R.fail('vahc', 'out_%d.%s: %d rows, %d halos' % (s, k, len(vid), nh[s]))
+                continue
+            if not nh[s]:
+                continue
+            if tid is not None and not (vid == tid).all():
                 R.fail('vahc', 'out_%d.%s: halo IDs differ from .trees (order or values)' % (s, k))
+            elif ref is not None and not (vid == ref[1]).all():
+                R.fail('vahc', 'out_%d.%s: halo IDs differ from out_%d.%s (order or values)' % (s, k, s, ref[0]))
+            ref = ref or (k, vid)
+    if from_text:
+        c['info']['counts_from_trees_text'] = compress(from_text)
     c['info']['kinds'] = want + (['vpot'] if E.get('PP_POT', '0') == '1' else [])
     c = R.check('halos')
     c['info']['counts'] = {str(k): v for k, v in sorted(nh.items())}

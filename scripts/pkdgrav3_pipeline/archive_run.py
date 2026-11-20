@@ -306,18 +306,25 @@ def source_sums(E):
     P = pl['paths']
     V, files = checked_files(E, pl)
     t0 = time.time()
-    rows = []
-    for cat, snap, src, rel in files:
+    # several files at once (hashlib releases the GIL on large reads/updates); KEPT_SUMS_NPROC, else the job's cores
+    nproc = max(1, int(E.get('KEPT_SUMS_NPROC') or os.environ.get('PBS_NCPUS') or 8))
+
+    def one(f):
+        cat, snap, src, rel = f
         st = os.stat(src)
-        rows.append(dict(path=rel, src=os.path.relpath(src, E['SCRATCH']), cat=cat, snap=snap, size=st.st_size,
-                         mtime=st.st_mtime, sha256=sha_file(src)))
+        return dict(path=rel, src=os.path.relpath(src, E['SCRATCH']), cat=cat, snap=snap, size=st.st_size,
+                    mtime=st.st_mtime, sha256=sha_file(src))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(nproc) as ex:
+        rows = list(ex.map(one, files))      # same order as files
     out = dict(run='%s/r%s' % (E['STEM'], E['REAL']), scratch=E['SCRATCH'], host=os.uname()[1], time=time.strftime('%Y-%m-%dT%H:%M:%S'),
                verify_time=V['time'], bytes=sum(r['size'] for r in rows), files=rows)
     f = os.path.join(P['state'], 'KEPT_FILES.json')
     with open(f + '.part', 'w') as fh:
         json.dump(out, fh, indent=1)
     os.replace(f + '.part', f)
-    print('%s: %d kept files, %s, checksummed in %.0f s' % (f, len(rows), retention.human(out['bytes']), time.time() - t0))
+    print('%s: %d kept files, %s, checksummed in %.0f s (%d at a time)' % (f, len(rows), retention.human(out['bytes']),
+                                                                        time.time() - t0, nproc))
     return 0
 
 
