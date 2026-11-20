@@ -192,8 +192,15 @@ SITES = dict(
     swarm=dict(root='/user1/{user}/sahyadri_scratch', archive='/storage/shadab/sahyadri_sims',
                codes='/user1/{user}/sahyadri_pipeline/codes', pkd='/user1/{user}/sahyadri_pipeline/pkdgrav3_io',
                queue='workq'),
+    # pride (TIFR theory): install_production.sh pride; the same Lustre /user1 as swarm (own scratch directory);
+    # Rockstar, consistent-trees and the venv are built again there (codes), pkdgrav3 for Haswell
+    pride=dict(root='/user1/{user}/sahyadri_scratch_pride', archive='/storage/shadab/sahyadri_sims',
+               codes='/user1/{user}/sahyadri_pride/codes', pkd='/user1/{user}/sahyadri_pride/pkdgrav3_io',
+               queue='workq'),
 )
 SWARM_WALL = '72:00:00'   # every swarm queue
+PRIDE_WALL = '72:00:00'   # pride: one queue (workq), 72 h at most
+PRIDE_NODE_MEM = '240gb'  # pride nodes: 252 GB free in PBS on 13 of 16 (one 189 GB, one 220 GB)
 # pegasus queues (qstat -Qf, 13 Nov 2026): project (-P PEGASUS_PROJECT, the project's budget; 96 h used here),
 # regular (user budget, 48 h at most), debug (4 h, tests); budgets in core-hours (amgr checkbalance)
 PEGASUS_PROJECT = 'hpc2502016'
@@ -258,6 +265,31 @@ def resources_swarm(N):
     return r
 
 
+def resources_pride(N):
+    """pride: 16 nodes x 20 Haswell cores (2 x Xeon E5-2660 v3, AVX2), 189-252 GB, 1 Gb/s Ethernet (no InfiniBand),
+    72 h; Lustre /user1 shared with swarm; ~390 GB node-local disk (/, /tmp, /var/tmp). Simulation on one node up to
+    1024^3 (~200 GB); 2048^3 would need 5 nodes over 1 Gb/s Ethernet (untested, not recommended). vahc grid 1024
+    (~97 GB per snapshot process) 2 snapshots at a time; Rockstar over shared nodes of at most PRIDE_NODE_MEM."""
+    rsm = rockstar_mem(N)
+    w = PRIDE_WALL
+    if N <= 256:
+        r = dict(SIM=(20, '60gb', w, 1), RS=(10, rsm, '12:00:00'), CT=(2, '16gb', '12:00:00'),
+                 PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=10, PP_NPROC=4)
+    elif N <= 512:
+        r = dict(SIM=(20, '100gb', w, 1), RS=(20, rsm, '24:00:00'), CT=(2, '32gb', '24:00:00'),
+                 PP=(20, '220gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=20, PP_NPROC=6)
+    else:
+        sim = (20, '230gb', w, 1) if N <= 1024 else (20, '230gb', w, 5)
+        r = dict(SIM=sim, RS=(20, rsm, w), CT=(2, '128gb', w), PP=(20, '230gb', w), FITS=(16, '160gb', '24:00:00'),
+                 RS_BLOCKS=32, RS_WRITERS=20, PP_NPROC=2)
+    r['RS'] = r['RS'] + (1,)
+    need = RS_MARGIN * int(rsm[:-2])
+    if need > int(PRIDE_NODE_MEM[:-2]):
+        nodes = int(np.ceil(need / int(PRIDE_NODE_MEM[:-2])))
+        r['RS'] = (r['RS'][0], '%dgb' % int(np.ceil(need / nodes)), r['RS'][2], nodes)
+    return r
+
+
 def fmt_l(L):
     return ('%d' % L) if float(L).is_integer() else ('%g' % L).replace('.', 'p')
 
@@ -297,20 +329,22 @@ def write(path, text, force, mode=0o644):
 
 def site_block(a, R):
     """run.conf lines that depend on the site."""
-    if a.site == 'swarm':
+    if a.site in ('swarm', 'pride'):
         return '\n'.join([
-            'SITE=swarm                 # computed on swarm; archived on pawna (the manager pulls the kept files)',
+            'SITE=%s                 # computed on %s; archived on pawna (the manager pulls the kept files)' % (
+                a.site, a.site),
             'REMOTE_ARCHIVE=1        # verify also writes KEPT_FILES.json (checksums for the pull)',
             'PBS_QUEUE=%s' % a.queue,
-            'PBS_PROJECT=            # swarm has no core-hour budgets',
+            'PBS_PROJECT=            # %s has no core-hour budgets' % a.site,
             # whole nodes only where the simulation needs most of their memory (2048^3); else shared like Rockstar
             'SIM_NODES=%d; SIM_MPIPROCS=2; SIM_PLACE=%s   # SIM_NCPU cores per node; 2 MPI ranks per node' % (
                 R['SIM'][3], ('scatter:excl' if int(R['SIM'][1][:-2]) > 300 else 'scatter') if R['SIM'][3] > 1 else 'free'),
-            'SIM_ENV=%s/scripts/pkdgrav3_pipeline/swarm/env_swarm.sh   # pkdgrav3 run-time environment (conda MPI, ssh '
-            'without the conda library path)' % SANDBOX,
+            'SIM_ENV=%s/scripts/pkdgrav3_pipeline/%s/env_%s.sh   # pkdgrav3 run-time environment (conda MPI, ssh '
+            'without the conda library path)' % (SANDBOX, a.site, a.site),
             'SIM_GPU=0',
             'SIM_STAGING=0           # snapshots and checkpoints written straight to SCRATCH (Lustre, ~1.1 GB/s per node)',
-            'RS_PLACE=scatter        # a multi-node Rockstar job shares the nodes with other jobs (swarm nodes are shared)'])
+            'RS_PLACE=scatter        # a multi-node Rockstar job shares the nodes with other jobs (%s nodes are shared)'
+            % a.site])
     if a.site == 'pawna':
         return ('PBS_QUEUE=%s\n'
                 'SIM_STAGING=1           # snapshots and checkpoints written to the node\'s SSD, copied to NFS during the run'
@@ -443,7 +477,7 @@ def setup_cosmo(a, cosmo):
     force_res = L * soft_box
     k, T, s8_start, s8 = ic_spectrum(c)
     res = (resources(N) if a.site == 'pawna' else resources_swarm(N) if a.site == 'swarm'
-           else resources_pegasus(N, a.queue))
+           else resources_pride(N) if a.site == 'pride' else resources_pegasus(N, a.queue))
     if a.sim_gpu and a.site != 'pegasus':
         sys.exit('--sim-gpu: only pegasus has GPU nodes')
     if a.sim_gpu and not a.sim_nodes:
