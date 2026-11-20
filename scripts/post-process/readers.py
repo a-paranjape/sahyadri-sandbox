@@ -599,6 +599,13 @@ class HaloReader(SnapshotReader):
 
         hdtype = self.halodatatype if not va else self.vadatatype
         hnames = self.halodatanames if not va else self.vadatanames
+        if va:
+            import halo_table_io   # .vahc may be binary (vahc_fast.py, PP_BINARY=1): same columns in the same order
+            if halo_table_io.is_binary(halocat):
+                rec = halo_table_io.read_records(halocat)
+                if len(rec.dtype.names) != len(hnames):
+                    raise ValueError('%s: %d columns, expected %d' % (halocat, len(rec.dtype.names), len(hnames)))
+                return pd.DataFrame({h: np.asarray(rec[r]) for h, r in zip(hnames, rec.dtype.names)}).astype(hdtype).to_records()
         halos = pd.read_csv(halocat,dtype=hdtype,names=hnames,comment='#',delim_whitespace=True,header=None).to_records()
 
         return halos

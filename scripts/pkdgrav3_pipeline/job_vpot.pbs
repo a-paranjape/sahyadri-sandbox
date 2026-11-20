@@ -7,7 +7,7 @@ set -u
 source "${PIPE_ENV:?pass -v CONF=...,PIPE_ENV=<repo>/scripts/pkdgrav3_pipeline/pipeline_env.sh}"
 ls "$HALO_DIR"/out_*.trees > /dev/null 2>&1 || { stamp "no out_<snap>.trees in $HALO_DIR (run stage ctrees first)"; exit 1; }
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-/usr/bin/time -v "$PY" "$PP/run_addvalue.py" "$STEM" --real "$REAL" --grid "$PP_GRID" --down-to 0 --no-vahc --fast --pot \
+/usr/bin/time -v "$PY" "$PP/run_addvalue.py" "$STEM" --real "$REAL" --grid "$PP_GRID" --down-to 0 --no-vahc --fast --pot $([ "${PP_BINARY:-1}" = 1 ] || echo --text) \
     --nproc "$PP_NPROC" 2> "$LOGS/vpot_time.${PBS_JOBID%%.*}.log" | grep -v '^\.\.\.'
 rc=${PIPESTATUS[0]}
 grep -E "Elapsed|Maximum resident" "$LOGS/vpot_time.${PBS_JOBID%%.*}.log"

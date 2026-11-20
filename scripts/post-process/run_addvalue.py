@@ -227,9 +227,7 @@ def _fast_snap(snap, args, hr, sr, ps, base, todo, t0):
     for k in todo:
         if k == 'pk':
             continue
-        part = base + '.' + k + '.part'
-        av.write(k, res[k], part)
-        os.replace(part, base + '.' + k)
+        av.write(k, res[k], base + '.' + k, binary=not args.text)   # via <file>.part (halo_table_io.write)
     if 'pk' in todo:   # matter and halo spectra from the same transformed density (pk_measure.py)
         import pk_measure
         t2 = time.time()
@@ -271,6 +269,9 @@ def main():
     ap.add_argument('--pot', action='store_true',
                     help='also write out_<snap>.vpot (mean particle potential within rs, R200b and at the .vahc scales; '
                          'only snapshots that store the potential; implies --fast)')
+    ap.add_argument('--text', action='store_true',
+                    help='--fast: write .vahc/.tens/.vpot as text (as AddValue) instead of binary (halo_table_io.py; '
+                         'same header lines, then packed records; same values, read by every pipeline reader)')
     ap.add_argument('--pk', action='store_true',
                     help='also write out_<snap>.pk: matter and halo-mass-bin power spectra and biases from the same '
                          'density grid (pk_measure.py), for every output (density-only pass without a halo catalogue)')

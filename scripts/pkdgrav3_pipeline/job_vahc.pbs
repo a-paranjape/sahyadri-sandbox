@@ -11,6 +11,9 @@ TENS=; [ "$PP_TENS" = 1 ] && TENS=--tens
 # PP_POT=1: also .vpot where the .pkc store the potential (needs PP_FAST=1)
 [ "${PP_FAST:-1}" = 1 ] && TENS="$TENS --fast"
 [ "${PP_POT:-0}" = 1 ] && TENS="$TENS --pot"
+# PP_BINARY=1 (default): .vahc/.tens/.vpot written binary (halo_table_io.py: the text header lines, then packed records;
+# same values, same file names); 0: text as AddValue. Every reader (FITS stage, checks, verify, readers.py) takes both.
+[ "${PP_BINARY:-1}" = 1 ] || TENS="$TENS --text"
 # PP_PK=1 (default): matter and halo-mass-bin P(k) of every output from the same grid (pk_measure.py), and CLASS
 # P(k) at every output redshift (class_pk.py, once) for the checks in stage verify
 if [ "${PP_PK:-1}" = 1 ]; then

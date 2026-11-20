@@ -24,6 +24,8 @@ import sys
 import numpy as np
 from scipy.spatial import cKDTree
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "post-process"))
+
 COLS = ['scale', 'id', 'pid', 'upid', 'mvir', 'rvir', 'rs', 'vmax', 'vrms', 'x', 'y', 'z', 'vx', 'vy', 'vz',
         'Spin_Bullock', 'M200b', 'M200c', 'Xoff', 'b_to_a', 'c_to_a', 'T/|U|']
 RATIOS = ['mvir', 'M200b', 'vmax', 'conc', 'Spin_Bullock', 'b_to_a', 'c_to_a', 'T/|U|']
@@ -67,10 +69,9 @@ def read_cat(d, i):
     h['a'] = scale if scale == scale else (float(h['scale'][0]) if 'scale' in h and n else np.nan)
     v = os.path.join(d, 'out_%d.vahc' % i)
     if os.path.exists(v):
-        with open(v) as f:
-            f.readline()
-            vn = f.readline().lstrip('#').split()
-        vd = np.loadtxt(v, comments='#', ndmin=2)
+        import halo_table_io   # text or binary (vahc_fast.py)
+        vn = halo_table_io.names(v)
+        vd = halo_table_io.read(v)
         row = {int(k): j for j, k in enumerate(vd[:, 0])} if len(vd) else {}
         idx = np.array([row.get(int(k), -1) for k in h['id']])
         for c in VAHC:

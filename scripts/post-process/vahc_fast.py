@@ -473,16 +473,14 @@ class FastAddValue(AddValue):
                 h += ' tens11_' + s + ' tens22_' + s + ' tens33_' + s + ' tens12_' + s + ' tens13_' + s + ' tens23_' + s
         return h + '\n'
 
-    def write(self, kind, arr, path=None):
-        """Write as AddValue (header, then one row per halo: str() of every value, space separated)."""
+    def write(self, kind, arr, path=None, binary=True):
+        """Write the header lines, then the rows: binary (halo_table_io: packed little-endian records after a
+        #SAHYADRI-BINARY line) or as AddValue (one row per halo: str() of every value, space separated). Both are
+        written 200000 rows at a time (memory: a whole-table str() copy is ~128 bytes per value) via <path>.part."""
+        import halo_table_io
         if path is None:
             path = self.halo_path + self.sim_stem + '/r{0:d}/out_{1:d}.{2}'.format(self.real, self.snap, kind)
         t = time.time()
-        cols = [arr[n].astype(str) for n in arr.dtype.names]
-        with open(path, 'w') as f:
-            f.write(self.header(kind))
-            step = 200000
-            for i in range(0, arr.size, step):
-                f.write(''.join(' '.join(r) + '\n' for r in zip(*(c[i:i + step] for c in cols))))
+        halo_table_io.write(path, arr, self.header(kind), binary=binary)
         self.timing['write_' + kind] = time.time() - t
         return path

@@ -33,10 +33,8 @@ def get_header_dic(file_name):
     head_row={'vahc':2,'trees':1}
     
     file_type=file_name.split('.')[-1]
-    with open(file_name,'r') as fin:
-        for ii in range(0,head_row[file_type]):
-            tline=fin.readline()
-            #print(ii,tline)
+    import halo_table_io   # .vahc may be binary (vahc_fast.py): its '#' header lines are the text ones
+    tline=halo_table_io.header_lines(file_name)[head_row[file_type]-1]+'\n'
 
     col_dic=parse_header(tline,file_type=file_type)
 
@@ -160,7 +158,11 @@ def convert_fits(indir='',rootin='',outdir=None,list_output_type=['basic','exten
         Fdic_out={}
 
         #open the text file with pandas iterator
-        tb=pd.read_csv(source_file,delim_whitespace=True,comment='#',header=None,
+        import halo_table_io
+        if halo_table_io.is_binary(source_file):
+            tb=(pd.DataFrame(v) for v in halo_table_io.iter_chunks(source_file,nlim))
+        else:
+            tb=pd.read_csv(source_file,delim_whitespace=True,comment='#',header=None,
               dtype=float,chunksize=nlim)
         count=0
         for chunk in tb:

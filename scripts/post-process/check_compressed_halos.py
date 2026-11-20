@@ -21,6 +21,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import compress_halo_outputs as C  # noqa: E402
+import halo_table_io as H  # noqa: E402
 
 bad = 0
 
@@ -60,7 +61,7 @@ def check_snapshot(R, out, snap):
     vahc = os.path.join(R, 'out_%s.vahc' % snap)
     if os.path.isfile(vahc) and os.path.isfile(os.path.join(out, 'out_%s_vahc.fits.gz' % snap)):
         vn = C.halo_header_names(vahc, 'vahc')
-        V = np.loadtxt(vahc, ndmin=2)
+        V = H.read(vahc)   # text or binary
         with fitsio.FITS(os.path.join(out, 'out_%s_vahc.fits.gz' % snap)) as f:
             d = f[1].read()
         nb = [c for c in vn if c not in C.BASIC_COLS and (c not in d.dtype.names or not same(d[c], V[:, vn.index(c)]))]  # .vpot cols: below
@@ -71,7 +72,7 @@ def check_snapshot(R, out, snap):
         vpot = os.path.join(R, 'out_%s.vpot' % snap)
         if os.path.isfile(vpot):
             pn = C.halo_header_names(vpot, 'vpot')
-            P = np.loadtxt(vpot, ndmin=2)
+            P = H.read(vpot)
             nb = [c for c in pn if c != 'haloID' and (c not in d.dtype.names or not same(d[c], P[:, pn.index(c)]))]
             ok(not nb and np.array_equal(P[:, pn.index('haloID')], A[:, names.index('id')]),
                'out_%s: .vpot columns (%d) in the vahc file equal the ASCII, rows in order%s' % (
@@ -79,7 +80,7 @@ def check_snapshot(R, out, snap):
     tens = os.path.join(R, 'out_%s.tens' % snap)
     if os.path.isfile(tens) and os.path.isfile(os.path.join(out, 'out_%s_tens.fits.gz' % snap)):
         tn = C.halo_header_names(tens, 'tens')
-        V = np.loadtxt(tens, ndmin=2)
+        V = H.read(tens)
         with fitsio.FITS(os.path.join(out, 'out_%s_tens.fits.gz' % snap)) as f:
             d = f[1].read()
         nb = [c for c in d.dtype.names if not same(d[c], V[:, tn.index(c)])]

@@ -47,8 +47,12 @@ def events(state):
 
 
 def ids_of(path, col):
-    """Integer column `col` of an ASCII catalogue (comment lines '#'), as a numpy array."""
+    """Integer column `col` of a catalogue (comment lines '#'), as a numpy array; .vahc/.tens/.vpot may be binary
+    (halo_table_io)."""
     import pandas as pd
+    import halo_table_io
+    if halo_table_io.is_binary(path):
+        return halo_table_io.column(path, halo_table_io.names(path)[col]).astype('int64')
     df = pd.read_csv(path, comment='#', sep=r'\s+', header=None, usecols=[col], dtype={col: 'int64'},
                      engine='c')
     return df[col].to_numpy()

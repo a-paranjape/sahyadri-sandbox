@@ -57,6 +57,9 @@ import fitsio
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import halo_table_io  # noqa: E402  (.vahc/.tens/.vpot, text or binary)
+
 TOOL = "compress_halo_outputs.py 1.0 (Sahyadri, 2026-11-11)"
 
 # same split as ConvertToFITS.out_column_list (pegasus version of 22 Jun 2026)
@@ -477,9 +480,13 @@ def finish(writer, prov_arr, out, args, extra_cards=(), stream=False):
 
 
 def halo_header_names(path, kind):
-    """Column names as ConvertToFITS.get_header_dic makes them: .trees line 1 without '(N)'; .vahc/.tens line 2."""
-    with open(path) as fh:
-        lines = [fh.readline() for _ in range(2)]
+    """Column names as ConvertToFITS.get_header_dic makes them: .trees line 1 without '(N)'; .vahc/.tens line 2
+    (text or binary, halo_table_io)."""
+    if kind != 'trees':
+        lines = halo_table_io.header_lines(path)[:2]
+    else:
+        with open(path) as fh:
+            lines = [fh.readline() for _ in range(2)]
     line = lines[0] if kind == 'trees' else lines[1]
     assert line.startswith('#'), path + ': no column header line'
     toks = line[1:].split()
@@ -522,7 +529,7 @@ def convert_halo_snapshot(task):
     prov = run_prov + [('out_%s.trees header' % snap, '\n'.join(hdr_lines))]
     for k in ('vahc', 'vpot'):
         if have[k]:
-            prov.append(('out_%s.%s header' % (snap, k), '\n'.join(ascii_header(src[k])[0])))
+            prov.append(('out_%s.%s header' % (snap, k), '\n'.join(halo_table_io.header_lines(src[k]))))
     prov_arr = provenance_table(prov)
 
     # columns of each output: list of (source kind, column name)
@@ -557,8 +564,10 @@ def convert_halo_snapshot(task):
         tmp = os.path.join(tmpdir, '.tmp_out_%s_%s_%d.fits' % (snap, t, os.getpid()))
         writers[t] = (TableWriter(tmp, dt, 'HALOS', cards), cols)
 
-    readers = {k: pd.read_csv(src[k], sep=r'\s+', comment='#', header=None, dtype=np.float64, engine='c',
-                              chunksize=args.chunk) for k in sources}
+    # .trees: text; .vahc/.tens/.vpot: text or binary (halo_table_io), chunks of the same rows
+    readers = {k: (pd.read_csv(src[k], sep=r'\s+', comment='#', header=None, dtype=np.float64, engine='c',
+                               chunksize=args.chunk) if k == 'trees' else halo_table_io.iter_chunks(src[k], args.chunk))
+               for k in sources}
     t0 = time.time()
     scale = None
     for chunks in zip(*[readers[k] for k in sources]):
