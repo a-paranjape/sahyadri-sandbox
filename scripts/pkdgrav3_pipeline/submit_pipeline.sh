@@ -84,7 +84,8 @@ for st in sim rockstar ctrees vahc vpot fits parquet xcorr ximult vprof verify a
   # shellcheck disable=SC2206
   RL=(-l ${R// -l / -l })      # "select=... -l place=..." -> two -l options
   PROJ=(); [ -n "${PBS_PROJECT:-}" ] && PROJ=(-P "$PBS_PROJECT")   # pegasus project queue: the project's budget
-  cmd=("$QSUB" -N "$N" -q "${PBS_QUEUE:-workq}" "${PROJ[@]}" "${RR[@]}" "${RL[@]}" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
+  # ${A[@]+"${A[@]}"}: an empty array under set -u is an "unbound variable" in bash < 4.4 (leap, CentOS 7: 4.2)
+  cmd=("$QSUB" -N "$N" -q "${PBS_QUEUE:-workq}" ${PROJ[@]+"${PROJ[@]}"} ${RR[@]+"${RR[@]}"} "${RL[@]}" -l "walltime=$W" -j oe -o "$LOGS/pbs.$st.$RUN.out" $DEP $H
        -v "$V" "$HERE/job_$st.pbs")
   if [ -n "$DRY" ]; then echo "${cmd[*]}"; prev="<$st>"; continue; fi
   id=$("${cmd[@]}")
