@@ -119,7 +119,17 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                                         sandbox='/user1/shadab/sahyadri_pride/sahyadri-sandbox',
                                         mirror='/user/shadab/sahyadri_mirror/pride', sync_s=120,
                                         max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
-                                        scratch_reserve_gb=2000, max_pbs_queued=4)))
+                                        scratch_reserve_gb=2000, max_pbs_queued=4),
+                             # leap (TIFR theory): same Lustre /user1 (own scratch); simulation only so far (pkdgrav3
+                             # from leap/build_c7.sh, pride's venv for the Python steps; the halo stages need builds
+                             # for glibc 2.17); compute nodes cannot qsub
+                             leap=dict(login='shadab@leap.theory.tifr.res.in', data='shadab@leap.theory.tifr.res.in',
+                                       scratch_root='/user1/shadab/sahyadri_scratch_leap',
+                                       python='/user1/shadab/sahyadri_pride/codes/venv/bin/python',
+                                       sandbox='/user1/shadab/sahyadri_c7/sahyadri-sandbox',
+                                       mirror='/user/shadab/sahyadri_mirror/leap', sync_s=120,
+                                       max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=0,
+                                       scratch_reserve_gb=2000, max_pbs_queued=4)))
 LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s')
 # max_pbs_queued: our jobs waiting in the site's PBS at most (pegasus queued_jobs_threshold: project 6, debug 2 per
 # user); with it, the post-processing stages are submitted one at a time, each after the previous one finished
@@ -401,7 +411,7 @@ def read_plan(path):
 
 TEMPLATES = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'production')
 QSTATES = ('open', 'drain', 'closed')
-DEFAULT_QUEUE = {LOCAL: 'workq', 'pegasus': 'project', 'swarm': 'workq', 'pride': 'workq'}
+DEFAULT_QUEUE = {LOCAL: 'workq', 'pegasus': 'project', 'swarm': 'workq', 'pride': 'workq', 'leap': 'workq'}
 
 
 def read_queues(path):

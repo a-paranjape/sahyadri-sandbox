@@ -47,7 +47,11 @@ for st in sim rockstar ctrees vahc vpot fits parquet xcorr ximult vprof verify a
     sim)      # SIM_NODES > 1 or SIM_MPIPROCS > 1 (pegasus): pkdgrav3 with MPI ranks over the nodes (job_sim.pbs)
               # SIM_GPU=1 (pegasus GPU nodes): one GPU per node (ngpus=1), job_sim.pbs then runs build_gpu
               GPU=; [ "${SIM_GPU:-0}" = 1 ] && GPU=":ngpus=1"
-              if [ "${SIM_NODES:-1}" -gt 1 ] || [ "${SIM_MPIPROCS:-1}" -gt 1 ]; then
+              # SIM_SELECT (leap): the whole select, nodes named (SIM_NODES chunks of SIM_NCPU cores, SIM_MPIPROCS ranks)
+              if [ -n "${SIM_SELECT:-}" ]; then
+                R="select=$SIM_SELECT"
+                [ -n "${SIM_PLACE:-}" ] && R="$R -l place=$SIM_PLACE"
+              elif [ "${SIM_NODES:-1}" -gt 1 ] || [ "${SIM_MPIPROCS:-1}" -gt 1 ]; then
                 R="select=${SIM_NODES:-1}:ncpus=$SIM_NCPU:mpiprocs=${SIM_MPIPROCS:-1}$GPU:mem=$SIM_MEM"
                 [ -n "${SIM_PLACE:-}" ] && R="$R -l place=$SIM_PLACE"
               else
