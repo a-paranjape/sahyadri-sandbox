@@ -231,9 +231,10 @@ PRIDE_WALL = '72:00:00'   # pride: one queue (workq), 72 h at most
 PRIDE_NODE_MEM = '240gb'  # pride nodes: 252 GB free in PBS on 13 of 16 (one 189 GB, one 220 GB)
 LEAP_WALL = '72:00:00'    # leap: workq, 72 h (resources_default.walltime); 340 running cores per user
 LEAP_NODE_MEM = '175gb'   # leap nodes: 187 GB in PBS (196302716 kb)
-# leap nodes whose hfi1 fabric port is ACTIVE (21 Nov 2026; compute-4-3: DOWN, 4-10: offline, 4-1/4-2/4-5 not
-# checked): a multi-node simulation names its nodes (SIM_SELECT), since PBS cannot leave one node out
-LEAP_FABRIC_NODES = ['compute-4-%d' % i for i in (4, 6, 7, 8, 9, 11, 12)]
+# leap nodes with an ACTIVE hfi1 fabric port that were up on 22 Nov 2026 (compute-4-3: port DOWN; 4-7: node down,
+# port active before; 4-1, 4-10: offline): a multi-node simulation names its nodes (SIM_SELECT), since PBS cannot
+# leave one node out. The first SIM_NODES are used; if one goes down, edit SIM_SELECT in run.conf (a restart reads it)
+LEAP_FABRIC_NODES = ['compute-4-%d' % i for i in (2, 4, 5, 6, 8, 9, 11, 12)]
 # pegasus queues (qstat -Qf, 13 Nov 2026): project (-P PEGASUS_PROJECT, the project's budget; 96 h used here),
 # regular (user budget, 48 h at most), debug (4 h, tests); budgets in core-hours (amgr checkbalance)
 PEGASUS_PROJECT = 'hpc2502016'
