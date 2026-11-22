@@ -318,7 +318,7 @@ def resources_pride(N):
                  PP=(20, '220gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=20, PP_NPROC=6)
     else:
         sim = (20, '230gb', w, 1) if N <= 1024 else (20, '230gb', w, 5)
-        r = dict(SIM=sim, RS=(20, rsm, w), CT=(2, '128gb', w), PP=(20, '230gb', w), FITS=(16, '160gb', '24:00:00'),
+        r = dict(SIM=sim, RS=(20, rsm, w), CT=(20, '128gb', w), PP=(20, '230gb', w), FITS=(16, '160gb', '24:00:00'),
                  RS_BLOCKS=32, RS_WRITERS=20, PP_NPROC=2)
     r['RS'] = r['RS'] + (1,)
     need = RS_MARGIN * int(rsm[:-2])
