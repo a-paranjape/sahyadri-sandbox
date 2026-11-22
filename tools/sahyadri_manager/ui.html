@@ -182,6 +182,7 @@ function renderRun(r, idx){
     ${r.err?`<div class="fail">config: ${h(r.err)}</div>`:''}
     ${fail}
     ${r.stalled?`<div class="fail">${h(r.stalled)}: the manager leaves this run alone until its storage answers (its PBS jobs are not touched)</div>`:''}
+    ${Object.entries(r.alerts||{}).map(([k,a])=>`<div class="fail" title="${h(k)}"><b>ALERT</b> since ${when(a.t)}: ${h(a.msg)} <button onclick="act({run:'${h(r.name)}',action:'dismiss_alert',key:'${h(k)}'})" title="hide this alert until it changes">Dismiss</button></div>`).join('')}
     ${r.archive_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">archive waiting: ${h(r.archive_msg)}</div>`:''}
     ${r.budget_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">waiting for core hours: ${h(r.budget_msg)}</div>`:''}
     ${simline}

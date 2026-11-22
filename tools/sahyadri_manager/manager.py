@@ -48,6 +48,7 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
     kept files from the data node into ARCHIVE (archive_run.py with PULL_HOST; pawna's compute nodes cannot reach
     it), at most max_pulls at a time; trash/undo/purge on the site with scratch_ops.py over ssh
 """
+import datetime
 import glob
 import http.server
 import json
@@ -85,6 +86,12 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    # a file system (run SCRATCH, ARCHIVE) that does not answer a small read/write test within
                    # storage_timeout_s is 'not responding': its runs are left alone until it answers again
                    storage_timeout_s=30,
+                   # watchdog (alerts on the page and in the log; nothing is killed or resubmitted by it):
+                   # a running simulation whose log has not changed for max(sim_stall_s, sim_stall_steps x its step
+                   # time); a staged snapshot or checkpoint finished but not drained to NFS after drain_stall_s, or
+                   # the drain writing straight to NFS (node disk full); swap in use on the node above swap_alert_gb
+                   # (job_sim.pbs node_mem events); a stage left on a node by an earlier job (stage_leftover)
+                   sim_stall_s=7200, sim_stall_steps=5, drain_stall_s=10800, swap_alert_gb=16,
                    local_codes='/user/shadab/sahyadri_prod/codes',
                    # planned runs: set up, registered and scheduled by the manager; queues: which PBS queues take
                    # jobs (open | drain | closed) and their own limits. Both in the manager's directory (edited there,
@@ -503,7 +510,7 @@ def sync_site(cfg, site, runs, timeout=1800):
         rs = run.E['REMOTE_SCRATCH'].rstrip('/')
         st, r = run.E['STEM'], run.E['REAL']
         for rel in ('state/%s/r%s' % (st, r), 'sims/%s/r%s/output_steps.txt' % (st, r), 'sims/%s/r%s/snapnames.txt' % (st, r),
-                    'sims/%s/r%s/run.*.log' % (st, r), 'sims/%s/r%s/logs' % (st, r), 'halos/%s/r%s/pk' % (st, r)):
+                    'sims/%s/r%s/run.*.log' % (st, r), 'sims/%s/r%s/drain.*.log' % (st, r), 'sims/%s/r%s/logs' % (st, r), 'halos/%s/r%s/pk' % (st, r)):
             srcs.append('%s/./%s' % (rs, rel))
     os.makedirs(S['mirror'], exist_ok=True)
     cmd = (['rsync', '-rtR', '--partial', '-e', 'ssh ' + ' '.join(SSH_OPTS + ['-o', 'ControlPath=%s/ssh-%%r@%%h' % HOME])]
@@ -690,18 +697,41 @@ class Run:
         D = dict(name=self.name, conf=self.conf, n_out=len(self.outs), err=self.err)
         J = self.jobs(qjobs, qtime)
         D['jobs'] = sorted(J.values(), key=lambda j: jobnum(j['job']))
-        ready = set()
+        # Restarts from a checkpoint (rewinds): a simulation job restarted from the checkpoint of step K rewrites the
+        # outputs after K. Whatever was announced, run through Rockstar or archived for those outputs before the
+        # restart belongs to a run that no longer exists (a job killed after its last checkpoint). From the job's
+        # sim_rewind event, or its sim_info restart path (jobs before sim_rewind existed).
+        cut = self.rewind_cuts(J)
+        D['rewinds'] = cut['rewinds']
+        tcut = cut['tcut']                       # output index -> time of the newest restart that rewrites it (0: none)
+        ready, since = set(), {}
         for e in self.ev:
             if e['ev'] == 'snap_ready' and e.get('step') in self.step_index:
-                ready.add(self.step_index[e['step']])
+                i = self.step_index[e['step']]
+                if e['t'] < tcut.get(i, 0):
+                    continue                     # announced before a restart that rewrites it
+                k = cut['job_step'].get(e['job'])
+                if e.get('earlier') and k is not None and int(e['step'], 10) > k:
+                    continue                     # restart announcement of an output after the checkpoint (old jobs)
+                ready.add(i)
+                since[i] = min(since.get(i, e['t']), e['t'])
         D['ready'] = sorted(ready)
+        D['ready_since'] = since
         D['sim_done'] = any(e['ev'] == 'sim_outputs' and int(e.get('ndone', -1)) == int(e.get('nout', -2))
                             for e in self.ev)
-        cov = set()
+        cov, D['rs_redo'] = set(), []
         for e in self.ev:
             if e['ev'] == 'rockstar_done' and int(e.get('ok', 0)) == 1:
-                cov.update(range(int(e['first']), int(e['last']) + 1))
+                t0 = J.get(e['job'], {}).get('start', e['t'])
+                for i in range(int(e['first']), int(e['last']) + 1):
+                    # an output that a restart rewrote counts only if Rockstar ran after its new version was ready
+                    # (10 min for clocks of different nodes)
+                    if tcut.get(i, 0) and not (i in since and t0 >= since[i] - 600):
+                        D['rs_redo'].append(i)
+                        continue
+                    cov.add(i)
         D['rs_done'] = sorted(cov)
+        D['rs_redo'] = sorted(set(D['rs_redo']) - cov)
         last = {}
         for j in D['jobs']:
             last[j['stage']] = j
@@ -717,13 +747,44 @@ class Run:
         D['verify'] = ok_after('verify_done')
         D['archive'] = ok_after('archive_done')
         # particles archived in batches while the run is computed: the newest snapshot of a passed batch
-        D['archb'] = max([int(e['upto']) for e in self.ev if e['ev'] == 'archive_batch_done' and int(e.get('ok', 0)) == 1]
-                         or [-1])
+        # a batch done before a restart that rewrote some of its outputs counts up to the output before the first of them
+        # (the next batch copies them again: archive_run.py skips only files of the same size and time)
+        ab = [-1]
+        for e in self.ev:
+            if e['ev'] == 'archive_batch_done' and int(e.get('ok', 0)) == 1:
+                u = int(e['upto'])
+                bad = [i for i in range(u + 1) if tcut.get(i, 0) > e['t']]
+                ab.append(min(bad) - 1 if bad else u)
+        D['archb'] = max(ab)
         D['kept'] = ok_after('kept_sums')
         D['fits'] = ok_after('fits_done')
         D['parquet'] = ok_after('parquet_done')
         D['sim_info'] = self.sim_progress()
         return D
+
+    def rewind_cuts(self, J):
+        """Restarts of the simulation: rewinds [(t, step K, job)], job -> K, and per output index the time of the
+        newest restart from a checkpoint before that output (tcut)."""
+        rew, job_step = [], {}
+        for e in self.ev:
+            k = None
+            if e['ev'] == 'sim_rewind' and str(e.get('step', '')).isdigit():
+                k = int(str(e['step']), 10)
+            elif e['ev'] == 'sim_info' and e.get('restart'):
+                m = re.search(r'\.(\d+)\.chk$', str(e['restart']))
+                k = int(m.group(1), 10) if m else None
+            if k is None:
+                continue
+            job_step[e['job']] = k
+            t = J.get(e['job'], {}).get('start', e['t'])
+            if not any(r[2] == e['job'] for r in rew):
+                rew.append((t, k, e['job']))
+        tcut = {}
+        for i, st in ((o[0], o[1]) for o in self.outs):
+            for t, k, _ in rew:
+                if int(st, 10) > k and t > tcut.get(i, 0):
+                    tcut[i] = t
+        return dict(rewinds=rew, job_step=job_step, tcut=tcut)
 
     def sim_progress(self):
         t, v = self.simcache
@@ -1169,6 +1230,10 @@ class Manager:
         for run in self.runs.values():
             D = self.derive(run)
             derived[run.conf] = D
+            try:
+                self.watch(run, D)
+            except Exception as e:  # noqa: BLE001  (the watchdog never stops the manager)
+                log('%s: watchdog error: %s' % (run.name, e))
             active_rs[run.site] = active_rs.get(run.site, 0) + sum(1 for j in D['active'] if j['stage'] == 'rockstar')
             self.waiting[run.site] = self.waiting.get(run.site, 0) + sum(
                 1 for j in D['active'] if j['status'] in ('submitted', 'queued', 'held') and not j['job'].startswith('L'))
@@ -1193,6 +1258,102 @@ class Manager:
                 run.note('manager error, automation stopped: %s' % e)
                 log(traceback.format_exc())
         return derived
+
+    # ------------------------------------------------------------------ watchdog
+    def watch(self, run, D):
+        """Alerts for a run (run.alerts: key -> dict(t, msg)): new ones are logged and noted once, gone ones noted as
+        resolved. Only looks; never kills or resubmits. See DEFAULT_CFG (sim_stall_s ...)."""
+        found = {}
+        if not (run.ms.get('trash') or run.ms.get('purged') or getattr(run, 'stalled', None)):
+            sim = D['last'].get('sim')
+            if sim and sim['status'] == 'running':
+                found.update(self.watch_sim(run, D, sim))
+            lv = [e for e in run.ev if e['ev'] == 'stage_leftover']
+            for e in lv[-3:]:
+                found['stage_leftover:%s' % e.get('dir')] = (
+                    'a stage left by an earlier job is on %s:%s (%.0f GB; set aside by job %s, not drained): copy what '
+                    'is needed from it, then delete it' % (e.get('node'), e.get('dir'), int(e.get('size') or 0) / 1e9,
+                                                           e['job']))
+            if D.get('rs_redo'):
+                found['rs_redo'] = ('Rockstar output of snapshot(s) %s was made before a restart rewrote them: '
+                                    'it is run again when they are ready' % ', '.join(str(i) for i in D['rs_redo']))
+        old = getattr(run, 'alerts', {})
+        dis = run.ms.get('dismissed', {})
+        new = {}
+        for k, msg in found.items():
+            a = old.get(k) if old.get(k, {}).get('msg') == msg else None
+            new[k] = a or dict(t=old.get(k, {}).get('t', now()), msg=msg)
+            if k not in old:
+                run.note('ALERT %s' % msg)
+        for k in old:
+            if k not in found:
+                run.note('alert resolved: %s' % old[k]['msg'])
+        if any(k not in found for k in dis):
+            run.ms['dismissed'] = {k: v for k, v in dis.items() if k in found}
+            run.save()
+        run.alerts = new
+        run.alerts_shown = {k: a for k, a in new.items() if dis.get(k) != a['t']}   # dismissed: until it ends and comes back
+
+    def watch_sim(self, run, D, sim):
+        out = {}
+        t_start = sim.get('start') or sim.get('submitted') or now()
+        info = D.get('sim_info') or {}
+        rate = info.get('rate')
+        lim = max(float(self.cfg.get('sim_stall_s', 7200)),
+                  float(self.cfg.get('sim_stall_steps', 5)) / rate if rate else 0.0)
+        lm = info.get('log_mtime')
+        if lm and now() - t_start > lim and now() - lm > lim:
+            out['sim_stalled'] = ('simulation job %s: its log has not changed for %.1f h (step %s; limit %.1f h): hung? '
+                                  '(node memory, NFS)' % (sim['job'], (now() - lm) / 3600, info.get('step'), lim / 3600))
+        # the staging drain of this job
+        dl = os.path.join(run.P['sim'], 'drain.%s.log' % sim['job'])
+        if os.path.isfile(dl):
+            st = getattr(run, 'drain_cache', None)
+            m = os.path.getmtime(dl)
+            if not st or st[0] != (dl, m):
+                fin, drained, cur = {}, set(), None
+                with open(dl, errors='replace') as fh:
+                    for line in fh:
+                        p = line.split()
+                        if len(p) < 3:
+                            continue
+                        if p[1] == 'finished' and len(p) >= 4:
+                            fin.setdefault(p[3], p[0])
+                        elif p[1] == 'drained':
+                            drained.add(p[2])
+                        elif p[1] == 'current' and len(p) >= 4:
+                            cur = (p[0], p[3])
+                st = ((dl, m), fin, drained, cur)
+                run.drain_cache = st
+            _, fin, drained, cur = st
+            lim = float(self.cfg.get('drain_stall_s', 10800))
+            late = []
+            for name, ts in fin.items():
+                if name in drained:
+                    continue
+                try:
+                    t = datetime.datetime.fromisoformat(ts).timestamp()
+                except ValueError:
+                    continue
+                if now() - t > lim:
+                    late.append((t, name))
+            if late:
+                late.sort()
+                out['drain_stalled'] = ('job %s: %d finished output(s)/checkpoint(s) not copied to NFS after %.1f h '
+                                        '(oldest %s, since %s): drain hung? they exist only on the node\'s disk'
+                                        % (sim['job'], len(late), lim / 3600, late[0][1], iso(late[0][0])))
+            if cur and '/var/tmp' not in cur[1] and not cur[1].startswith('/tmp'):
+                out['drain_direct'] = ('job %s: node disk full, snapshots written straight to NFS since %s (%s)'
+                                       % (sim['job'], cur[0], cur[1]))
+        mem = [e for e in run.ev if e['ev'] == 'node_mem' and e['job'] == sim['job']]
+        if mem:
+            e = mem[-1]
+            swap = float(e.get('swap_used_mb') or 0) / 1024
+            if swap > float(self.cfg.get('swap_alert_gb', 16)):
+                out['swap'] = ('job %s on %s: %.0f GB of swap in use, %.1f GB memory available (%s): the node is '
+                               'swapping; the simulation and its drain may hang' % (
+                                   sim['job'], e.get('host'), swap, float(e.get('avail_mb') or 0) / 1024, e.get('time', '')[:16]))
+        return out
 
     def load_queues(self):
         p = self.cfg.get('queues_file')
@@ -1568,6 +1729,15 @@ class Manager:
             save_cfg(self.cfg)
             self.load_runs()
             return 'removed %s from the manager (no files touched)' % run.name
+        if act == 'dismiss_alert':
+            k = a.get('key')
+            al = getattr(run, 'alerts', {}).get(k)
+            if not al:
+                raise ValueError('no alert %s' % k)
+            run.ms.setdefault('dismissed', {})[k] = al['t']
+            run.alerts_shown = {x: v for x, v in getattr(run, 'alerts_shown', {}).items() if x != k}
+            run.note('alert dismissed: %s' % al['msg'])
+            return 'dismissed'
         if act == 'pause':
             run.ms['paused'] = True
             run.note('automation paused')
@@ -2027,6 +2197,7 @@ class Manager:
                 restarts=run.ms.get('restarts', 0), actions=run.ms.get('actions', [])[-30:],
                 budget_msg=getattr(run, 'budget_msg', None) if getattr(run, 'budget_wait', None) else None,
                 stalled=getattr(run, 'stalled', None), archive_msg=getattr(run, 'archive_msg', None),
+                alerts=getattr(run, 'alerts_shown', {}), rs_redo=D.get('rs_redo', []), rewinds=D.get('rewinds', []),
                 keep=dict(full=pl['full_z'] if pl else [], pct=pl['subsample_pct'] if pl else None,
                           tables=pl['tables'] if pl else []),
                 outputs=[[o[0], o[1], o[3]] for o in run.outs], scratch_bytes=run.scratch_bytes,

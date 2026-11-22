@@ -32,6 +32,33 @@ if [ -n "${RESTART:-}" ]; then
   CHK=$(readlink -f "$CHK")
   stamp "restart from $CHK"
 fi
+J=${PBS_JOBID%%.*}; J=${J:-$$}
+# Restart from checkpoint step K: whatever an earlier job wrote after step K belongs to a run that no longer exists
+# (killed, node or power failure after its last checkpoint): its snapshots beyond K and incomplete checkpoints beyond K,
+# and the stale .part files of its drain, are moved to $SIM_DIR/lost_after_chk<K>.<job>/ (same file system, a rename),
+# so that this job rewrites those snapshots instead of mixing with them (19-20 Nov 2026: r3/r5 snapshots of the dead
+# run were taken as this run's and Rockstar ran on them). The manager is told (sim_rewind): Rockstar and archive work
+# on snapshots beyond K done before now is redone.
+CHK_STEP=
+if [ -n "$CHK" ]; then
+  CHK_STEP=$(basename "$CHK" | sed -n 's/^.*\.\([0-9][0-9]*\)\.chk$/\1/p')
+  if [ -n "$CHK_STEP" ]; then
+    LOST="$SIM_DIR/lost_after_chk$CHK_STEP.$J"; nlost=0
+    for f in "$PKC_DIR"/snap.* "$SIM_DIR"/checkpoints/snap.*; do
+      [ -e "$f" ] || continue
+      b=${f##*/}; s=${b#snap.}; s=${s%%.*}
+      [[ $s =~ ^[0-9]+$ ]] || continue
+      if [ $((10#$s)) -gt $((10#$CHK_STEP)) ] || [[ $b =~ \.part[0-9]*$ ]] || [[ $b == *.rescue_tmp* ]]; then
+        d="$LOST/$(basename "$(dirname "$f")")"
+        mkdir -p "$d" && mv "$f" "$d/" && nlost=$((nlost + 1))
+      fi
+    done
+    if [ $nlost -gt 0 ]; then
+      stamp "restart from step $CHK_STEP: $nlost files of an earlier job after that step (or .part) moved to $LOST"
+    fi
+    event sim_rewind step="$CHK_STEP" moved="$nlost" dir="$LOST"
+  fi
+fi
 NTH=${PBS_NCPUS:-$SIM_NCPU}
 # SIM_GPU=1 (pegasus GPU nodes, one P100 each): the CUDA build $PKD_IO_ROOT/build_gpu (build_pkdgrav3_gpu_pegasus.sh);
 # submit_pipeline.sh then asks for ngpus=1 per node. SIM_BUILD overrides the build directory.
@@ -41,7 +68,6 @@ PKD_BIN=$PKD_IO_ROOT/${SIM_BUILD:-$([ "${SIM_GPU:-0}" = 1 ] && echo build_gpu ||
 # MPI ranks: SIM_MPIPROCS per node on SIM_NODES nodes (pegasus); NTH threads per rank
 NRANK=$(( ${SIM_NODES:-1} * ${SIM_MPIPROCS:-1} ))
 [ "$NRANK" -gt 1 ] && NTH=$(( SIM_NCPU / ${SIM_MPIPROCS:-1} ))
-J=${PBS_JOBID%%.*}; J=${J:-$$}
 # events for the manager: snap_ready step=<step> when all files of an output are in $PKC_DIR (staged: the drain's
 # "drained snap.<step>" line; otherwise pkdgrav3's snap.<step>.done marker, looked for every SIM_WATCH_S seconds)
 snap_watch() {
@@ -49,6 +75,21 @@ snap_watch() {
     for _ in $(seq 1 600); do [ -f "$SIM_DIR/drain.$J.log" ] && break; kill -0 $$ 2>/dev/null || return; sleep 1; done
     tail -n +1 -F --pid=$$ "$SIM_DIR/drain.$J.log" 2>/dev/null | while read -r _t w name _rest; do
       [ "$w" = drained ] && [[ $name == snap.* ]] && event snap_ready step="${name#snap.}"
+    done &
+    # when the node's disk is full the drain points pkdgrav3 straight at $PKC_DIR: those snapshots are never
+    # "drained"; their .done marker lands in $PKC_DIR. Announced once all their files are there and complete
+    # (pkcreader; a marker can arrive while the files of that snapshot are still on the local disk).
+    local seen=" " f s
+    while kill -0 $$ 2>/dev/null; do
+      for f in "$PKC_DIR"/snap.*.done; do
+        [ -e "$f" ] || continue; s=${f##*/snap.}; s=${s%.done}
+        case "$seen" in *" $s "*) continue ;; esac
+        if "$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); from pkcreader import PkcSnapshot; PkcSnapshot(sys.argv[2])' \
+             "$PP" "$PKC_DIR/snap.$s" 2>/dev/null; then
+          seen="$seen$s "; event snap_ready step="$s" direct=1
+        fi
+      done
+      sleep "${SIM_WATCH_S:-60}"
     done
   else
     local seen=" " f s
@@ -63,16 +104,30 @@ snap_watch() {
 }
 snap_watch < /dev/null > /dev/null 2>&1 &
 SNAPWATCH_PID=$!
-event sim_info nth="$NTH" staging="${SIM_STAGING:-0}" restart="${CHK:-}"
-# restart: the planned outputs already complete in $PKC_DIR (written by earlier jobs) are announced now, so the manager
-# can run Rockstar on them while this job continues (checked as at the end: all files, header/trailer, pkcreader)
+# node memory for the manager's watchdog (node_mem every SIM_MEMWATCH_S, default 30 min): 20-22 Nov 2026 the 2048^3
+# nodes ran with 2-8 GB available and ~125 GB swapped; one simulation and the drains hung (NFS writes stuck)
+mem_watch() {
+  while kill -0 $$ 2>/dev/null; do
+    awk '/^MemAvailable:/{a=$2} /^SwapTotal:/{st=$2} /^SwapFree:/{sf=$2} END{printf "%d %d\n", a/1024, (st-sf)/1024}' /proc/meminfo |
+      { read -r av sw; event node_mem avail_mb="$av" swap_used_mb="$sw"; }
+    sleep "${SIM_MEMWATCH_S:-1800}"
+  done
+}
+mem_watch < /dev/null > /dev/null 2>&1 &
+MEMWATCH_PID=$!
+event sim_info nth="$NTH" staging="${SIM_STAGING:-0}" restart="${CHK:-}" restart_step="${CHK_STEP:-}"
+# restart: the planned outputs up to the checkpoint step already complete in $PKC_DIR (written by earlier jobs) are
+# announced now, so the manager can run Rockstar on them while this job continues (checked as at the end: all files,
+# header/trailer, pkcreader). Outputs after the checkpoint step are written again by this job.
 if [ -n "$CHK" ] && [ -f output_steps.txt ]; then
-  "$PY" - "$PP" "$PKC_DIR" $(awk '!/^#/ {print $1}' output_steps.txt) <<'PYEOF' | while read -r s; do event snap_ready step="$s" checked=1 earlier=1; done
+  "$PY" - "$PP" "$PKC_DIR" "${CHK_STEP:-0}" $(awk '!/^#/ {print $1}' output_steps.txt) <<'PYEOF' | while read -r s; do event snap_ready step="$s" checked=1 earlier=1; done
 import sys, glob
 sys.path.insert(0, sys.argv[1])
 from pkcreader import PkcSnapshot
-d = sys.argv[2]
-for s in sys.argv[3:]:
+d, K = sys.argv[2], int(sys.argv[3], 10)
+for s in sys.argv[4:]:
+    if K and int(s, 10) > K:
+        continue
     if glob.glob('%s/snap.%s.s*.pkc' % (d, s)):
         try:
             PkcSnapshot('%s/snap.%s' % (d, s)); print(s)
@@ -88,6 +143,15 @@ if [ "${SIM_STAGING:-0}" = 1 ]; then
   # pkdgrav3 does not wait for NFS (~25 MB/s). Logs: run.<job>.log, staged.<job>.log, drain.<job>.log.
   STAGE_DIR=${SIM_STAGE_DIR:-/var/tmp/${USER}_stage_$(echo "$STEM" | tr / _)_r$REAL}
   stamp "pkdgrav3 with $NTH threads, staged I/O in $STAGE_DIR on $(hostname), parameter file ${CHK:-$PAR}"
+  # a stage left on this node by an earlier job of this run (its drain did not finish: killed, hung on NFS, node
+  # failure) is not reused: its snapshots may be of a dead run, and its drain's .part files may hang. Set aside on the
+  # node (it may hold the only copy of earlier outputs) and reported to the manager; nothing deleted here.
+  if [ -e "$STAGE_DIR" ]; then
+    LEFT="$STAGE_DIR.left.$J"
+    mv "$STAGE_DIR" "$LEFT"
+    stamp "stage $STAGE_DIR left by an earlier job: moved to $(hostname):$LEFT ($(du -sh "$LEFT" 2>/dev/null | cut -f1)); not drained"
+    event stage_leftover node="$(hostname)" dir="$LEFT" size="$(du -sb "$LEFT" 2>/dev/null | cut -f1)"
+  fi
   df -h /var/tmp | tail -1
   env RUNDIR="$SIM_DIR" PAR="$( [ -z "$CHK" ] && readlink -f "$PAR")" RESTART="$CHK" DEST="$PKC_DIR" \
       STAGE="$STAGE_DIR" CHKSTAGE=1 CHKDEST="$SIM_DIR/checkpoints" KEEPCHK="${SIM_KEEPCHK:-2}" NTH="$NTH" \
@@ -154,7 +218,7 @@ extra=$(ls "$PKC_DIR" 2>/dev/null | sed -n 's/^snap\.\([0-9]*\)\.s.*\.pkc$/\1/p'
 [ -n "$extra" ] && stamp "snapshots that are not planned outputs (wall-time/STOP exits), not used: $extra"
 NDONE=$(grep -c . snapnames.txt)
 stamp "pkdgrav3 exit $rc; $NDONE of $NOUT outputs: $(tr '\n' ' ' < snapnames.txt | cut -c1-300)"
-sleep 2; kill $SNAPWATCH_PID 2>/dev/null
+sleep 2; kill $SNAPWATCH_PID $MEMWATCH_PID 2>/dev/null; pkill -P $SNAPWATCH_PID 2>/dev/null
 # the complete outputs, checked (pkcreader): the manager's list of snapshots that Rockstar may use
 for s in $(cat snapnames.txt); do event snap_ready step="$s" checked=1; done
 event sim_outputs ndone="$NDONE" nout="$NOUT" rc="$rc"

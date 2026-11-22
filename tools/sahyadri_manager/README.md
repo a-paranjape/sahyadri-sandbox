@@ -93,6 +93,41 @@ Each registered run's `run.conf` is copied to `~/.sahyadri_mgr/confs/` when it i
   stops watching its directories, so the other runs (e.g. on pegasus) go on. An `ARCHIVE` that does not answer
   holds that run's archive the same way. All resumes by itself once the test returns.
 
+## Watchdog (alerts)
+
+Red **ALERT** lines on a run's card, also written to `manager.log` and the run's actions once when they start and
+once when they end. The watchdog only looks: it never kills, resubmits or deletes anything. *Dismiss* hides an alert
+until it ends and comes back. Limits in `config.json`:
+
+| alert | when | limit |
+|---|---|---|
+| `sim_stalled` | a running simulation's `run.<job>.log` has not changed | max(`sim_stall_s` 2 h, `sim_stall_steps` 5 × its step time) |
+| `drain_stalled` | a staged snapshot or checkpoint is "finished" in `drain.<job>.log` but not "drained" (it exists only on the node's disk) | `drain_stall_s` 3 h |
+| `drain_direct` | the drain points pkdgrav3 straight at NFS (node disk below `--min-free-gb`) | — |
+| `swap` | the node has more swap in use (`node_mem` events from `job_sim.pbs`, every 30 min) | `swap_alert_gb` 16 |
+| `stage_leftover` | a new simulation job found a stage of an earlier job on its node and set it aside (`<stage>.left.<job>`) | — |
+| `rs_redo` | Rockstar output of snapshots that a restart rewrote; Rockstar runs on them again | — |
+
+Why (20–22 Nov 2026, pawna 2048³ r3, r4, r5): the nodes ran with 2–8 GB of memory available and ~125 GB swapped;
+the drains' NFS writes hung (`wait_on_commit`) on all three nodes, 1–2 days of snapshots stayed on the local disks,
+and r5's simulation hung for 29 h. None of it was visible on the page.
+
+## Restarts after a crash (rewinds)
+
+A simulation restarted from the checkpoint of step K (`--restart latest` = the newest `checkpoints/*.chk`, whose
+restart file the drain copies last, so it is complete) writes the outputs after K again. `job_sim.pbs` therefore:
+
+* moves what an earlier job wrote after step K — snapshots, incomplete checkpoints, and stale drain `.part` files —
+  to `<sim>/lost_after_chk<K>.<job>/` (a rename; delete it when the run is checked), and sends `sim_rewind step=K`;
+* announces as ready (for Rockstar) only the outputs up to K that are complete;
+* sets aside a stage directory left on its node by an earlier job (`stage_leftover`) instead of draining it again;
+* with staging, also announces snapshots written straight to NFS (the drain switched) once all their files check.
+
+The manager ignores everything announced before a restart for outputs after K; Rockstar results for those outputs
+count only if Rockstar started after their new version was ready (otherwise `rs_redo`, and the Rockstar batch
+covers them again); an archive batch counts only up to the output before the first one rewritten, so the next batch
+(or the final archive: it skips only files of the same size and time) copies the new versions.
+
 ## Runs on another site (pegasus)
 
 `manager.py add pegasus:<run.conf on pegasus>` registers a run set up there (`setup_production.py --site pegasus`).
