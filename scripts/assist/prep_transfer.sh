@@ -1,4 +1,7 @@
 #!/bin/bash
+# Run CLASS on <CLASS_INIT_FILE>, rename its P(k) to <CLASS_TRANSFER_FILE> and convert it to the NGenIC input
+# format with modify_class_output.py (Gadget-4 chain, submit_CiPod.sh).
+#   prep_transfer.sh <CLASS_INIT_FILE> <CLASS_TRANSFER_FILE> <PYTHON_EXEC> <CODE_HOME>
 
 if [ "$#" -ne 4 ]; then
   echo ''	

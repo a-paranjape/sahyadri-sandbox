@@ -23,6 +23,10 @@ conversion, submitted as chained PBS jobs from one config file:
 [docs/pkdgrav3_pipeline_pawna.md](/docs/pkdgrav3_pipeline_pawna.md) (scripts in
 [scripts/pkdgrav3_pipeline](/scripts/pkdgrav3_pipeline)).
 
+## Documentation ##
+- **API reference** (every module, class, function and script, generated from the docstrings): [docs/api/README.md](/docs/api/README.md). Regenerate after changing docstrings with `python3 tools/gen_api_docs.py` (`--check` tells whether it is up to date).
+- pkdgrav3 pipeline on pawna and pegasus: [docs/pkdgrav3_pipeline_pawna.md](/docs/pkdgrav3_pipeline_pawna.md); run manager: [tools/sahyadri_manager/README.md](/tools/sahyadri_manager/README.md); halo potential tools (xcorr, ximult, vprof) and data paths: [docs/handover_xcorr_vprof.md](/docs/handover_xcorr_vprof.md).
+
 ## Installation tips ##
 Here we provide some installation tips for setting up these codes in a [PBS environment](https://en.wikipedia.org/wiki/Portable_Batch_System). For further details, please see the individual documentation pages linked above.
 

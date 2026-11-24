@@ -1,4 +1,10 @@
 #!/bin/bash
+# Submit the Gadget-4 chain of one run as dependent PBS jobs from a submission config file: CLASS transfer
+# function (prep_transfer.sh), Gadget-4 with NGenIC ICs (run_gadget.sh), Rockstar and consistent-trees,
+# post-processing (run_postprocess.sh) and the janitor. Paths (SANDBOX_DIR, CONFIG_DIR, SCRATCH_DIR) and switches
+# (RUN_CLASS, Rockstar, post-processing) are read from the config file. The pkdgrav3 pipeline replaces this on
+# pawna: scripts/pkdgrav3_pipeline/submit_pipeline.sh.
+#   submit_CiPod.sh <SUB_CONFIG_FILE>
 
 if [ "$#" -ne 1 ]; then
   echo "USAGE: $0 <SUB_CONFIG_FILE>"
@@ -27,7 +33,7 @@ echo 'CONFIG_DIR =' $CONFIG_DIR
 
 SCRATCH_DIR=`awk '$1=="SCRATCH_DIR" {print $3}' $1`
 if [[ -z "$SCRATCH_DIR" ]]; then
-    SCRATH_DIR=$SCRATCH
+    SCRATCH_DIR=$SCRATCH
     echo 'SCRATCH_DIR not availbe in config file using default'
 fi
 echo 'SCRATCH_DIR =' $SCRATCH_DIR

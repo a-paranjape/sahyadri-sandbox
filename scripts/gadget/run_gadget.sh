@@ -1,4 +1,7 @@
 #!/bin/bash
+# Run Gadget-4 under mpirun with the build for mesh 2 x NPART, with or without NGenIC, optionally restarting
+# (RESTART = Gadget-4 restart flag; 0 = start).
+#   run_gadget.sh <GADGET2_CONFIG_FILE> <NPART> <NCPU_TOT> <NGENIC> <RESTART> <CODE_HOME>
 
 if [ "$#" -ne 6 ]; then
   echo ''	

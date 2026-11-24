@@ -1,4 +1,7 @@
 #!/bin/bash
+# Last job of the Gadget-4 chain (submit_CiPod.sh): moves the PBS logs of the CLASS, Gadget, Rockstar,
+# tree and post-processing jobs into the run's logs/ directories and deletes the helper jobs' files.
+#   janitor.sh <CLASS_OUT_DIR> <GADGET2_OUT_DIR> <AUTO_ROCKSTAR_DIR>
 
 if [ "$#" -ne 3 ]; then
   echo ''	

@@ -1,4 +1,7 @@
 #!/bin/bash
+# Build Gadget-4 for PM meshes 2^7 ... 2^11 (PMGRID = 2 x mesh) in $CODE_HOME/code/Gadget-4/mesh<M>-NGenIC
+# (and mesh<M> without NGenIC if NO_NGENIC=0), single-precision positions, NCPU ranks with shared memory.
+#   makeallgrids.sh [clean]      clean: run make clean and remove the build directories instead
 
 clean=$1
 clean_key="clean"

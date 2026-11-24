@@ -1,4 +1,7 @@
 #!/bin/bash
+# PBS array job of the Gadget-4 chain: splits snapshots SNAP_START..N_OUT-1 into NJOBS_PP ranges and runs
+# postprocess.py on range $PBS_ARRAY_INDEX with NCPU_PP processes (particles down-sampled to 512^3 above 512^3).
+#   run_postprocess.sh <PYTHON_EXEC> <SIM_STEM> <REAL> <NPART> <SNAP_START> <N_OUT> <PP_GRID> <LBOX> <NJOBS_PP> <NCPU_PP>
 
 if [ "$#" -ne 10 ]; then
   echo ''	
