@@ -141,3 +141,50 @@ potential of the environment, which two halos 10--25\,\Mpch{} apart largely shar
 less relative shift than the bin means suggest; the mean-shift estimate ignores this. \emph{Caveats}: one realisation
 per box at $z=0$; L200's top bin (76 halos) and L1000's lowest bin (3--15 particles per halo) are not usable for this;
 the errors treat the 2\,\Mpch{} bins as independent.
+
+\paragraph{Logarithmic $s$ bins.} The same measurement repeated with 100 logarithmic bins from 0.01 to 100\,\Mpch{}
+(\fp{--sbins}~\fp{log:0.01,100,100}; pawna job 2539125, 24 Nov 2026, 1 core, 5--29\,min and 4.9\,GB per box; archived as
+\fp{.../xcorr/out_100_ximult_phiall_log.npz} with the runs, read-only, listed in \fp{MANIFEST.json} and
+\fp{SHA256SUMS}). Both binnings have edges at 10 and 100\,\Mpch: summed over 10--100\,\Mpch{} the pair counts of the
+two runs are identical in every space, line of sight and pair, in all three boxes, and $\langle v_g\rangle$ per bin is
+identical. Bins below 0.29\,\Mpch{} hold no pairs (distinct hosts); cross pairs with the top bin start at
+1.05--1.26\,\Mpch{} in L500 and L1000, and below 1\,\Mpch{} there are only $10^2$--$4\times10^4$ pairs, mostly of
+bins 0--1.
+Fig.~\ref{fig:ximult512_phi_logs} and Table~\ref{tab:ximult512philog}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/ximult512_phi_logs.pdf}
+\caption{$s^2$ times the dipole difference against $s$ in logarithmic bins (two bins of 0.04\,dex per point,
+inverse-variance mean of the bins with pairs) for five potential columns: L1000 pair 1--3, grav $-$ real (left) and
+rsd+grav $-$ rsd (middle), and L500 pair 0--2, grav $-$ real (right). Mean over $x,y,z$, jackknife errors. Dotted:
+mean-shift estimate, shown only above 3\,\Mpch{} because it needs a smooth $\xi_0$, and $\xi_0$ jumps from $-1$ to
+$\sim$20 at the exclusion edge.}
+\label{fig:ximult512_phi_logs}
+\end{figure}
+
+\begin{table}[H]
+\centering\footnotesize
+\input{ximult512_phi_log_table.tex}
+\caption{$\xi_1^{\rm grav}-\xi_1^{\rm real}$ in the logarithmic bins, inverse-variance mean over $s=1$--3, 3--10 and
+10--40\,\Mpch{} (bins with pairs only) in units of $10^{-3}$, jackknife errors with the bins treated as independent.
+$\Delta v_g$ in km\,s$^{-1}$ for the pair's two bins. Unweighted by $s$, so not on the scale of
+Table~\ref{tab:ximult512phi}.}
+\label{tab:ximult512philog}
+\end{table}
+
+\emph{3--10\,\Mpch} is where the logarithmic bins add most: the dipole of the potentials within the halo is clearly
+detected and ordered as $\Delta v_g$. In L1000 pair 1--3 it is $(37\pm10)\times10^{-3}$ for $\phi_{r_s}$,
+$(19\pm8)\times10^{-3}$ for $\phi_{R_{200b}}$, $(9\pm7)\times10^{-3}$ at $4R_{200b}$, consistent with zero at
+$6R_{200b}$ and 5\,\Mpch, and slightly negative at $8R_{200b}$ ($-12\pm5$), while $\Delta v_g$ only falls from 13.0 to
+5.4\,km\,s$^{-1}$. The wide-aperture deficit seen at 10--25\,\Mpch{} is therefore stronger at 3--10\,\Mpch, as
+expected if close pairs share the smoothed environment potential. Every column lies below its mean-shift estimate
+there: measured over estimate (same weights) is 0.65 for $\phi_{r_s}$, 0.55 for $0.5R_{\rm vir}$, 0.46--0.51 for $R_{\rm vir}$ to $2R_{200b}$,
+0.25 at $4R_{200b}$ and 0.19 at 2\,\Mpch, and $\le0$ for $6R_{200b}$, $8R_{200b}$, 3 and 5\,\Mpch{} (L1000, pair
+1--3; L500 pair 0--2 similar, 0.46 for $\phi_{r_s}$). \emph{1--3\,\Mpch}: next to the exclusion edge the shift moves pairs across a step in $\xi_0$, and the dipole
+changes sign and size from bin to bin (L1000 pair 1--3, $\phi_{r_s}$: $\Delta\xi_1=-3.4\pm0.8$ at 1.26\,\Mpch); its
+average is consistent with zero in L1000 ($(-176\pm158)\times10^{-3}$ for $\phi_{r_s}$). L500 pair 0--2, with many more close pairs,
+gives a positive average for the spheres, $(123\pm38)\times10^{-3}$ for $\phi_{r_s}$ (3$\sigma$) falling to
+$(48\pm25)\times10^{-3}$ at $R_{200b}$, and $(-40\pm16)\times10^{-3}$ at $8R_{200b}$. With only
+$10^2$--$10^4$ pairs per bin here the jackknife errors themselves are uncertain; the 1--3\,\Mpch{} numbers are
+indicative only. \emph{10--40\,\Mpch}: as the linear-bin run (same pairs).

@@ -313,7 +313,8 @@ python make_boxsize_figures.py
 python make_ximult_box_figures.py
 # the same with every potential column (pawna job /user/shadab/ximult_phi/job.pbs: halo_xi_multipoles.py --los x,y,z
 # --phi <12 columns>); archived <halos>/xcorr/out_100_ximult_phiall.npz copied without DD, xi_ell_jk and the
-# other spaces' xi to data/box512_L200_L500_L1000/L<L>_out100_ximult_phiall.npz
+# other spaces' xi to data/box512_L200_L500_L1000/L<L>_out100_ximult_phiall.npz; and with 100 log s bins, 0.01-100
+# Mpc/h (job_log1.pbs: --sbins log:0.01,100,100), archived out_100_ximult_phiall_log.npz -> L<L>_out100_ximult_phiall_log.npz
 python make_ximult_phi_figures.py
 # Rockstar on 2 nodes vs 1 node (pegasus debug queue, RS_NODES; Mvir, X, Y, Z, Vmax of out_{30,50,80,100}.list of the
 # three test runs in data/rs_multinode_halos.npz)

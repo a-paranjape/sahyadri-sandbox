@@ -12,6 +12,10 @@ usage: make_ximult_phi_figures.py [--d data/box512_L200_L500_L1000] [--figs figs
                                  rsd+grav - rsd, four cross pairs, with the mean-shift estimate
   figs/ximult512_phi_s.pdf       L1000 pair 1-3: dipole against s for five columns, with their mean-shift estimates
   ximult512_phi_table.tex        the 10-40 Mpc/h dipole of the best-measured pairs for each column
+  log-s bins (100 from 0.01 to 100 Mpc/h, --sbins log:0.01,100,100, pawna job 2539125; L<box>_..._phiall_log.npz,
+  archived as .../xcorr/out_100_ximult_phiall_log.npz):
+  figs/ximult512_phi_logs.pdf    s^2 x dipole difference against log s, five columns, L1000 1-3 and L500 0-2
+  ximult512_phi_log_table.tex    dipole (grav - real) averaged over 1-3, 3-10, 10-40 Mpc/h for each column
 Averages over 10-40 Mpc/h as make_ximult_box_figures.py: inverse-variance weights of the 2 Mpc/h bins (jackknife
 errors, bins treated as independent); the mean-shift estimate -(<v_g>_B - <v_g>_A)/(aH) dxi_0^real/ds averaged with
 the same weights.
@@ -43,10 +47,10 @@ S_COLS = ['phi_rs', 'phi_Rvir', 'phi_R4R200b', 'phi_R8R200b', 'phi_R5Mpch']
 S_COLORS = ['#123f80', '#2a78d6', '#1baf7a', '#c9a227', '#eb6834']
 
 
-def load(d):
+def load(d, suffix=''):
     D = {}
     for L in BOXES:
-        X = np.load(os.path.join(d, 'L%d_out100_ximult_phiall.npz' % L))
+        X = np.load(os.path.join(d, 'L%d_out100_ximult_phiall%s.npz' % (L, suffix)))
         D[L] = {k: X[k] for k in X.files}
         D[L]['pairs_l'] = [tuple(int(v) for v in p) for p in X['pairs']]
         D[L]['cols'] = [str(c) for c in X['phi_cols']]
@@ -177,6 +181,85 @@ def fig_s(D, out):
     plt.close(fig)
 
 
+LOG_PANELS = [(1000, (1, 3), 0), (1000, (1, 3), 1), (500, (0, 2), 0)]
+LOG_YLIM = [(-7, 7), (-3, 7), (-1.2, 1.5)]
+LOG_REBIN = 2          # 2 log bins (0.08 dex) per point
+EST_SMIN = 3.0         # the mean-shift estimate needs a smooth xi_0: not across the exclusion edge (~1-2 Mpc/h)
+
+
+def wavg(y, e, m):
+    """inverse-variance mean of y[m] over bins with pairs (e > 0); (nan, nan) if none"""
+    ok = m & (e > 0) & np.isfinite(y)
+    if not ok.any():
+        return np.nan, np.nan
+    w = 1 / e[ok]**2
+    return (y[ok] * w).sum() / w.sum(), w.sum()**-0.5
+
+
+def log_rebin(s, y, e, n=LOG_REBIN):
+    """groups of n log bins: geometric-mean s, inverse-variance mean of the bins with pairs"""
+    m = (len(s) // n) * n
+    S, Y, E = [], [], []
+    for i in range(0, m, n):
+        sl = slice(i, i + n)
+        a, b = wavg(y[sl], e[sl], np.ones(n, bool))
+        S.append(np.exp(np.log(s[sl]).mean())); Y.append(a); E.append(b)
+    return np.array(S), np.array(Y), np.array(E)
+
+
+def fig_logs(D, out):
+    fig, axs = plt.subplots(1, 3, figsize=(15, 4.6), constrained_layout=True)
+    for ax, (L, p, kd), yl in zip(axs, LOG_PANELS, LOG_YLIM):
+        X = D[L]; s = X['s_mid']; style(ax); ax.set_ylim(*yl); ax.axhline(0, color='#9b9a95', lw=0.8)
+        for k, (c, cc) in enumerate(zip(S_COLS, S_COLORS)):
+            y, e = dipole(X, p, c, kd)
+            S, Y, E = log_rebin(s, y, e)
+            ok = np.isfinite(Y)
+            fac = 10**((k - 2) * 0.008)        # small horizontal offsets
+            ax.errorbar(S[ok] * fac, S[ok]**2 * Y[ok], S[ok]**2 * E[ok], color=cc, marker='o', ms=3, lw=1.2,
+                        capsize=1.5, label=LAB[c])
+            est = estimate(X, p, c); q = s > EST_SMIN
+            ax.plot(s[q], s[q]**2 * est[q], color=cc, lw=1.1, ls=':')
+        ax.set_xscale('log'); ax.set_xlim(1, 100)
+        ax.set_xlabel(r'$s$ [$h^{-1}$Mpc]', fontsize=9)
+        ax.set_title(r'$L=%d$, pair %d–%d: %s' % (L, p[0], p[1], DIFFS[kd][1]), fontsize=10)
+    axs[0].set_ylabel(r'$s^2\times$ dipole difference [$h^{-2}$Mpc$^2$]', fontsize=9)
+    axs[0].legend(fontsize=8, frameon=False, title='potential within / smoothed at', title_fontsize=8)
+    fig.suptitle(r'Log-$s$ bins (100 from 0.01 to 100 $h^{-1}$Mpc, shown in pairs of bins from 1 $h^{-1}$Mpc; no '
+                 r'halo pairs below 0.29 $h^{-1}$Mpc): mean over $x,y,z$, jackknife errors; dotted: mean-shift estimate '
+                 r'for $s>3\,h^{-1}$Mpc', fontsize=10)
+    fig.savefig(out)
+    plt.close(fig)
+
+
+LOG_RANGES = [(1, 3), (3, 10), (10, 40)]
+
+
+def table_log(D, out):
+    """dipole (grav - real) averaged over 1-3, 3-10 and 10-40 Mpc/h in the log bins, L1000 1-3 and L500 0-2"""
+    rows = []
+    cols = D[1000]['cols']
+    for kc, c in enumerate(cols):
+        cells = []
+        for L, p in ((1000, (1, 3)), (500, (0, 2))):
+            X = D[L]; s = X['s_mid']; y, e = dipole(X, p, c, 0)
+            dv = X['vg_mean'][kc, p[1]] - X['vg_mean'][kc, p[0]]
+            cells.append('%.1f' % dv)
+            for a, b in LOG_RANGES:
+                m, err = wavg(y, e, (s > a) & (s < b))
+                cells.append(r'$%+.1f\pm%.1f$' % (m * 1e3, err * 1e3))
+        rows.append(r'%s & %s \\' % (LAB[c], ' & '.join(cells)))
+        if kc == NSPHERE - 1:
+            rows.append(r'\midrule')
+    with open(out, 'w') as f:
+        f.write('% written by make_ximult_phi_figures.py (log-s bins)\n')
+        f.write(r'\begin{tabular}{lcccccccc}' + '\n' + r'\toprule' + '\n')
+        f.write(r' & \multicolumn{4}{c}{L1000, pair 1–3} & \multicolumn{4}{c}{L500, pair 0–2} \\' + '\n')
+        f.write(r'\cmidrule(lr){2-5}\cmidrule(lr){6-9}' + '\n')
+        f.write(r'potential & $\Delta v_g$ & 1–3 & 3–10 & 10–40 & $\Delta v_g$ & 1–3 & 3–10 & 10–40 \\' + '\n')
+        f.write(r'\midrule' + '\n' + '\n'.join(rows) + '\n' + r'\bottomrule' + '\n' + r'\end{tabular}' + '\n')
+
+
 def table(D, out):
     rows = []
     X = D[1000]; cols = X['cols']
@@ -211,6 +294,9 @@ def main():
     fig_dipole(D, os.path.join(A.figs, 'ximult512_phi_dipole.pdf'))
     fig_s(D, os.path.join(A.figs, 'ximult512_phi_s.pdf'))
     table(D, A.table)
+    DL = load(A.d, '_log')
+    fig_logs(DL, os.path.join(A.figs, 'ximult512_phi_logs.pdf'))
+    table_log(DL, os.path.join(HERE, 'ximult512_phi_log_table.tex'))
     X = D[1000]
     for kd in range(2):
         print(DIFFS[kd][0] % '*', 'L1000 1-3 measured/estimate:',
