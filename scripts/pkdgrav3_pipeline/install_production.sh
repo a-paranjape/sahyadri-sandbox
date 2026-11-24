@@ -10,13 +10,16 @@
 #        install_production.sh swarm   [/user1/$USER/sahyadri_pipeline]   (Miniforge in /user1/$USER/miniforge3 if
 #                                       missing; pkdgrav3 for Ice Lake; no 'bash -l': swarm's login shell drops the
 #                                       arguments of a script started that way)
+#        install_production.sh pride   [/user1/$USER/sahyadri_pride]      (TIFR; shares swarm's Lustre /user1 and
+#                                       Miniforge; pkdgrav3 for Haswell (AVX2): swarm's Ice Lake build does not run)
 # Rerunning updates the clones and rebuilds. Nothing outside <root> is changed (pegasus: caches on /data).
 set -eu
-SITE=${1:?usage: install_production.sh pawna|pegasus|swarm [root]}
+SITE=${1:?usage: install_production.sh pawna|pegasus|swarm|pride [root]}
 case $SITE in
   pawna)   ROOT=${2:-/user/$USER/sahyadri_prod} ;;
   pegasus) ROOT=${2:-$HOME/sahyadri_pipeline} ;;
   swarm)   ROOT=${2:-/user1/$USER/sahyadri_pipeline} ;;
+  pride)   ROOT=${2:-/user1/$USER/sahyadri_pride} ;;
   *) echo "unknown site $SITE"; exit 1 ;;
 esac
 BRANCH=${BRANCH:-run-manager}
@@ -46,7 +49,7 @@ if [ "$SITE" = pawna ]; then
   "$R/venv/bin/python" -m pip install -q "numpy<2" "cython>=3" dill tomli
   PKD_IO_ROOT=$R bash -l "$R/pkdgrav3/bench/phase0/compile_pawna.sh"
   ENVSH=$R/pkdgrav3/bench/phase0/env_pawna.sh
-elif [ "$SITE" = swarm ]; then
+elif [ "$SITE" = swarm ] || [ "$SITE" = pride ]; then
   export CONDA_BASE=${CONDA_BASE:-/user1/$USER/miniforge3}
   CACHE=${CACHE:-$ROOT/cache}
   mkdir -p "$CACHE/pip"
@@ -54,8 +57,10 @@ elif [ "$SITE" = swarm ]; then
     curl -sSL -o "$CACHE/Miniforge3.sh" https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
     bash "$CACHE/Miniforge3.sh" -b -p "$CONDA_BASE"
   fi
-  ARCH=icelake-server bash "$R/pkdgrav3/tools/pegasus/setup_pegasus.sh" "$R"   # same conda env and build as pegasus
-  ENVSH=$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/swarm/env_swarm.sh
+  # same conda env and build as pegasus; swarm: Ice Lake (Xeon 8358), pride: Haswell (Xeon E5-2660 v3, no AVX-512)
+  ARCH=$([ "$SITE" = swarm ] && echo icelake-server || echo haswell) \
+    bash "$R/pkdgrav3/tools/pegasus/setup_pegasus.sh" "$R"
+  ENVSH=$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/$SITE/env_$SITE.sh
 else
   CACHE=${CACHE:-/data/project/hpc2502016/shadab/cache}
   mkdir -p "$CACHE/conda_pkgs" "$CACHE/pip"
@@ -68,7 +73,7 @@ ls -la "$R/build/pkdgrav3" "$R/build_snapcomp/pkc_check"
 stamp "== Rockstar, consistent-trees, Python venv, post-processing helpers in $ROOT/codes"
 if [ "$SITE" = pawna ]; then
   bash "$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pawna.sh" "$ROOT/codes" "$R"
-elif [ "$SITE" = swarm ]; then
+elif [ "$SITE" = swarm ] || [ "$SITE" = pride ]; then
   PIP_CACHE_DIR=$CACHE/pip bash "$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pegasus.sh" "$ROOT/codes" "$R"
 else
   PIP_CACHE_DIR=$CACHE/pip bash "$ROOT/sahyadri-sandbox/scripts/pkdgrav3_pipeline/setup_pegasus.sh" "$ROOT/codes" "$R"

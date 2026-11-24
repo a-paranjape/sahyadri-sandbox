@@ -1,0 +1,5 @@
+#!/bin/sh
+# system ssh without the conda environment's library path, and without host-key checks between compute nodes (the
+# shared ~/.ssh/known_hosts has none of them); mpirun uses it to start its daemons (env_leap.sh: --prtemca plm_ssh_agent)
+exec env -u LD_LIBRARY_PATH -u PYTHONHOME /usr/bin/ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o LogLevel=ERROR "$@"

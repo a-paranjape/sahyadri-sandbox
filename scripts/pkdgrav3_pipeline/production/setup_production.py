@@ -228,8 +228,28 @@ SITES = dict(
     swarm=dict(root='/user1/{user}/sahyadri_scratch', archive='/storage/shadab/sahyadri_sims',
                codes='/user1/{user}/sahyadri_pipeline/codes', pkd='/user1/{user}/sahyadri_pipeline/pkdgrav3_io',
                queue='workq'),
+    # pride (TIFR theory): install_production.sh pride; the same Lustre /user1 as swarm (own scratch directory);
+    # Rockstar, consistent-trees and the venv are built again there (codes), pkdgrav3 for Haswell
+    pride=dict(root='/user1/{user}/sahyadri_scratch_pride', archive='/storage/shadab/sahyadri_sims',
+               codes='/user1/{user}/sahyadri_pride/codes', pkd='/user1/{user}/sahyadri_pride/pkdgrav3_io',
+               queue='workq'),
+    # leap (TIFR theory): the same Lustre /user1 (own scratch directory); pkdgrav3 from leap/build_c7.sh (conda
+    # environment for glibc 2.17, skylake-avx512). The simulation stage needs only the pipeline's Python (numpy, scipy,
+    # pkcreader), and pride's venv runs on leap; Rockstar, consistent-trees and fitsio of pride's codes need a newer
+    # glibc, so the halo stages are not installed on leap yet (run them on pride or swarm: same /user1)
+    leap=dict(root='/user1/{user}/sahyadri_scratch_leap', archive='/storage/shadab/sahyadri_sims',
+              codes='/user1/{user}/sahyadri_pride/codes', pkd='/user1/{user}/sahyadri_c7/pkdgrav3_io',
+              queue='workq'),
 )
 SWARM_WALL = '72:00:00'   # every swarm queue
+PRIDE_WALL = '72:00:00'   # pride: one queue (workq), 72 h at most
+PRIDE_NODE_MEM = '240gb'  # pride nodes: 252 GB free in PBS on 13 of 16 (one 189 GB, one 220 GB)
+LEAP_WALL = '72:00:00'    # leap: workq, 72 h (resources_default.walltime); 340 running cores per user
+LEAP_NODE_MEM = '175gb'   # leap nodes: 187 GB in PBS (196302716 kb)
+# leap nodes with an ACTIVE hfi1 fabric port that were up on 22 Nov 2026 (compute-4-3: port DOWN; 4-7: node down,
+# port active before; 4-1, 4-10: offline): a multi-node simulation names its nodes (SIM_SELECT), since PBS cannot
+# leave one node out. The first SIM_NODES are used; if one goes down, edit SIM_SELECT in run.conf (a restart reads it)
+LEAP_FABRIC_NODES = ['compute-4-%d' % i for i in (2, 4, 5, 6, 8, 9, 11, 12)]
 # pegasus queues (qstat -Qf, 13 Nov 2026): project (-P PEGASUS_PROJECT, the project's budget; 96 h used here),
 # regular (user budget, 48 h at most), debug (4 h, tests); budgets in core-hours (amgr checkbalance)
 PEGASUS_PROJECT = 'hpc2502016'
@@ -296,6 +316,69 @@ def resources_swarm(N):
     return r
 
 
+def resources_pride(N):
+    """pride: 16 nodes x 20 Haswell cores (2 x Xeon E5-2660 v3, AVX2), 189-252 GB, 1 Gb/s Ethernet (no InfiniBand),
+    72 h; Lustre /user1 shared with swarm; ~390 GB node-local disk (/, /tmp, /var/tmp). Simulation on one node up to
+    1024^3 (~200 GB); 2048^3 would need 5 nodes over 1 Gb/s Ethernet (untested, not recommended). vahc grid 1024
+    (~97 GB per snapshot process) 2 snapshots at a time; Rockstar over shared nodes of at most PRIDE_NODE_MEM."""
+    rsm = rockstar_mem(N)
+    w = PRIDE_WALL
+    if N <= 256:
+        # Rockstar writers (= RS_NCPU): a product of three factors > 1 for periodic boundaries (12 = 2x2x3, 20 = 2x2x5;
+        # 10 = 2x1x5 failed: 128^3 test 764005)
+        r = dict(SIM=(20, '60gb', w, 1), RS=(12, rsm, '12:00:00'), CT=(2, '16gb', '12:00:00'),
+                 PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=12, PP_NPROC=4)
+    elif N <= 512:
+        r = dict(SIM=(20, '100gb', w, 1), RS=(20, rsm, '24:00:00'), CT=(2, '32gb', '24:00:00'),
+                 PP=(20, '220gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=20, PP_NPROC=6)
+    else:
+        sim = (20, '230gb', w, 1) if N <= 1024 else (20, '230gb', w, 5)
+        r = dict(SIM=sim, RS=(20, rsm, w), CT=(20, '128gb', w), PP=(20, '245gb', w), FITS=(16, '160gb', '24:00:00'),
+                 RS_BLOCKS=32, RS_WRITERS=20, PP_NPROC=2)
+    r['RS'] = r['RS'] + (1,)
+    need = RS_MARGIN * int(rsm[:-2])
+    if need > int(PRIDE_NODE_MEM[:-2]):
+        nodes = int(np.ceil(need / int(PRIDE_NODE_MEM[:-2])))
+        r['RS'] = (r['RS'][0], '%dgb' % int(np.ceil(need / nodes)), r['RS'][2], nodes)
+    return r
+
+
+
+def resources_leap(N):
+    """leap: 12 nodes x 32 Skylake cores (2 x Xeon Gold 6142), 187 GB, 100 Gb/s hfi1 fabric; 72 h; Lustre /user1 shared
+    with swarm; 24 GB node-local disk (no staging, no local FITS temporary files). Simulation with 2 MPI ranks per
+    node over the fabric (env_leap.sh); 2048^3 on 6 nodes (expected peak ~750 GB: 125 GB per node; 175gb asked).
+    Measured (20-21 Nov 2026, 512^3 restart at z = 0.06, 2 x 16 threads per node): 34.3 s/step on 1 node, 20.0 on 2,
+    10.5 on 4, 7.8 on 6 (swarm: 24.5 on 1 x 32 cores, 11.9 on 2 x 32). Halo stages: not installed on leap (SITES)."""
+    rsm = rockstar_mem(N)
+    w = LEAP_WALL
+    if N <= 256:
+        r = dict(SIM=(32, '60gb', w, 1), RS=(16, rsm, '12:00:00'), CT=(2, '16gb', '12:00:00'),
+                 PP=(16, '160gb', '24:00:00'), FITS=(8, '32gb', '06:00:00'), RS_BLOCKS=8, RS_WRITERS=16, PP_NPROC=4)
+    elif N <= 512:
+        r = dict(SIM=(32, '100gb', w, 1), RS=(32, rsm, '24:00:00'), CT=(2, '32gb', '24:00:00'),
+                 PP=(32, '170gb', '48:00:00'), FITS=(16, '64gb', '12:00:00'), RS_BLOCKS=16, RS_WRITERS=32, PP_NPROC=4)
+    else:
+        sim = (32, '175gb', w, 2) if N <= 1024 else (32, LEAP_NODE_MEM, w, 6)
+        # vahc grid 1024 (~97 GB per snapshot process): one snapshot at a time per 187 GB node
+        r = dict(SIM=sim, RS=(32, rsm, w), CT=(20, '128gb', w), PP=(32, '175gb', w), FITS=(16, '160gb', '24:00:00'),
+                 RS_BLOCKS=32, RS_WRITERS=32, PP_NPROC=1)
+    r['RS'] = r['RS'] + (1,)
+    need = RS_MARGIN * int(rsm[:-2])
+    if need > int(LEAP_NODE_MEM[:-2]):
+        nodes = int(np.ceil(need / int(LEAP_NODE_MEM[:-2])))
+        r['RS'] = (r['RS'][0], '%dgb' % int(np.ceil(need / nodes)), r['RS'][2], nodes)
+    return r
+
+
+def leap_select(R):
+    """SIM_SELECT for a multi-node simulation on leap: the first SIM_NODES nodes of LEAP_FABRIC_NODES, named."""
+    n, ncpu, mem = R['SIM'][3], R['SIM'][0], R['SIM'][1]
+    if n > len(LEAP_FABRIC_NODES):
+        sys.exit('leap: %d simulation nodes asked for, %d have a working fabric port' % (n, len(LEAP_FABRIC_NODES)))
+    return '+'.join('1:host=%s:ncpus=%d:mpiprocs=2:mem=%s' % (h, ncpu, mem) for h in LEAP_FABRIC_NODES[:n])
+
+
 def fmt_l(L):
     """Box size for run names: ``200`` for 200.0, ``12p5`` for 12.5."""
     return ('%d' % L) if float(L).is_integer() else ('%g' % L).replace('.', 'p')
@@ -337,20 +420,26 @@ def write(path, text, force, mode=0o644):
 
 def site_block(a, R):
     """run.conf lines that depend on the site."""
-    if a.site == 'swarm':
+    if a.site in ('swarm', 'pride', 'leap'):
         return '\n'.join([
-            'SITE=swarm                 # computed on swarm; archived on pawna (the manager pulls the kept files)',
+            'SITE=%s                 # computed on %s; archived on pawna (the manager pulls the kept files)' % (
+                a.site, a.site),
             'REMOTE_ARCHIVE=1        # verify also writes KEPT_FILES.json (checksums for the pull)',
             'PBS_QUEUE=%s' % a.queue,
-            'PBS_PROJECT=            # swarm has no core-hour budgets',
+            'PBS_PROJECT=            # %s has no core-hour budgets' % a.site,
             # whole nodes only where the simulation needs most of their memory (2048^3); else shared like Rockstar
             'SIM_NODES=%d; SIM_MPIPROCS=2; SIM_PLACE=%s   # SIM_NCPU cores per node; 2 MPI ranks per node' % (
-                R['SIM'][3], ('scatter:excl' if int(R['SIM'][1][:-2]) > 300 else 'scatter') if R['SIM'][3] > 1 else 'free'),
-            'SIM_ENV=%s/scripts/pkdgrav3_pipeline/swarm/env_swarm.sh   # pkdgrav3 run-time environment (conda MPI, ssh '
-            'without the conda library path)' % SANDBOX,
+                R['SIM'][3], ('scatter:excl' if int(R['SIM'][1][:-2]) > 300 or a.site == 'leap' else 'scatter')
+                if R['SIM'][3] > 1 else 'free'),
+            'SIM_ENV=%s/scripts/pkdgrav3_pipeline/%s/env_%s.sh   # pkdgrav3 run-time environment (conda MPI, ssh '
+            'without the conda library path)' % (SANDBOX, a.site, a.site),
             'SIM_GPU=0',
             'SIM_STAGING=0           # snapshots and checkpoints written straight to SCRATCH (Lustre, ~1.1 GB/s per node)',
-            'RS_PLACE=scatter        # a multi-node Rockstar job shares the nodes with other jobs (swarm nodes are shared)'])
+            'RS_PLACE=scatter        # a multi-node Rockstar job shares the nodes with other jobs (%s nodes are shared)'
+            % a.site]
+            + (['SIM_SELECT=%s   # the nodes, named: only these have a working fabric port (setup_production.py '
+                'LEAP_FABRIC_NODES; compute-4-3: port down)' % leap_select(R)]
+               if a.site == 'leap' and R['SIM'][3] > 1 else []))
     if a.site == 'pawna':
         return ('PBS_QUEUE=%s\n'
                 'SIM_STAGING=1           # snapshots and checkpoints written to the node\'s SSD, copied to NFS during the run'
@@ -495,6 +584,7 @@ def setup_cosmo(a, cosmo):
     force_res = L * soft_box
     k, T, s8_start, s8 = ic_spectrum(c)
     res = (resources(N) if a.site == 'pawna' else resources_swarm(N) if a.site == 'swarm'
+           else resources_pride(N) if a.site == 'pride' else resources_leap(N) if a.site == 'leap'
            else resources_pegasus(N, a.queue))
     if a.sim_gpu and a.site != 'pegasus':
         sys.exit('--sim-gpu: only pegasus has GPU nodes')

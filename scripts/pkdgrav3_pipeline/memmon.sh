@@ -10,9 +10,12 @@ root=$1; out=$2; dt=${3:-5}; excl=${4:-0}
 t0=$(date +%s.%N)
 echo "# t_s nproc pss_kb rss_kb   (root pid $root on $(hostname), every $dt s, started $(date -Is))" > "$out"
 while kill -0 "$root" 2>/dev/null; do
-  pids=$(ps -e -o pid=,ppid= | awk -v r="$root" -v x="$excl" '{p[$1]=$2}
+  pids=$(ps -e -o pid= -o ppid= | awk -v r="$root" -v x="$excl" '{p[$1]=$2}
          END{for(i in p){j=i; while(j>1){ if(j==x) break; if(j==r){print i; break}; j=p[j]}}}')
-  line=$(for p in $pids; do awk '/^Rss:/{r=$2} /^Pss:/{s=$2} END{if(NR) print s+0, r+0}' /proc/$p/smaps_rollup 2>/dev/null; done |
+  # smaps_rollup (one line per field) needs Linux >= 4.14; older kernels (leap, CentOS 7: 3.10) only have smaps
+  # (the same fields per mapping): summed, the same numbers
+  line=$(for p in $pids; do f=/proc/$p/smaps_rollup; [ -r "$f" ] || f=/proc/$p/smaps
+                            awk '/^Rss:/{r+=$2} /^Pss:/{s+=$2} END{if(NR) print s+0, r+0}' "$f" 2>/dev/null; done |
          awk '{n++; s+=$1; r+=$2} END{print n+0, s+0, r+0}')
   echo "$(awk -v a="$(date +%s.%N)" -v b="$t0" 'BEGIN{printf "%.1f", a-b}') $line" >> "$out"
   sleep "$dt"
