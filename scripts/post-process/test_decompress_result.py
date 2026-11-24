@@ -181,7 +181,7 @@ def plot_histogram_stats(fig,axarr,pl,data_dict,quant='pos'):
         ax.set_yscale('log')
         
         # Add statistical information as text
-        stats_text=stats_text+'\n'+f'{i}: {means[i]:.4f} \pm {np.sqrt(variances[i]):.4f}'
+        stats_text=stats_text+'\n'+f'{i}: {means[i]:.4f} \\pm {np.sqrt(variances[i]):.4f}'
         ax.set_xlim([-nsigma*std_dev[i],nsigma*std_dev[i]]) 
 
     stats_text=stats_text+'\n'+f'Npart: {data_dict["count"]}'

@@ -472,7 +472,8 @@ def compressed_filename(filename_prefix, quant):
 def print_this(print_string,logfile,overwrite=False):
     """ Convenience function for printing to logfile or stdout."""
     if logfile is not None:
-        writelog(logfile,print_string+'\n',overwrite=overwrite)
+        with open(logfile, 'w' if overwrite else 'a') as g:
+            g.write(print_string+'\n')
     else:
         print(print_string)
     return

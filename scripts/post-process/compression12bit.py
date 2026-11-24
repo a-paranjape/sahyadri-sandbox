@@ -82,9 +82,11 @@ def decompress_12bit(compressed, max_value, output_size, allow_negative=True, li
 
 
 
-def compress_integer_array(arr, bit_depth=None,little_endian=True,possible_bit_depth= [8,12,16,32,64]):
+def compress_integer_array(arr, bit_depth=None,little_endian=True,possible_bit_depth= [8,12,16,32,64],
+                           overflow_threshold=0.0):
     """Pack the integer array ``arr`` (even length) at ``bit_depth`` bits (chosen by
-    :func:`find_optimal_bit_depth` if None); values too large for the depth go to an overflow list.
+    :func:`find_optimal_bit_depth` if None, allowing at most ``overflow_threshold`` of the values to overflow);
+    values too large for the depth go to an overflow list.
 
     Returns (packed bytes, overflow indices, overflow values, original dtype, bit depth).
     """

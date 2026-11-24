@@ -449,12 +449,13 @@ class SnapshotReader(Utilities,Paths):
         else:
             return str(obj)
 
-    def hdf5_to_json(self, output_filename,subsamples):
+    def hdf5_to_json(self, output_filename,compression_dic):
         """
         Read Config, Header, and Parameters groups from the HDF5 file and write them to a JSON file.
         
         Args:
         output_filename (str): Name of the output JSON file.
+        compression_dic (dict): compression settings; stored in the header together with its 'subsamples'.
         
         Returns:
         None
@@ -480,7 +481,7 @@ class SnapshotReader(Utilities,Paths):
                             data = dset[:]
                             json_data[group_name][dset_name] = self.json_serializable(data)
         #Also add the subsamples in the header
-        json_data['Header']['subsamples']= subsamples
+        json_data['Header']['subsamples']= compression_dic['subsamples']
         json_data['Header']['compression_dic']= compression_dic
         # Write to JSON file
         with open(output_filename, 'w') as json_file:

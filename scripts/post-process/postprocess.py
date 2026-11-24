@@ -539,7 +539,7 @@ def add_pbc_jncol(data,rand=None,Lbox=200,njn=0,los=1):
          if(jntype=='2d'):
             jnreg=NJNy*indx+indy
          elif(jntype=='3d'):
-            indz=int_(NJNz*(mat[:,2]-POS_min[2])/blen[2])
+            indz=np.int_(NJNz*(mat[:,2]-POS_min[2])/blen[2])
             indz=np.mod(indz,NJNz)
             jnreg=NJNz*(NJNy*indx+indy)+indz
 

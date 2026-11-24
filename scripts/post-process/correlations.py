@@ -1261,7 +1261,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
             Returns density (contrast) [shape (self.grid,self.grid,self.grid)]
         """
 
-        if pos.shape[0] != self.dim:
+        if pos.shape[0] != 3:
             raise TypeError("Inconsistent data dimensions!! Try again.")
 
         if np.any(pos) < 0.0:
@@ -1290,16 +1290,18 @@ class PowerSpectrum(Utilities,Paths,Constants):
         density = np.zeros(self.grid**3)
         # using np.empty would lead to 'density' being updated across multiple calls!
 
+        if not hasattr(self, 'lib_ngp'):      # loaded on first use (was never loaded)
+            self.lib_ngp = cdll.LoadLibrary(self.python_path+'ngp_update.so')
         c_update_density = self.lib_ngp.update_density
         c_update_density.restype = None
-        c_update_density.argtypes = [c_int,c_int,ndpointer(c_double, flags="C_CONTIGUOUS"),
+        c_update_density.argtypes = [c_long,c_int,ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      ndpointer(c_double, flags="C_CONTIGUOUS"),
                                      c_double]
 
-        c_update_density(c_int(ndata),c_int(self.grid),density,
+        c_update_density(c_long(ndata),c_int(self.grid),density,
                          pos[0].astype('float64'),
                          pos[1].astype('float64'),
                          pos[2].astype('float64'),
@@ -1309,7 +1311,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
         density = np.reshape(density,(self.grid,self.grid,self.grid),order='F')
 
         if contrast:
-            density = density*self.grid**3/(1.0*ndata + TINY) - 1.0
+            density = density*self.grid**3/(1.0*ndata + self.TINY) - 1.0
 
         return density
     ##########################################################################
