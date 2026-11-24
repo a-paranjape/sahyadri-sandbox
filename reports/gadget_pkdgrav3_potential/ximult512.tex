@@ -64,3 +64,80 @@ in L1000 (1.78 against 2.50, 1.75 against 2.36, 0.25 against 0.57); at $256^3$ a
 gave 0.5--1.2 times the mean-shift prediction (guide \fp{docs/pkdgrav3_pipeline_pawna.md}, section 14). In L200 and L500 the dipole is consistent both with zero and with the
 estimate. With redshift-space distortions included (bottom row) the potential effect on the dipole is similar. It grows
 toward small $s$, where $\xi_0$ is steep; below $\sim$8\,\Mpch{} halo exclusion dominates.
+
+\subsection{Dependence on the halo potential used}
+\label{sec:ximult512phi}
+% Figures and table: make_ximult_phi_figures.py; data: data/box512_L200_L500_L1000/L<L>_out100_ximult_phiall.npz.
+
+\paragraph{Measurement.} The same measurement (same halos, mass bins, lines of sight, $s$ and $\mu$ bins, jackknife)
+repeated with the shift $v_g = -\phi/c$ taken from each of the twelve potential columns of the \texttt{.vpot}
+catalogue in turn (\fp{halo_xi_multipoles.py --phi <12 columns> --los x,y,z}; pawna job 2539117, 24 Nov 2026, 32
+cores, 3.5\,min and 2.6\,GB per box, 26 spaces: real, rsd, and grav and rsd+grav for each column). Five columns are
+the mean particle potential within a sphere of radius $r_s$, $0.5R_{\rm vir}$, $R_{\rm vir}$, $1.5R_{\rm vir}$ and
+$R_{200b}$; seven are the Gaussian-smoothed potential grid of the VAHC scales at the halo, $2$, $4$, $6$, $8\,R_{200b}$
+and 2, 3, 5\,\Mpch{} (\fp{vahc_fast.py}). Where a column is undefined the halo takes $\phi_{0.5R_{\rm vir}}$, as
+before: for $\phi_{r_s}$ 23\% of the halos above $2\times10^{12}$\,\Msunh{} in L500 and 29\% in L1000 (empty $r_s$
+sphere; none in L200), for the grid columns at most 0.25\% (L1000, $2R_{200b}$). The real- and redshift-space
+multipoles and the $\phi_{r_s}$ spaces reproduce the run above exactly (largest difference 0), so every column is
+measured on the same halos. The outputs are archived with the runs
+(\fp{/storage/shadab/sahyadri_sims/halos/Sahyadri_L<L>N512/default512/r1/xcorr/out_100_ximult_phiall.npz}, listed in
+the run's \fp{MANIFEST.json} and \fp{SHA256SUMS}, read-only).
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/ximult512_phi_vg.pdf}
+\caption{Mean $v_g = -\phi/c$ of each mass bin for the twelve potential columns. Left of the dashed line: mean within
+a sphere; right: Gaussian-smoothed grid. The lowest bin of L1000 (13\,498 halos against 220\,664 in the next) is
+incomplete there: its halos have 3--15 particles.}
+\label{fig:ximult512_phi_vg}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/ximult512_phi_dipole.pdf}
+\caption{Gravitational dipole averaged over $s = 10$--$40$\,\Mpch{} (as Table~\ref{tab:ximult512}) for each potential
+column: $\xi_1^{\rm grav}-\xi_1^{\rm real}$ (top), $\xi_1^{\rm rsd+grav}-\xi_1^{\rm rsd}$ (bottom), four cross pairs.
+Filled: measured, mean over the lines of sight, jackknife errors of the 2\,\Mpch{} bins treated as independent; open,
+dotted: mean-shift estimate with the same weights. L200 is left out of the pairs with its top bin (76 halos, jackknife
+errors not reliable).}
+\label{fig:ximult512_phi_dipole}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{figs/ximult512_phi_s.pdf}
+\caption{Dipole against $s$ in L1000 for pair 1--3 and five of the columns, in 8\,\Mpch{} bins; dotted: the
+mean-shift estimate of each column. Below $\sim$8\,\Mpch{} halo exclusion dominates (not shown).}
+\label{fig:ximult512_phi_s}
+\end{figure}
+
+\begin{table}[H]
+\centering\footnotesize
+\input{ximult512_phi_table.tex}
+\caption{Dipole averaged over $s = 10$--$40$\,\Mpch{} in units of $10^{-3}$ for each potential column: measured
+$\pm$ jackknife error (mean-shift estimate), for the best-measured pairs. $\Delta v_g = \langle v_g\rangle_3 - \langle
+v_g\rangle_1$ in L1000. Ratio: measured over estimate for $\xi_1^{\rm grav}-\xi_1^{\rm real}$, L1000, pair 1--3.
+Above the line: means within a sphere; below: smoothed grid.}
+\label{tab:ximult512phi}
+\end{table}
+
+\paragraph{Results.} \emph{Mean $v_g$} (Fig.~\ref{fig:ximult512_phi_vg}): the potential within $r_s$ separates the
+mass bins most; averaging over larger spheres, or smoothing the grid over larger radii, makes the halos of every bin
+shallower and the difference between bins smaller. Between bins 1 and 3 in L1000 it falls from 13.0\,km\,s$^{-1}$
+($r_s$) to 9.3 and 8.9 ($R_{\rm vir}$, $R_{200b}$) and 5.4 ($8R_{200b}$); the lowest bins hardly change (1.5--3.3\,km
+s$^{-1}$). The grid at a fixed 2\,\Mpch{} is deeper than at $4$--$8R_{200b}$ for the top bin, whose $R_{200b}$ is
+$\gtrsim1$\,\Mpch. \emph{Dipole} (Fig.~\ref{fig:ximult512_phi_dipole}, Table~\ref{tab:ximult512phi}): it follows
+$\Delta v_g$, largest for $\phi_{r_s}$ and smallest for the widest apertures, in both differences and in every box
+and pair where it is measured. In L1000, pair 1--3, $\xi_1^{\rm grav}-\xi_1^{\rm real}$ goes from
+$(1.78\pm0.52)\times10^{-3}$ ($r_s$, 3.4$\sigma$) through $(1.08\pm0.42)\times10^{-3}$ ($R_{200b}$) to
+$(0.23\pm0.30)\times10^{-3}$ ($8R_{200b}$); with redshift-space distortions, $(2.46\pm0.39)\times10^{-3}$ to
+$(0.31\pm0.29)\times10^{-3}$. \emph{Against the mean-shift estimate}: for the five spheres and the grid at $2R_{200b}$
+and 2\,\Mpch{} the measured dipole is 0.6--0.7 of the estimate ($\xi_1^{\rm grav}-\xi_1^{\rm real}$; 0.75--1.04 with
+redshift-space distortions), for the widest apertures much less: 0.40 at $6R_{200b}$, 0.23 at $8R_{200b}$, 0.21 at
+5\,\Mpch{} (0.47, 0.27, 0.25). Fig.~\ref{fig:ximult512_phi_s} shows where: at $s\approx10$--25\,\Mpch{} the dipole of
+the wide apertures stays far below their estimates, while those of $\phi_{r_s}$ and $\phi_{R_{\rm vir}}$ follow theirs.
+A likely reading (not tested further here): a potential smoothed over $\sim$10\,\Mpch{} contains the large-scale
+potential of the environment, which two halos 10--25\,\Mpch{} apart largely share, so it shifts them alike and leaves
+less relative shift than the bin means suggest; the mean-shift estimate ignores this. \emph{Caveats}: one realisation
+per box at $z=0$; L200's top bin (76 halos) and L1000's lowest bin (3--15 particles per halo) are not usable for this;
+the errors treat the 2\,\Mpch{} bins as independent.
