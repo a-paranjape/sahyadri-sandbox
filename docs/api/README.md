@@ -4,7 +4,7 @@
 
 Generated from the docstrings of the Python modules and the header comments of the shell and PBS scripts by [`tools/gen_api_docs.py`](../../tools/gen_api_docs.py). Guides: [pkdgrav3 pipeline on pawna](../pkdgrav3_pipeline_pawna.md), [run manager](../../tools/sahyadri_manager/README.md), [halo potential tools handover](../handover_xcorr_vprof.md).
 
-- [Shell and PBS scripts](scripts.md) (41 scripts)
+- [Shell and PBS scripts](scripts.md) (44 scripts)
 
 ## `tools/sahyadri_manager/`
 

@@ -62,6 +62,9 @@ Run with the pipeline's Python (numpy, scipy), e.g. /storage/shadab/pipeline_tes
 - [`resources`](#resources) - Default PBS resources by size (edit run.conf to change). Measured: 512^3 sim 25 GB / 80 min on 64 cores for 60 steps; Rockstar see rockstar\_mem (one writer per core: 64 writers 2.9x faster than 16 at 512^3 with the output on the node's disk); .vahc PP\_NPROC x ~13 GB at grid 512 (26 GB with PP\_FAST=0).
 - [`resources_pegasus`](#resources_pegasus) - pegasus: 32-core nodes (385 GB Skylake hpc001-060; 514 GB Ice Lake / Sapphire Rapids hpc061-100, debug queue on hpc081+), no node-local staging. Simulation with 2 MPI ranks per node (16 threads each), as pkdgrav3's pegasus tests; 3 nodes from 1024^3. Wall times: 96 h (project queue), at most 4 h in the debug queue.
 - [`resources_swarm`](#resources_swarm) - swarm: 12 nodes x 64 Ice Lake cores (Xeon 8358), 504 GB, shared between jobs; 72 h at most; Lustre /user1. Simulation with 2 MPI ranks per node; one node (32 cores, free cores of a shared node) up to 512^3, a whole node at 1024^3, 2 whole nodes at 2048^3 (~785 GB). Rockstar over shared nodes where one cannot hold it (RS\_NODES, RS\_PLACE=scatter): 2048^3 -&gt; 2 nodes. Measured (17 Nov 2026, 512^3 restart at z = 0.06): 24.5 s/step on 32 cores, 11.9 s on 2 x 32 (2.06x); Rockstar on 2 shared nodes as fast as on one, memory split evenly.
+- [`resources_pride`](#resources_pride) - pride: 16 nodes x 20 Haswell cores (2 x Xeon E5-2660 v3, AVX2), 189-252 GB, 1 Gb/s Ethernet (no InfiniBand), 72 h; Lustre /user1 shared with swarm; ~390 GB node-local disk (/, /tmp, /var/tmp). Simulation on one node up to 1024^3 (~200 GB); 2048^3 would need 5 nodes over 1 Gb/s Ethernet (untested, not recommended). vahc grid 1024 (~97 GB per snapshot process) 2 snapshots at a time; Rockstar over shared nodes of at most PRIDE\_NODE\_MEM.
+- [`resources_leap`](#resources_leap) - leap: 12 nodes x 32 Skylake cores (2 x Xeon Gold 6142), 187 GB, 100 Gb/s hfi1 fabric; 72 h; Lustre /user1 shared with swarm; 24 GB node-local disk (no staging, no local FITS temporary files). Simulation with 2 MPI ranks per node over the fabric (env\_leap.sh); 2048^3 on 6 nodes (expected peak ~750 GB: 125 GB per node; 175gb asked). Measured (20-21 Nov 2026, 512^3 restart at z = 0.06, 2 x 16 threads per node): 34.3 s/step on 1 node, 20.0 on 2, 10.5 on 4, 7.8 on 6 (swarm: 24.5 on 1 x 32 cores, 11.9 on 2 x 32). Halo stages: not installed on leap (SITES).
+- [`leap_select`](#leap_select) - SIM\_SELECT for a multi-node simulation on leap: the first SIM\_NODES nodes of LEAP\_FABRIC\_NODES, named.
 - [`fmt_l`](#fmt_l) - Box size for run names: `200` for 200.0, `12p5` for 12.5.
 - [`same_content`](#same_content) - path exists and holds text, apart from '#' comment lines (the set-up time).
 - [`write_shared`](#write_shared) - A file of the set-up directory, shared by its realisations (archived with each run): left untouched (and its mtime with it) when only its comments would change, so setting up another realisation does not make the kept files of the runs already verified or archived look changed.
@@ -206,6 +209,37 @@ Simulation with 2 MPI ranks per node; one node (32 cores, free cores of a shared
 at 1024^3, 2 whole nodes at 2048^3 (~785 GB). Rockstar over shared nodes where one cannot hold it (RS\_NODES,
 RS\_PLACE=scatter): 2048^3 -&gt; 2 nodes. Measured (17 Nov 2026, 512^3 restart at z = 0.06): 24.5 s/step on 32 cores,
 11.9 s on 2 x 32 (2.06x); Rockstar on 2 shared nodes as fast as on one, memory split evenly.
+
+## resources_pride
+
+```python
+resources_pride(N)
+```
+
+pride: 16 nodes x 20 Haswell cores (2 x Xeon E5-2660 v3, AVX2), 189-252 GB, 1 Gb/s Ethernet (no InfiniBand),
+72 h; Lustre /user1 shared with swarm; ~390 GB node-local disk (/, /tmp, /var/tmp). Simulation on one node up to
+1024^3 (~200 GB); 2048^3 would need 5 nodes over 1 Gb/s Ethernet (untested, not recommended). vahc grid 1024
+(~97 GB per snapshot process) 2 snapshots at a time; Rockstar over shared nodes of at most PRIDE\_NODE\_MEM.
+
+## resources_leap
+
+```python
+resources_leap(N)
+```
+
+leap: 12 nodes x 32 Skylake cores (2 x Xeon Gold 6142), 187 GB, 100 Gb/s hfi1 fabric; 72 h; Lustre /user1 shared
+with swarm; 24 GB node-local disk (no staging, no local FITS temporary files). Simulation with 2 MPI ranks per
+node over the fabric (env\_leap.sh); 2048^3 on 6 nodes (expected peak ~750 GB: 125 GB per node; 175gb asked).
+Measured (20-21 Nov 2026, 512^3 restart at z = 0.06, 2 x 16 threads per node): 34.3 s/step on 1 node, 20.0 on 2,
+10.5 on 4, 7.8 on 6 (swarm: 24.5 on 1 x 32 cores, 11.9 on 2 x 32). Halo stages: not installed on leap (SITES).
+
+## leap_select
+
+```python
+leap_select(R)
+```
+
+SIM\_SELECT for a multi-node simulation on leap: the first SIM\_NODES nodes of LEAP\_FABRIC\_NODES, named.
 
 ## fmt_l
 

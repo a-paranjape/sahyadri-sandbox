@@ -208,6 +208,8 @@ usage: install_production.sh pawna   [/user/$USER/sahyadri_prod]
        install_production.sh swarm   [/user1/$USER/sahyadri_pipeline]   (Miniforge in /user1/$USER/miniforge3 if
                                       missing; pkdgrav3 for Ice Lake; no 'bash -l': swarm's login shell drops the
                                       arguments of a script started that way)
+       install_production.sh pride   [/user1/$USER/sahyadri_pride]      (TIFR; shares swarm's Lustre /user1 and
+                                      Miniforge; pkdgrav3 for Haswell (AVX2): swarm's Ice Lake build does not run)
 Rerunning updates the clones and rebuilds. Nothing outside <root> is changed (pegasus: caches on /data).
 ```
 
@@ -401,6 +403,39 @@ Config (all optional):
 Output: $HALO_DIR/xcorr/out_<snap>_<tag>.npz. Restart: rerun; existing outputs are skipped.
 ```
 
+## `scripts/pkdgrav3_pipeline/leap/build_c7.sh`
+
+Source: [build_c7.sh](../../scripts/pkdgrav3_pipeline/leap/build_c7.sh)
+
+```text
+pkdgrav3 for leap (and flock, raft): conda environment solved for glibc 2.17 (CentOS/RHEL 7), skylake-avx512 build.
+  bash build_c7.sh [root]   (default /user1/$USER/sahyadri_c7/pkdgrav3_io; run on leap's login node, ~30 min)
+Creates <root>/env (~3 GB; package cache <root>/conda_pkgs), <root>/pkdgrav3 (copy of SRC, default pride's clone:
+the same commit as swarm), <root>/build, <root>/build_snapcomp. Needs Miniforge in $CONDA_BASE.
+leap's login profile sets ARCH=x86_64, so compile_pegasus.sh is run without a login shell (bash -l would reset ARCH
+and cmake would get -march=x86_64).
+```
+
+## `scripts/pkdgrav3_pipeline/leap/env_leap.sh`
+
+Source: [env_leap.sh](../../scripts/pkdgrav3_pipeline/leap/env_leap.sh)
+
+```text
+pkdgrav3 run-time environment on leap (TIFR theory; 12 nodes x 32 Skylake cores (2 x Xeon Gold 6142), 187 GB,
+100 Gb/s hfi1 fabric (Omni-Path-like; UCX: rc_verbs/ud_verbs) + 10/1 GbE; CentOS 7, glibc 2.17). Sourced by
+job_sim.pbs (SIM_ENV in run.conf).
+pkdgrav3 and its conda environment (Open MPI 5 + UCX) are in /user1/$USER/sahyadri_c7/pkdgrav3_io, built by
+build_c7.sh (next to this file): a conda environment solved for glibc 2.17 and TARGET_ARCHITECTURE=skylake-avx512
+(swarm's and pride's builds need glibc 2.27-2.34 and do not start here). The same build runs on flock and raft.
+MPI between nodes (measured 20-21 Nov 2026, 512^3 restart: 2/4/6 nodes 86/82/73 % efficient; 6 us, 3.2 GB/s):
+  - pml ucx over the fabric's verbs: with Open MPI's defaults the ranks choose different PMLs (cm on some nodes,
+    ob1 on others) and MPI_Init fails ("selected pml cm, but peer ... selected pml ob1")
+  - compute-4-3's fabric port is DOWN (ucx finds no transport there): run.conf SIM_SELECT names the nodes
+  - mpirun starts its daemons with ssh_noconda (system ssh without the conda library path, and without host-key
+    checks: the home directory, and with it known_hosts, is shared by swarm, pride, flock, leap and raft, whose
+    compute nodes are not in it, so ssh refused them: "Host key verification failed")
+```
+
 ## `scripts/pkdgrav3_pipeline/memmon.sh`
 
 Source: [memmon.sh](../../scripts/pkdgrav3_pipeline/memmon.sh)
@@ -421,6 +456,18 @@ Source: [pipeline_env.sh](../../scripts/pkdgrav3_pipeline/pipeline_env.sh)
 
 ```text
 Sourced by every pipeline job: reads the run config ($CONF) and sets derived paths.
+```
+
+## `scripts/pkdgrav3_pipeline/pride/env_pride.sh`
+
+Source: [env_pride.sh](../../scripts/pkdgrav3_pipeline/pride/env_pride.sh)
+
+```text
+pkdgrav3 run-time environment on pride (TIFR theory; 16 nodes x 20 Haswell cores (2 x Xeon E5-2660 v3, AVX2),
+189-252 GB, 1 Gb/s Ethernet, no InfiniBand). Sourced by job_sim.pbs (SIM_ENV in run.conf).
+pride shares swarm's Lustre /user1 (home) and Miniforge; only pkdgrav3 differs: swarm's build is for Ice Lake
+(AVX-512) and does not run here, so pride has its own (install_production.sh pride: ARCH=haswell) in
+/user1/$USER/sahyadri_pride. The rest (conda MPI, ssh without conda's library path) is swarm's environment.
 ```
 
 ## `scripts/pkdgrav3_pipeline/setup_pawna.sh`
