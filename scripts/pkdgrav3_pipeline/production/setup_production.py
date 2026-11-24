@@ -26,6 +26,9 @@ Simulation settings:
                (1 - 1/13)/2000), i.e. round(delta a / STEP_DA) steps between outputs; ~2120 in total
   outputs      the scale factors in sahyadri_outputs_a.txt (101, z = 11.98 ... 0; the last is z = 0 exactly)
   potential    stored (dCompPotStep = 100 (km/s)^2) in every snapshot at z <= 0.5
+  memory       bMemIntegerPosition = True (positions as 32-bit integers, 36 B per particle; ~0.78 x the memory of
+               doubles; 512^3 test 24 Nov 2026: P(k) within 1e-3 to k = 4 h/Mpc, halo mass function within 0.3 %);
+               --no-int-pos for doubles. Checkpoints keep the layout: restarts use the setting they were made with
   checkpoints  every CHECK_INTERVAL steps to r<R>/checkpoints (newest 2 kept); pkdgrav3 stops cleanly 1-4 h before
                the PBS wall time (iWallRunTime); continue with `submit.sh restart`
   I/O          staged (pkdgrav3 tools/staging/run_staged.pbs): snapshots and checkpoints go to the node's local SSD
@@ -403,6 +406,8 @@ def main():
                          'at 2048^3); memory per node then 1.1 x the estimate / nodes' % RS_NODE_MEM)
     ap.add_argument('--rs-batch', type=int, choices=(0, 1), default=1,
                     help='1: Rockstar in batches while the simulation runs; 0: one Rockstar job after it')
+    ap.add_argument('--no-int-pos', action='store_true',
+                    help='positions as doubles (48 B per particle) instead of bMemIntegerPosition (36 B, the default)')
     ap.add_argument('--force', action='store_true', help='overwrite existing configuration files')
     ap.add_argument('--schedule', nargs='?', const=0, type=int, default=None, metavar='PRIORITY',
                     help='register with the run manager and queue the simulations (priority, default 0)')
@@ -469,12 +474,18 @@ def setup_cosmo(a, cosmo):
            else resources_pegasus(N, a.queue))
     if a.sim_gpu and a.site != 'pegasus':
         sys.exit('--sim-gpu: only pegasus has GPU nodes')
+    # pkdgrav3 memory at 2048^3 on one pawna node (191 threads, r5 job 2539063): 830 GiB = RSS 735 + swap 95 GiB
+    # (particles 457 GiB at 48 B, trees ~334 GiB at 200 B per node, ~40 GiB other). bMemIntegerPosition: 36 B per
+    # particle and 160 B per tree node -> ~650 GiB (0.78 x); 512^3 test (pawna node3, 64 threads, /usr/bin/time):
+    # peak RSS 25.0 -> 22.3 GiB, P(k) within 1e-3 up to k = 4 h/Mpc and halo mass function within 0.3 % (24 Nov 2026)
+    peak_gb = 830 * 1.0737 * (N / 2048.) ** 3 * (1.0 if a.no_int_pos else 0.78)
     if a.sim_gpu and not a.sim_nodes:
-        a.sim_nodes = 3 if N >= 2048 else 1          # 2048^3 needs ~785 GB: 3 GPU nodes (~370 GB usable each)
+        # the fewest GPU nodes (~370 GB usable each) holding 1.25 x the peak: 1 up to ~1520^3, 2 to ~1920^3, 3 at 2048^3
+        # (integer positions; doubles: 1 up to ~1400^3, 2 to ~1760^3, 3 to ~2020^3, 4 at 2048^3)
+        a.sim_nodes = max(1, int(np.ceil(1.25 * peak_gb / int(GPU_NODE_MEM[:-2]))))
     if a.sim_nodes:
         if a.site == 'pawna':
             sys.exit('--sim-nodes: pawna simulations run on one node')
-        peak_gb = 747 * 1.0737 * (N / 2048.) ** 3          # measured 747 GiB at 2048^3 (one node)
         cap = int(GPU_NODE_MEM[:-2]) if a.sim_gpu else 480
         if peak_gb * 1.05 / a.sim_nodes > cap:
             sys.exit('%d %snodes hold at most %d GB each, the simulation needs ~%.0f GB: use more nodes'
@@ -490,7 +501,8 @@ def setup_cosmo(a, cosmo):
             sys.exit('--rs-nodes %d: %.0f GB per node, more than %s' % (a.rs_nodes, need / a.rs_nodes, RS_NODE_MEM))
     wall_h = int(res['SIM'][2].split(':')[0])
     # pkdgrav3 stops this long before the PBS wall time: the staging drain must still copy the last checkpoint
-    # (48 B/particle; ~52 GB at 1024^3, ~35 min at the ~25 MB/s of /storage) and snapshot to NFS
+    # (36 B/particle with integer positions, 48 with doubles; ~52 GB at 1024^3 with doubles, ~35 min at the ~25 MB/s
+    # of /storage) and snapshot to NFS
     margin = 60 if N <= 512 else (120 if N <= 1024 else 240)
     if a.site != 'pawna':   # no staging: checkpoints go straight to Lustre (~412 GB at 2048^3, minutes)
         margin = min(margin, 90)
@@ -577,6 +589,11 @@ def setup_cosmo(a, cosmo):
             '# memory layout: ordered, particle ID = Lagrangian lattice index (no bMemParticleID)',
             'bMemUnordered   = False',
             'bMemParticleID  = False',
+            ] + ([] if a.no_int_pos else [
+            '# positions as 32-bit integers (steps of 2^-31 box), 36 B per particle instead of 48 and 160 B per tree node',
+            '# instead of 200: ~0.78 x the memory. Checkpoints keep this layout: a restart must use the same setting',
+            'bMemIntegerPosition = True',
+            ]) + [
             'bDoDensity      = False',
             'bOverwrite      = True',
             'bVDetails       = True',
@@ -661,6 +678,7 @@ SUBSAMPLES="%(sub)s"
 SIM_NCPU=%(sim_n)d;  SIM_MEM=%(sim_m)s;  SIM_WALL=%(sim_w)s    # iWallRunTime in p.par = SIM_WALL - %(margin)d min
 %(site_block)s
 SIM_KEEPCHK=2           # keep the newest 2 complete checkpoints in checkpoints/ (0 = all)
+SIM_CHK_BPP=%(chk_bpp)d          # checkpoint bytes per particle (36: bMemIntegerPosition in p.par, 48: doubles); manager space estimates
 SIM_CHECK_INTERVAL=%(chk_int)d   # steps between checkpoints (iCheckInterval in p.par; with SIM_STAGING=0 also set on every restart)
 RS_NCPU=%(rs_n)d;    RS_MEM=%(rs_m)s;   RS_WALL=%(rs_w)s
 RS_NODES=%(rs_nodes)d              # Rockstar nodes: RS_NCPU cores, RS_MEM and RS_NCPU writers on each (server on the first, a client per node)
@@ -711,7 +729,7 @@ PARQUET=1
            stem=stem, r=r, N=N, L='%g' % L, nout=len(a_out), sub=SUBSAMPLES,
            sim_n=R['SIM'][0], sim_m=R['SIM'][1], sim_w=R['SIM'][2], rs_n=R['RS'][0], rs_m=R['RS'][1], rs_w=R['RS'][2], rs_nodes=(R['RS'][3] if len(R['RS']) > 3 else 1),
            ct_n=R['CT'][0], ct_m=R['CT'][1], ct_w=R['CT'][2], pp_n=R['PP'][0], pp_m=R['PP'][1], pp_w=R['PP'][2],
-           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, chk_int=a.check_interval, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], vf_n=verify_resources(N, a.site, a.queue)[0], vf_m=verify_resources(N, a.site, a.queue)[1], vf_w=verify_resources(N, a.site, a.queue)[2], vf_p=verify_resources(N, a.site, a.queue)[3], pq_n=parquet_resources(N)[0], pq_m=parquet_resources(N)[1],
+           site_block=site_block(a, R), rs_local=1 if a.site == 'pawna' else 0, margin=margin, chk_int=a.check_interval, chk_bpp=48 if a.no_int_pos else 36, rs_batch=a.rs_batch, fi_n=R['FITS'][0], fi_m=R['FITS'][1], fi_w=R['FITS'][2], vf_n=verify_resources(N, a.site, a.queue)[0], vf_m=verify_resources(N, a.site, a.queue)[1], vf_w=verify_resources(N, a.site, a.queue)[2], vf_p=verify_resources(N, a.site, a.queue)[3], pq_n=parquet_resources(N)[0], pq_m=parquet_resources(N)[1],
            pq_w=parquet_resources(N)[2], fr=force_res, rsb=R['RS_BLOCKS'],
            rsw=R['RS_WRITERS'], ppn=R['PP_NPROC'], ppgrid=min(N, 1024), ctdiv='5' if N >= 1024 else '')
         write(os.path.join(sdir, 'run.conf'), conf, a.force)

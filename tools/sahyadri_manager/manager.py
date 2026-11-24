@@ -138,11 +138,11 @@ SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=30', '-o', 'ServerAlive
 def scratch_estimate(E, n_out):
     """Bytes a run will occupy in SCRATCH at most (before its deletion is approved): every snapshot in full
     (10.5 B/particle measured with the potential at z <= 0.5: 128^3 and 512^3 runs), SIM_KEEPCHK checkpoints
-    (48 B/particle), halo catalogues/trees/FITS (~0.5 of the snapshots at 64^3, a small fraction at large N;
+    (SIM_CHK_BPP: 48 B/particle, 36 with integer positions), halo catalogues/trees/FITS (~0.5 of the snapshots at 64^3, a small fraction at large N;
     0.15 used), plus 10 %."""
     n3 = float(E.get('NPART', 0)) ** 3
     snaps = 10.5 * n3 * n_out
-    chk = 48.0 * n3 * int(E.get('SIM_KEEPCHK', '2') or 2)
+    chk = float(E.get('SIM_CHK_BPP', 48) or 48) * n3 * int(E.get('SIM_KEEPCHK', '2') or 2)   # 36 with integer positions
     return int(1.10 * (snaps * 1.15 + chk))
 def archive_estimate(E, plan):
     """Bytes a run's archive will hold (retention plan): full snapshots 10.5 B/particle each, the other outputs at the
@@ -156,7 +156,7 @@ def archive_estimate(E, plan):
     b = 10.5 * n3 * (nf + (no - nf) * sum(plan['subsamples']) / 100.0)
     b += 106.0 * n3 + (88.0 * n3 if plan.get('parquet') else 0)
     if plan.get('checkpoint'):
-        b += 48.0 * n3
+        b += float(E.get('SIM_CHK_BPP', 48) or 48) * n3
     return int(b)
 
 
