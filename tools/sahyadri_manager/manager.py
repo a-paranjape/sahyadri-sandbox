@@ -1333,10 +1333,18 @@ class Manager:
         rate = info.get('rate')
         lim = max(float(self.cfg.get('sim_stall_s', 7200)),
                   float(self.cfg.get('sim_stall_steps', 5)) / rate if rate else 0.0)
-        lm = info.get('log_mtime')
+        # this job's own log: sim_info has no log time before the job's first step, and a job that hangs before it
+        # (pawna r4 2539111, 24 Nov 2026: stuck 10 h in the first tree build after a restart) must still be caught
+        jl = os.path.join(run.P['sim'], 'run.%s.log' % sim['job'])
+        try:
+            lm = os.path.getmtime(jl)
+        except OSError:
+            lm = info.get('log_mtime')
         if lm and now() - t_start > lim and now() - lm > lim:
-            out['sim_stalled'] = ('simulation job %s: its log has not changed for %.1f h (step %s; limit %.1f h): hung? '
-                                  '(node memory, NFS)' % (sim['job'], (now() - lm) / 3600, info.get('step'), lim / 3600))
+            out['sim_stalled'] = ('simulation job %s: its log has not changed for %.1f h (%s; limit %.1f h): hung? '
+                                  '(node memory, NFS)' % (sim['job'], (now() - lm) / 3600,
+                                                          'step %s' % info['step'] if info.get('step') is not None
+                                                          else 'before its first step', lim / 3600))
         # the staging drain of this job
         dl = os.path.join(run.P['sim'], 'drain.%s.log' % sim['job'])
         if os.path.isfile(dl):
