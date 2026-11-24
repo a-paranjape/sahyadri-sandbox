@@ -24,6 +24,7 @@ TABLES = ['basic', 'extended', 'tens', 'vahc']
 
 
 def best(f, n=3):
+    """Best (minimum) wall time of ``n`` calls of ``f`` and the last result."""
     t = []
     for _ in range(n):
         t0 = time.perf_counter(); r = f(); t.append(time.perf_counter() - t0)
@@ -31,15 +32,21 @@ def best(f, n=3):
 
 
 def native(a):
+    """``a`` converted to native byte order (FITS columns are big-endian)."""
     return a.astype(a.dtype.newbyteorder('='))
 
 
 def table(path):
+    """The FITS table at ``path`` as an Arrow table (native byte order) and as the fitsio array."""
     D = fitsio.read(path, ext=1)
     return pa.table({c: native(D[c]) for c in D.dtype.names}), D
 
 
 def write(T, f, mode, level=3):
+    """Write table ``T`` to Parquet ``f`` with zstd at ``level`` in layout ``mode`` ('dict': default
+    dictionaries; 'nodict': no dictionary for floats; 'nodict_split': also byte-stream-split floats); returns the
+    file size.
+    """
     fl = [c for c in T.column_names if pa.types.is_floating(T.schema.field(c).type)]
     kw = dict(compression='zstd', compression_level=level, row_group_size=1 << 20, write_statistics=True)
     if mode == 'dict':
@@ -52,11 +59,15 @@ def write(T, f, mode, level=3):
 
 
 def exact(T, f):
+    """True if reading ``f`` back gives every column of ``T`` bit for bit."""
     R = pq.read_table(f)
     return all(np.array_equal(np.asarray(R[c]).view(np.uint8), np.asarray(T[c]).view(np.uint8)) for c in T.column_names)
 
 
 def main():
+    """Command line: ``parquet_layout_test.py <out dir> <FITS dir>``: compare encodings, row-group sizes and
+    read patterns of the halo tables.
+    """
     out, d = sys.argv[1], sys.argv[2]
     os.makedirs(out, exist_ok=True)
     print('== 1. encodings (MB; write s)')

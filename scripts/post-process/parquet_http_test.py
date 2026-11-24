@@ -15,14 +15,20 @@ import urllib.request
 
 
 def main_client(base, label):
+    """Time the access patterns of the halo Parquet files over HTTP from ``base`` (downloads, DuckDB queries
+    of one or two columns, a cut, a join of two tables); every request URL carries ``label`` so the server log
+    can be matched (:func:`main_log`). Prints the best of three runs per test.
+    """
     import duckdb
     base = base.rstrip('/')
     out = []
 
     def url(f, tag, k):
+        """Quoted URL of file ``f`` with a ``?t=<label>.<tag>.<k>`` tag that defeats caches."""
         return "'%s/%s?t=%s.%s.%d'" % (base, f, label, tag, k)
 
     def run(tag, desc, fn):
+        """Run ``fn`` three times; record and print the best time of test ``tag``."""
         ts = []
         res = None
         for k in range(3):
@@ -33,13 +39,17 @@ def main_client(base, label):
         print('%-4s %-58s best %7.3f s  worst %7.3f s  %s' % (tag, desc, min(ts), max(ts), str(res)[:60]), flush=True)
 
     def dl(f, tag):
+        """Test function: download file ``f`` completely; returns its size."""
         def fn(k):
+            """Download once (attempt ``k``)."""
             with urllib.request.urlopen(url(f, tag, k).strip("'")) as r:
                 return len(r.read())
         return fn
 
     def q(sql_fn):
+        """Test function: run the SQL ``sql_fn(k)`` in a fresh DuckDB connection without metadata cache."""
         def fn(k):
+            """Run the query once (attempt ``k``)."""
             con = duckdb.connect()
             con.execute('SET enable_http_metadata_cache = false')
             return con.execute(sql_fn(k)).fetchall()
@@ -62,6 +72,7 @@ def main_client(base, label):
         q(lambda k: 'select count(*), max(Mvir) from read_parquet(%s) where Tree_root_ID = 23659197' % url('tree_0_0_0.dict.parquet', 'Q6', k)))
 
     def catalogue(k):
+        """Join the basic and vahc tables of snapshot 100 and query a cut on Mvir (attempt ``k``)."""
         con = duckdb.connect()
         con.execute('SET enable_http_metadata_cache = false')
         con.execute('create view halos as select b.*, v.* exclude (haloID) from read_parquet(%s) b join read_parquet(%s) v '
@@ -72,6 +83,7 @@ def main_client(base, label):
 
 
 def main_log(path, label):
+    """Sum the server log ``path`` (range_http_server.py) per test of run ``label``: requests, bytes, time."""
     S = collections.defaultdict(lambda: [0, 0, 0.0])
     for line in open(path):
         r = json.loads(line)

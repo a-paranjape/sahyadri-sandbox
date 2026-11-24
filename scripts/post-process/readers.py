@@ -1,3 +1,10 @@
+"""Readers for the Sahyadri snapshots and halo catalogues.
+
+:class:`SnapshotReader`: header and particle blocks (positions, velocities, IDs, potential) of a snapshot in
+Gadget HDF5, the older compressed HDF5 format (``Nbody_Compression``) or pkdgrav3 .pkc (``pkcreader``), with
+optional down-sampling. :class:`HaloReader`: consistent-trees hlists and the value-added tables (.vahc,
+.tens) of a snapshot, with mass cuts. Paths come from ``utilities.Paths``.
+"""
 import os
 import numpy as np
 import pandas as pd
@@ -14,6 +21,7 @@ import json
 import time
 
 def ltime(date=True):
+    """Local time as ``d/m/yyyy h:m:s`` (``date`` False: only the time)."""
     tm=time.localtime()
     datestr=str(tm.tm_mday)+'/'+str(tm.tm_mon)+'/'+str(tm.tm_year)
     tmstr=str(tm.tm_hour)+':'+str(tm.tm_min)+':'+str(tm.tm_sec)
@@ -55,6 +63,10 @@ class SnapshotReader(Utilities,Paths):
             self.read_snapshot_header()
 
     def read_snapshot_header(self):
+        """Find the snapshot file (``snapshot_<nnn>.hdf5``, ``.0.hdf5``, a compressed snapshot, or a .pkc via
+        ``snapnames.txt``) and read its header: scale factor, redshift, particle numbers, box size, particle mass and
+        cosmology into attributes. Raises if no snapshot is found.
+        """
         if os.path.exists(self.snapshot_file+'.hdf5'):
             self.snapshot_ext = '.hdf5' 
         elif os.path.exists(self.snapshot_file+'.0.hdf5'):
@@ -117,6 +129,7 @@ class SnapshotReader(Utilities,Paths):
     # number <snap> is line <snap> of snapnames.txt (the SNAPSHOT_NAMES file given to Rockstar: zero-padded
     # pkdgrav3 steps) in the simulation directory; the files are <dir>/<name>.<step>.s<pct>.<writer>.pkc.
     def find_pkc(self):
+        """Prefix of the .pkc snapshot of this output from the run's ``snapnames.txt`` (None if absent)."""
         simdir = self.sim_path + self.sim_stem + '/r'+str(self.real)
         names = os.path.join(simdir, 'snapnames.txt')
         if not os.path.isfile(names):
@@ -133,6 +146,7 @@ class SnapshotReader(Utilities,Paths):
         return prefixes[0] if prefixes else None
 
     def read_pkc_header(self):
+        """Open the .pkc snapshot (``PkcSnapshot``) and set the header attributes from it."""
         from pkcreader import PkcSnapshot
         self.pkc = PkcSnapshot(self.find_pkc())
         self.snapshot_file, self.snapshot_ext = self.pkc.prefix, '.pkc'
@@ -510,6 +524,10 @@ class HaloReader(SnapshotReader):
     ###############################################
     def __init__(self,sim_stem='scm1024',real=1,snap=200,logfile=None,verbose=True,read_header=True):
 
+        """Set up the halo catalogue of snapshot ``snap``: column names and types of the hlist and value-added
+        tables, the smoothing scales, the run's ``scales.txt`` and default mass limits; with ``read_header`` the
+        snapshot header is read too.
+        """
         SnapshotReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose,read_header=read_header)
 
         self.halocat_stem = self.sim_stem + '/r'+str(self.real)+'/' + 'out_' + str(self.snap)        
@@ -832,6 +850,9 @@ class HaloReader(SnapshotReader):
 
     ###############################################
     def calc_Npmin_default(self,grid):
+        """Default minimum particle number of a halo for a density grid of size ``grid`` (scaled with the
+        particle number and the grid).
+        """
         Npmin = 200*self.NENCL_2R200B*(self.npart/1024**3.)*(512./grid)**3
         return Npmin
     ###############################################

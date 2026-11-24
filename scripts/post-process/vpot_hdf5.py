@@ -29,6 +29,9 @@ def has_potential(sr):
 
 
 def hdf5_fields(sr, ps, threads, halos, hpos, Om, chunk=1 << 24):
+    """Density grid and per-halo potential sums from an HDF5 snapshot (Gadget-4 or pkdgrav3 HDF5) read in
+    chunks of ``chunk`` particles; returns (density, number of particles, vpot sums).
+    """
     pos = sr.read_block('pos')                      # (3, N), Mpc/h
     n = pos.shape[1]
     density = ps.density_field(pos)

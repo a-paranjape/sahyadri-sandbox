@@ -1,11 +1,16 @@
+"""Rockstar catalogues of the input routes (pkc, pkc2, gad, h5g) at z = 0 compared with the Gadget route:
+counts per mass bin and, for Mvir >= 1e11 Msun/h, match fraction and mass and Vmax differences.
+"""
 # Rockstar catalogs of different input routes (pkc, pkc2, gad, h5g) at z = 0, matched to gad by nearest centre.
 import numpy as np, sys
 from scipy.spatial import cKDTree
 D='/storage/shadab/pkc_rockstar/rsval/'
 def load(r, f):
+    """Columns Mvir, X, Y, Z, Rvir of file ``f`` of route ``r`` (old helper; the script uses :func:`hdr`)."""
     a=np.loadtxt(D+r+'/'+f, usecols=(2,8,9,10,5), comments='#')  # Mvir Vmax? -> pick by header
     return a
 def hdr(r,f):
+    """Column names from the first header line of file ``f`` of route ``r``."""
     with open(D+r+'/'+f) as fh: return fh.readline()[1:].split()
 cols=hdr('pkc','out_5.list'); ix={c:i for i,c in enumerate(cols)}
 use=[ix['Mvir'],ix['Vmax'],ix['X'],ix['Y'],ix['Z']]

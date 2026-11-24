@@ -61,6 +61,11 @@ def makedirs_g(d):
 
 
 def sha_copy(src, dst):
+    """Copy ``src`` to ``dst`` and return the SHA-256 (hex) of the bytes copied.
+
+    Written to ``dst.part``, fsynced, given the source's times and mode plus group read, then renamed, so an
+    interrupted copy never leaves a truncated file under the final name.
+    """
     h = hashlib.sha256()
     tmp = dst + '.part'
     with open(src, 'rb') as fi, open(tmp, 'wb') as fo:
@@ -79,6 +84,7 @@ def sha_copy(src, dst):
 
 
 def sha_file(path):
+    """SHA-256 (hex) of a file, read in ``CHUNK`` blocks."""
     h = hashlib.sha256()
     with open(path, 'rb') as f:
         while True:
@@ -99,6 +105,11 @@ def sha_direct(path):
 
 
 def main():
+    """Command line: ``archive_run.py <run.conf> [--dry-run] [...]``.
+
+    Refuses an ARCHIVE that is, contains or lies inside SCRATCH, then copies the kept files (local run), pulls
+    them from the run's site (remote run) or copies a batch of particle outputs (see the module docstring).
+    """
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     dry = '--dry-run' in sys.argv
@@ -167,6 +178,12 @@ def same_source(man_path, src_scratch):
 
 
 def copy_local(E, pl, P, V, files, dry):
+    """Copy the kept files ``files`` of a local run into the archive and write its manifest.
+
+    A locked (read-only) complete archive is only checked against ``files``; otherwise each file whose archive
+    copy is missing or differs (size, mtime, SHA-256) is copied with :func:`sha_copy` and re-read from the
+    archive to verify it. ``V`` is the verify report, ``dry`` lists without copying. Returns the exit code.
+    """
     adir = os.path.join(E['ARCHIVE'], P['rel']['state'])
     man_path = os.path.join(adir, 'MANIFEST.json')
     same_source(man_path, E['SCRATCH'])
@@ -310,6 +327,7 @@ def source_sums(E):
     nproc = max(1, int(E.get('KEPT_SUMS_NPROC') or os.environ.get('PBS_NCPUS') or 8))
 
     def one(f):
+        """Manifest row of one kept file: archive path, source path, category, snapshot, size, mtime, SHA-256."""
         cat, snap, src, rel = f
         st = os.stat(src)
         return dict(path=rel, src=os.path.relpath(src, E['SCRATCH']), cat=cat, snap=snap, size=st.st_size,
@@ -368,6 +386,7 @@ def pull(E, dry):
     def src_of(r):
         # where the file is in the remote SCRATCH; KEPT_FILES.json before 'src' was recorded: the cosmology copies
         # are archived as sims/<stem>/r<N>/cosmology/<f> from sims/<stem>/<f> (retention.kept_files)
+        """Path of manifest row ``r`` in the remote SCRATCH (older KEPT_FILES.json rows have no ``src``)."""
         if r.get('src'):
             return r['src']
         if r['cat'] == 'cosmo':
@@ -375,6 +394,7 @@ def pull(E, dry):
         return r['path']
 
     def rsync(args):
+        """Run rsync over ssh with ``args`` (up to 5 attempts, 60 s apart); SystemExit if all fail."""
         cmd = ['rsync', '-tpW', RSYNC_CHMOD, '--partial', '-e', 'ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=10'] + args
         print(' '.join(cmd), flush=True)
         for attempt in range(1, 6):
@@ -476,6 +496,9 @@ def particles_batch(E, upto, dry):
                 files.append(dict(path=rel, src=src, cat=cat, snap=snap, size=st.st_size, mtime=st.st_mtime))
 
     def is_done(f):
+        """True if file ``f`` was archived before with a verified checksum and is unchanged since (size,
+        source mtime and, for a remote run, the source SHA-256).
+        """
         prev = done.get(f['path'])
         dst = os.path.join(E['ARCHIVE'], f['path'])
         if not prev or prev.get('sha256_dst') != prev.get('sha256') or not os.path.isfile(dst):
@@ -536,11 +559,13 @@ def particles_batch(E, upto, dry):
 
 
 def shlex_quote(x):
+    """``shlex.quote`` (imported lazily)."""
     import shlex
     return shlex.quote(x)
 
 
 def git_head():
+    """``<hash> <subject>`` of the repository's HEAD commit, recorded in the manifest ('' without git)."""
     try:
         return subprocess.run(['git', '-C', HERE, 'log', '-1', '--format=%h %s'], capture_output=True,
                               text=True).stdout.strip()

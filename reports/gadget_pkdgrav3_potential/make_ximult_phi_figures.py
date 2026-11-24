@@ -48,6 +48,9 @@ S_COLORS = ['#123f80', '#2a78d6', '#1baf7a', '#c9a227', '#eb6834']
 
 
 def load(d, suffix=''):
+    """Load ``L<L>_out100_ximult_phiall<suffix>.npz`` of every box into a dict, adding ``pairs_l`` (pairs as
+    tuples), ``cols`` (the potential column names) and ``dn`` (names of the differences).
+    """
     D = {}
     for L in BOXES:
         X = np.load(os.path.join(d, 'L%d_out100_ximult_phiall%s.npz' % (L, suffix)))
@@ -59,6 +62,7 @@ def load(d, suffix=''):
 
 
 def style(ax):
+    """Common axis style of the report figures."""
     ax.grid(True, color='#e6e5e0', lw=0.6)
     for s in ('top', 'right'):
         ax.spines[s].set_visible(False)
@@ -89,14 +93,17 @@ def avg(X, p, col, kd, smin=10, smax=40):
 
 
 def skip(L, p):
+    """True for the pairs not shown: the top mass bin of L = 200 (76 halos, jackknife errors unreliable)."""
     return L == 200 and 3 in p      # L200's top bin: 76 halos, jackknife errors unreliable
 
 
 def sep(ax):
+    """Dashed vertical line between the sphere columns and the smoothed-grid columns."""
     ax.axvline(NSPHERE - 0.5, color='#9b9a95', lw=0.8, ls='--')
 
 
 def fig_vg(D, out):
+    """Figure: mean v_g per mass bin for each of the twelve potential columns, per box."""
     fig, axs = plt.subplots(1, 3, figsize=(13, 3.9), sharey=True, constrained_layout=True)
     for ax, L in zip(axs, BOXES):
         X = D[L]; style(ax); sep(ax); x = np.arange(len(X['cols']))
@@ -114,6 +121,9 @@ def fig_vg(D, out):
 
 
 def fig_dipole(D, out):
+    """Figure: 10-40 Mpc/h dipole for each potential column and pair, measured against the mean-shift
+    estimate (grav and rsd+grav).
+    """
     fig, axs = plt.subplots(2, 4, figsize=(15, 7.2), sharex=True, constrained_layout=True)
     cols = D[1000]['cols']; x = np.arange(len(cols))
     for kd in range(2):
@@ -148,16 +158,19 @@ REBIN = 4
 
 
 def rebin(x, n=REBIN):
+    """Average the last axis of ``x`` over groups of ``n`` bins (a remainder is dropped)."""
     m = (x.shape[-1] // n) * n
     return x[..., :m].reshape(x.shape[:-1] + (m // n, n)).mean(-1)
 
 
 def rebin_err(e, n=REBIN):
+    """Error of :func:`rebin` for independent errors ``e``: sqrt(sum e^2) / n."""
     m = (e.shape[-1] // n) * n
     return np.sqrt((e[..., :m].reshape(e.shape[:-1] + (m // n, n))**2).sum(-1)) / n
 
 
 def fig_s(D, out):
+    """Figure: dipole difference against s for L1000 pair 1-3, selected potential columns."""
     X = D[1000]; p = (1, 3)
     fig, axs = plt.subplots(1, 2, figsize=(12, 4.4), sharey=True, constrained_layout=True)
     s = rebin(X['s_mid'])
@@ -208,6 +221,7 @@ def log_rebin(s, y, e, n=LOG_REBIN):
 
 
 def fig_logs(D, out):
+    """Figure: s^2 x dipole difference against log s for the logarithmic-bin runs (``LOG_PANELS``)."""
     fig, axs = plt.subplots(1, 3, figsize=(15, 4.6), constrained_layout=True)
     for ax, (L, p, kd), yl in zip(axs, LOG_PANELS, LOG_YLIM):
         X = D[L]; s = X['s_mid']; style(ax); ax.set_ylim(*yl); ax.axhline(0, color='#9b9a95', lw=0.8)
@@ -261,6 +275,7 @@ def table_log(D, out):
 
 
 def table(D, out):
+    """LaTeX table of the dipole per potential column (L1000 pair 1-3 and others) with the v_g difference."""
     rows = []
     X = D[1000]; cols = X['cols']
     for c in cols:
@@ -284,6 +299,7 @@ def table(D, out):
 
 
 def main():
+    """Command line: the multi-potential dipole figures and tables (linear and logarithmic bins)."""
     ap = argparse.ArgumentParser()
     ap.add_argument('--d', default=os.path.join(HERE, 'data', 'box512_L200_L500_L1000'))
     ap.add_argument('--figs', default=os.path.join(HERE, 'figs'))

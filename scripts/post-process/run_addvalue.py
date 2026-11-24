@@ -37,6 +37,9 @@ sys.path.insert(0, HERE)
 
 
 def snaps_of(args):
+    """Snapshots to process: those in the run's ``scales.txt`` that have halos, filtered by ``args.snaps``
+    ('all', ranges and lists).
+    """
     from utilities import Paths
     P = Paths()
     import numpy as np
@@ -79,6 +82,7 @@ def streamed_density(pkc, ps, threads):
     jobs = [(f, i) for f in pkc.files for i in range(len(f.counts))]
 
     def decode(job):
+        """Decode one .pkc block to float32 positions in Mpc/h."""
         f, i = job
         h = f.header
         X = f.block(i)[0]
@@ -102,6 +106,9 @@ def streamed_density(pkc, ps, threads):
 
 
 def do_snap(snap, args):
+    """Value-added catalogue of one snapshot: density field, environment, tidal tensor and Hessian eigenvalues
+    around each halo (``AddValue``), written to ``out_<snap>.vahc`` / ``.tens``; returns a log string.
+    """
     from readers import SnapshotReader, HaloReader
     from correlations import PowerSpectrum
     from addvalue import AddValue
@@ -192,6 +199,7 @@ def _pk_only(snap, args, base, t0):
 
 
 def _hdf5_pot(sr):
+    """True if the HDF5 snapshot of ``sr`` stores the particle potential."""
     from vpot_hdf5 import has_potential
     return has_potential(sr)
 
@@ -244,6 +252,7 @@ def _fast_snap(snap, args, hr, sr, ps, base, todo, t0):
 
 
 def main():
+    """Command line (see ``--help``): value-added catalogues for the snapshots of a run, several at a time."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('stem', help='e.g. sahyadri/default2048 (sims/<stem>, halos/<stem>)')
     ap.add_argument('--real', type=int, default=1)
@@ -303,6 +312,7 @@ def main():
 
 
 def _job(a):
+    """Pool wrapper of :func:`do_snap`: an exception becomes a message so the other snapshots go on."""
     try:
         return do_snap(*a)
     except Exception as e:  # report and go on with the other snapshots

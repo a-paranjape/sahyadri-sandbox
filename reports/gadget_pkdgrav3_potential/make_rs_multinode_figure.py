@@ -26,6 +26,9 @@ COL = {'1nb': '#2a78d6', '2n': '#eb6834'}
 
 
 def match(A, B, L):
+    """Mass ratio B/A of the nearest halo in ``B`` within 0.05 Mpc/h of each halo in ``A`` (NaN if none);
+    columns: mass, x, y, z.
+    """
     t = cKDTree(B[:, 1:4] % L, boxsize=L)
     d, j = t.query(A[:, 1:4] % L)
     m = d < 0.05
@@ -35,6 +38,7 @@ def match(A, B, L):
 
 
 def style(ax):
+    """Common axis style of the report figures."""
     ax.grid(True, color='#e6e5e0', lw=0.6)
     for s in ('top', 'right'):
         ax.spines[s].set_visible(False)
@@ -42,6 +46,7 @@ def style(ax):
 
 
 def main():
+    """Command line: figure and table comparing Rockstar on one node with Rockstar over several nodes."""
     ap = argparse.ArgumentParser()
     ap.add_argument('--d', default=os.path.join(HERE, 'data', 'rs_multinode_halos.npz'))
     ap.add_argument('--figs', default=os.path.join(HERE, 'figs'))

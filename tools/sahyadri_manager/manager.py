@@ -170,14 +170,20 @@ SLOW = ('check_trash', 'approve_trash', 'undo_trash', 'approve_purge')
 
 
 def now():
+    """Current time in seconds since the epoch (``time.time``; one place to patch in tests)."""
     return time.time()
 
 
 def iso(t=None):
+    """Local time ``t`` (default: now) as ``YYYY-MM-DD HH:MM:SS``, the format of the manager log."""
     return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t or now()))
 
 
 def log(msg):
+    """Print ``msg`` with a time stamp and append it to the manager log ``LOGF``.
+
+    Writing the log file is best effort: an unwritable log never stops the manager.
+    """
     line = '[%s] %s' % (iso(), msg)
     print(line, flush=True)
     try:
@@ -188,6 +194,12 @@ def log(msg):
 
 
 def load_cfg():
+    """Return the manager configuration: ``DEFAULT_CFG`` updated with ``config.json`` in ``HOME``.
+
+    Top-level keys replace the defaults; each entry of ``sites`` is merged key by key over the default site
+    settings, so a site in ``config.json`` only needs the keys it changes. An unreadable file is logged and the
+    defaults are used.
+    """
     c = json.loads(json.dumps(DEFAULT_CFG))
     if os.path.isfile(CONFIG):
         try:
@@ -215,6 +227,7 @@ class BudgetWait(Exception):
 
 
 def hours(wall):
+    """Convert a PBS walltime ``HH[:MM[:SS]]`` to hours (float)."""
     h, m, sec = (list(map(int, str(wall).split(':'))) + [0, 0])[:3]
     return h + m / 60.0 + sec / 3600.0
 
@@ -236,11 +249,17 @@ class Budgets:
     TTL = 300
 
     def __init__(self):
+        """Empty balance cache ``{(site, kind, name, period): [time, core-hours]}`` and its lock."""
         self.cache = {}           # (site, kind, name, period) -> [t, balance]
         self.lock = threading.Lock()
 
     @staticmethod
     def which(cfg, run):
+        """Budget key of a run, or None when its site has no budget.
+
+        A run with ``PBS_PROJECT`` is charged to that project in the current half-year period (``YYYY.h1``/``h2``),
+        otherwise to the site's ``budget.user``. Returns ``(site, 'project'|'user', name, period)``.
+        """
         B = cfg['sites'][run.site].get('budget')
         if not B:
             return None
@@ -250,6 +269,10 @@ class Budgets:
         return (run.site, 'project', proj, period) if proj else (run.site, 'user', B['user'], '')
 
     def balance(self, cfg, key, fresh=False):
+        """Core-hour balance of budget ``key`` from ``amgr checkbalance`` on the site's login node.
+
+        Cached for ``TTL`` seconds unless ``fresh``; raises RuntimeError if the amgr output has no ``'cost'`` value.
+        """
         with self.lock:
             c = self.cache.get(key)
             if c and not fresh and now() - c[0] < self.TTL:
@@ -266,6 +289,12 @@ class Budgets:
         return float(m.group(1))
 
     def check(self, cfg, run, stages):
+        """Raise ``BudgetWait`` if the budget of ``run`` cannot pay for ``stages`` (comma separated).
+
+        The need is the sum of :func:`job_coreh` over the stages; the site's ``reserve_coreh`` is kept back. A short
+        balance is re-read fresh before refusing. On success the need is subtracted from the cached balance, so
+        submissions between two amgr reads cannot overspend.
+        """
         key = self.which(cfg, run)
         if key is None:
             return
@@ -281,6 +310,7 @@ class Budgets:
             self.cache[key][1] -= need
 
     def view(self):
+        """The cached balances as a list of dicts (site, kind, name, period, coreh, t) for the page."""
         with self.lock:
             return [dict(site=k[0], kind=k[1], name=k[2], period=k[3], coreh=v[1], t=v[0]) for k, v in self.cache.items()]
 
@@ -295,9 +325,16 @@ class Probe:
     FRESH = 60
 
     def __init__(self):
+        """Empty per-key probe state (last success, running test thread, start time, down since)."""
         self.st = {}
 
     def ok(self, key, fn, timeout):
+        """Non-blocking health check: True if the storage behind ``key`` answered recently.
+
+        ``fn`` is a test (listdir, small write) run in a daemon thread; a success within ``FRESH`` seconds counts as
+        up. If a test is still running after ``timeout`` seconds the storage is marked down (logged once) and False is
+        returned, so a hung NFS mount never blocks the manager's main loop.
+        """
         s = self.st.setdefault(key, dict(t_ok=0.0, th=None, t0=0.0, down=None))
         th = s['th']
         if th is None or not th.is_alive():
@@ -305,6 +342,7 @@ class Probe:
                 return True
 
             def test():
+                """Run the probe; record the success time and log when a storage that was down answers again."""
                 try:
                     fn()
                 except Exception:  # noqa: BLE001
@@ -338,6 +376,7 @@ PROBE = Probe()
 def storage_test(d):
     """List directory d and write, fsync and remove a small file in it."""
     def fn():
+        """Probe a scratch directory: list it and write, fsync and remove a small file."""
         os.listdir(d)
         f = os.path.join(d, '.mgr_probe')
         with open(f, 'w') as fh:
@@ -351,6 +390,7 @@ def storage_test(d):
 def archive_test(d):
     """Stat the archive root (or its nearest existing parent) and list it."""
     def fn():
+        """Probe an archive path: list the deepest existing parent directory (read only)."""
         p = d
         while p and not os.path.isdir(p) and p != '/':
             p = os.path.dirname(p)
@@ -359,11 +399,13 @@ def archive_test(d):
 
 
 def fmt_l(L):
+    """Box size for run names: ``200`` for 200.0, ``12p5`` for 12.5 (no dot in file names)."""
     L = float(L)
     return ('%d' % L) if L.is_integer() else ('%g' % L).replace('.', 'p')
 
 
 def reals_of(spec):
+    """Expand a realisation list like ``'1-3,7'`` to ``[1, 2, 3, 7]``."""
     out = []
     for part in str(spec).split(','):
         a, _, b = part.partition('-')
@@ -478,6 +520,7 @@ def set_queue_state(path, site, q, state):
 
 
 def run_queue(run):
+    """The PBS queue of a run: ``PBS_QUEUE`` from its run.conf, else the site's default queue."""
     return run.E.get('PBS_QUEUE') or DEFAULT_QUEUE.get(run.site, 'workq')
 
 
@@ -554,6 +597,7 @@ def sync_site(cfg, site, runs, timeout=1800):
 
 
 def save_cfg(c):
+    """Write the manager configuration to ``config.json`` atomically (temporary file + rename)."""
     os.makedirs(HOME, mode=0o700, exist_ok=True)
     tmp = CONFIG + '.tmp'
     with open(tmp, 'w') as f:
@@ -562,6 +606,7 @@ def save_cfg(c):
 
 
 def atomic_json(path, obj):
+    """Write ``obj`` as JSON to ``path`` atomically (temporary file + ``os.replace``)."""
     tmp = path + '.tmp'
     with open(tmp, 'w') as f:
         json.dump(obj, f, indent=1)
@@ -583,14 +628,24 @@ def jobnum(j):
 
 
 def short(job):
+    """PBS job id without the server suffix: ``'2539127.pawna'`` -> ``'2539127'``."""
     return str(job).split('.')[0]
 
 
 # ====================================================================================================== one run
 class Run:
+    """One simulation realisation known to the manager, described by its run.conf.
+
+    Holds the configuration (``E``), the derived paths (``P``, from ``retention.paths``), the manager's own state
+    file ``ms`` (paused, scheduled, failed, trash, acknowledged jobs, action history), the events written by the
+    pipeline jobs (``state/events/*.jsonl``) and caches of the simulation progress. ``derive`` turns events and the
+    PBS queue into the run's current status; ``submit`` starts pipeline stages. Remote runs (another site) keep a
+    local mirror of their state directory and are submitted over ssh.
+    """
     CFG = None          # the manager's configuration (sites), set by Manager.load_runs
 
     def __init__(self, conf, paused=False):
+        """Load the run from ``conf`` (absolute path); ``paused`` marks a newly added run paused."""
         self.conf = os.path.abspath(conf)
         self.ev = []
         self.offsets = {}
@@ -607,6 +662,11 @@ class Run:
 
     def load(self):
         # the manager keeps a copy of every run.conf: a purged run's own copy is gone with its scratch directory
+        """(Re)read run.conf and derive paths, output list and the manager state file.
+
+        A copy of run.conf is kept in ``HOME/confs`` so that a run whose scratch directory was purged can still be
+        shown; if neither the file nor the copy exists, FileNotFoundError is raised.
+        """
         saved = os.path.join(HOME, 'confs', self.conf.strip('/').replace('/', '__'))
         if os.path.isfile(self.conf):
             os.makedirs(os.path.dirname(saved), exist_ok=True)
@@ -641,15 +701,22 @@ class Run:
             self.err = None if (self.ms.get('trash') or self.ms.get('purged')) else str(e)
 
     def save(self):
+        """Write the manager state of this run (``ms``) to its state file atomically."""
         atomic_json(self.msfile, self.ms)
 
     def note(self, msg):
+        """Log ``msg`` for this run and append it to its action history (last 200 kept)."""
         log('%s: %s' % (self.name, msg))
         self.ms['actions'] = (self.ms.get('actions', []) + [[now(), msg]])[-200:]
         self.save()
 
     # ------------------------------------------------------------------ events
     def read_events(self):
+        """Read new complete lines from the run's event files (``state/events/*.jsonl``).
+
+        Each file is read from the offset reached last time; an incomplete last line is left for the next call.
+        Returns the number of new events appended to ``self.ev``.
+        """
         new = 0
         for f in sorted(glob.glob(os.path.join(self.P['state'], 'events', '*.jsonl'))):
             off = self.offsets.get(f, 0)
@@ -726,6 +793,14 @@ class Run:
         return J
 
     def derive(self, qjobs, qtime):
+        """Status of the run from its events and the PBS queue, as a dict for the scheduler and the page.
+
+        ``qjobs``/``qtime``: the site's qstat snapshot. Keys include ``jobs`` (all jobs with stage and status),
+        ``active`` (queued or running jobs), ``ready`` (outputs whose snapshot is complete), ``rs_done``/``rs_redo``
+        (Rockstar), ``archb``/``archive``, ``fits``, ``parquet``, ``verify``, ``sim_done``, ``sim_clean_stop``,
+        ``sim_info`` (step, redshift, rate) and ``rewinds``. Outputs rewritten by a restart from an earlier
+        checkpoint (``rewind_cuts``) only count events after that restart.
+        """
         D = dict(name=self.name, conf=self.conf, n_out=len(self.outs), err=self.err)
         J = self.jobs(qjobs, qtime)
         D['jobs'] = sorted(J.values(), key=lambda j: jobnum(j['job']))
@@ -771,6 +846,7 @@ class Run:
         D['active'] = [j for j in D['jobs'] if j['status'] in ('submitted', 'queued', 'held', 'running', 'exiting')]
 
         def ok_after(evname):   # the event of the newest job
+            """The newest event called ``evname`` (by job number), or None."""
             es = sorted((e for e in self.ev if e['ev'] == evname), key=lambda e: jobnum(e['job']))
             return es[-1] if es else None
         # sim jobs that stopped cleanly before the last output (pkdgrav3 iWallRunTime / STOP: rc 0, outputs missing)
@@ -819,6 +895,11 @@ class Run:
         return dict(rewinds=rew, job_step=job_step, tcut=tcut)
 
     def sim_progress(self):
+        """Step, redshift and step rate of the running simulation from the tail of its pkdgrav3 log.
+
+        Reads the last 64 kB of the newest ``run.<job>.log``; cached for 60 s (and frozen while the run is marked
+        stalled). Returns a dict or None if no step was logged yet.
+        """
         t, v = self.simcache
         if now() - t < 60 or getattr(self, 'stalled', None):
             return v
@@ -847,6 +928,10 @@ class Run:
         return v
 
     def phase(self, D):
+        """Phase of the run for the page, first match wins: purged, waiting to restart / scheduled, in trash, failed,
+        archived, verified (no archive), post (post-processing), not started, rockstar, simulation. From the manager
+        state ``ms`` and the derived status ``D``.
+        """
         if self.ms.get('purged'):
             return 'purged'
         if self.ms.get('scheduled') and not self.ms.get('failed'):
@@ -880,6 +965,13 @@ class Run:
         # archive as a process on this (head) node: always for a remote run (a pull from its data node), and for a
         # local run unless archive_on_head is off (the head node writes /storage at ~430 MB/s against ~25-30 MB/s from
         # a compute node, and no compute node is taken)
+        """Submit pipeline ``stages`` (comma separated) of this run; returns the new job ids.
+
+        Archive stages run as a copy process on the head node instead (``start_pull``). A remote run is submitted
+        with ``submit_pipeline.sh`` on its site's login node over ssh after a budget check; a local run with
+        ``submit_pipeline.sh`` here. ``extra`` are extra arguments of submit_pipeline.sh, ``what`` a description
+        for the history.
+        """
         if stages in ('archive', 'archb') and (self.remote or (Run.CFG or {}).get('archive_on_head', True)):
             return self.start_pull(what, stage=stages)
         if self.remote:     # qsub on the site's login node, with the run's own run.conf there
@@ -938,7 +1030,17 @@ class Run:
 
 # ====================================================================================================== manager
 class Manager:
+    """The run manager: one process that watches all runs, submits their pipeline stages and serves the page.
+
+    The main loop (:meth:`serve`) handles file events (inotify on the runs' state directories), actions from the
+    page or the CLI (over a unix socket), and a heartbeat (``heartbeat_s``) that refreshes qstat, the watchdog
+    (:meth:`watch`), the scheduler (:meth:`schedule_site`) and the state snapshot shown by the page. The plan
+    file is synchronised in its own thread (:meth:`plan_loop`), remote sites in another (``sync_loop``).
+    """
     def __init__(self):
+        """Create ``HOME`` (mode 700), load the configuration, copy the plan and queue templates if missing,
+        load the runs and set up queues, locks and caches.
+        """
         os.makedirs(HOME, mode=0o700, exist_ok=True)
         os.chmod(HOME, 0o700)
         self.cfg = load_cfg()
@@ -967,6 +1069,11 @@ class Manager:
 
     # ------------------------------------------------------------------ runs
     def load_runs(self):
+        """(Re)load the runs listed in the configuration.
+
+        Runs no longer listed are dropped; a new run whose storage does not answer (``PROBE``) is left in
+        ``self.unloaded`` and tried again at a later heartbeat.
+        """
         self.cfg = load_cfg()
         Run.CFG = self.cfg
         want = {r['conf']: r for r in self.cfg['runs']}
@@ -994,6 +1101,7 @@ class Manager:
         self.restart_watch()
 
     def restart_watch(self):
+        """(Re)start ``inotifywait`` on ``HOME`` and every run's state directory when that set changed."""
         dirs = sorted([HOME] + [r.P['state'] for r in self.runs.values() if not getattr(r, 'stalled', None)])
         if self.watch_proc and self.watch_proc.poll() is None and dirs == self.watch_dirs:
             return
@@ -1007,17 +1115,20 @@ class Manager:
         log('watching %d directories' % len(dirs))
 
     def watch_reader(self, proc):
+        """Thread: forward each changed path from inotifywait to the main queue; report when it ends."""
         for line in proc.stdout:
             self.q.put(('file', line.strip()))
         self.q.put(('watch_ended', proc))
 
     def derive(self, run):
+        """``run.derive`` with the qstat snapshot of the run's own site."""
         if run.remote:
             jobs, qt, _ok = self.qsite.get(run.site, ({}, 0.0, None))
             return run.derive(jobs, qt)
         return run.derive(self.qjobs, self.qtime)
 
     def sites(self):
+        """Names of the remote sites with at least one run."""
         return sorted({r.site for r in self.runs.values() if r.remote})
 
     def refresh_qstat_site(self, site):
@@ -1085,6 +1196,7 @@ class Manager:
         return box['result']
 
     def plan_loop(self):
+        """Thread: synchronise the plan file (``plan_sync``) every ``plan_s`` seconds; errors are logged."""
         while True:
             try:
                 self.plan_sync()
@@ -1193,6 +1305,10 @@ class Manager:
 
     # ------------------------------------------------------------------ PBS
     def refresh_qstat(self):
+        """Read this site's PBS jobs of the current user (``qstat -f -F json``) into ``self.qjobs``.
+
+        Each job: state, name, node, queue time. On failure the previous snapshot is kept and ``qok`` is False.
+        """
         r = subprocess.run([PBS + '/qstat', '-f', '-F', 'json'], capture_output=True, text=True, timeout=120)
         jobs = {}
         if r.returncode == 0:
@@ -1216,6 +1332,10 @@ class Manager:
         self.qjobs, self.qtime = jobs, now()
 
     def refresh_disk(self):
+        """Free and used space of every scratch and archive file system the runs use (one entry per device),
+        plus the scratch bytes of each run, for the page and the scratch checks. Storage that does not answer is
+        skipped.
+        """
         d, seen = {}, {}           # one entry per file system and kind (several scratch roots may share one)
         for run in self.runs.values():
             if getattr(run, 'stalled', None):
@@ -1255,6 +1375,9 @@ class Manager:
 
     # ------------------------------------------------------------------ policy
     def tick(self):
+        """One heartbeat: derive every run, run the watchdog, count active Rockstar and waiting jobs per site,
+        submit what is due (post-processing, archive, scheduled simulations) and build the page snapshot.
+        """
         active_rs = {}             # per site
         derived = {}
         self.waiting = {}          # per site: our jobs submitted but not started (PBS queue limits)
@@ -1272,6 +1395,9 @@ class Manager:
         self.schedule_sims(derived)
         # Rockstar turn order over the runs: the one whose next snapshot has waited longest goes first
         def waiting(run):
+            """When the oldest output of ``run`` not yet through Rockstar became ready (inf if none): Rockstar
+            jobs are started oldest first across runs.
+            """
             D = derived[run.conf]
             todo = set(range(len(run.outs))) - set(D['rs_done'])
             return run.seen_ready.get(min(todo), float('inf')) if todo else float('inf')
@@ -1327,6 +1453,12 @@ class Manager:
         run.alerts_shown = {k: a for k, a in new.items() if dis.get(k) != a['t']}   # dismissed: until it ends and comes back
 
     def watch_sim(self, run, D, sim):
+        """Watchdog for one simulation job: returns alerts for a stalled job and for memory pressure.
+
+        A job is stalled when its own log ``run.<job>.log`` has not changed for ``max(sim_stall_s,
+        sim_stall_steps / rate)`` (catches a hang before the first step), and alerts on swap activity or low memory
+        from the job's ``node_mem`` events (:func:`swap_alert`).
+        """
         out = {}
         t_start = sim.get('start') or sim.get('submitted') or now()
         info = D.get('sim_info') or {}
@@ -1393,6 +1525,7 @@ class Manager:
         return out
 
     def load_queues(self):
+        """Re-read the queues file (open/drain/closed and limits per site and queue) if it changed; log it."""
         p = self.cfg.get('queues_file')
         try:
             m = os.path.getmtime(p) if p else None
@@ -1438,6 +1571,7 @@ class Manager:
         return None
 
     def qinfo(self, run):
+        """Queue settings of the run's queue (open with no limits if not listed)."""
         return self.queues.get((run.site, run_queue(run))) or dict(state='open', max_running=None, max_waiting=None)
 
     def policy(self, run, D, active_rs):
@@ -1620,9 +1754,11 @@ class Manager:
         return m is None or self.waiting.get(site, 0) + n <= int(m)
 
     def took(self, site, n=1):
+        """Count ``n`` jobs just submitted on ``site`` as waiting, until the next qstat shows them."""
         self.waiting[site] = self.waiting.get(site, 0) + n
 
     def sim_counts(self, derived, site=LOCAL, q=None):
+        """Number of running and of queued simulation jobs on ``site`` (optionally in queue ``q``)."""
         running = queued = 0
         for run in self.runs.values():
             if run.site != site or (q is not None and run_queue(run) != q):
@@ -1642,6 +1778,14 @@ class Manager:
             self.schedule_site(derived, site)
 
     def schedule_site(self, derived, site):
+        """Submit scheduled simulations of ``site`` in priority order while the limits allow.
+
+        Candidates are runs with ``ms['scheduled']`` that are not busy, paused, failed or in the trash, sorted by
+        ``(priority, time scheduled)`` -- the lower priority number goes first. A run waits (reason shown on the page)
+        if one of its simulation jobs is active, before ``not_before``, when the queue is closed, draining (only
+        restarts) or at its ``max_running``, or when the site's ``max_sim_running`` / ``max_sim_queued`` is reached;
+        once one run is blocked by a site limit, later candidates wait too, so the order is kept.
+        """
         running, queued = self.sim_counts(derived, site)
         cand = [r for r in self.runs.values() if r.site == site and r.ms.get('scheduled')
                 and not (r.busy or r.err or r.ms.get('paused') or r.ms.get('failed') or r.ms.get('trash'))]
@@ -1706,10 +1850,18 @@ class Manager:
                                         not_before=sc.get('not_before'), wait=wait))
 
     def acked(self, run, j):
+        """True if job ``j`` of ``run`` was acknowledged on the page (its failure no longer alerts)."""
         return j['job'] in run.ms.get('acked', [])
 
     # ------------------------------------------------------------------ actions from the page
     def action(self, a):
+        """Carry out an action from the page or the CLI (dict ``a`` with ``action`` and its arguments).
+
+        Actions: add_run, unretire, refresh, set_queue, set_limits, delete_preview, delete_run, remove_run,
+        dismiss_alert, pause, resume, reload_conf, schedule, set_priority, unschedule, submit_sim (``restart``),
+        retry, postprocess, ack, check_trash, approve_trash, undo_trash, approve_purge. Returns a message; raises
+        ValueError for a refused action. Slow actions run in a worker thread (:meth:`slow_action`).
+        """
         name, act = a.get('run'), a.get('action')
         if act == 'add_run':
             return self.add_run(a['conf'], a.get('paused', True))
@@ -1934,6 +2086,11 @@ class Manager:
         return left >= 0, msg
 
     def add_run(self, conf, paused=True):
+        """Register a run from ``conf`` (a local path, or ``site:/path`` for a run on another site).
+
+        A remote run.conf is mirrored first. Refuses a missing file and a second run with the same name (names
+        address runs on the page, in the CLI and in the plan file). Returns a message.
+        """
         site, _, rconf = conf.partition(':') if re.match(r'^[A-Za-z]\w*:/', conf) else ('', '', '')
         if site:
             if site not in self.cfg['sites']:
@@ -2034,6 +2191,9 @@ class Manager:
                          P['rel']['halo'], retention.human(size) if size is not None else '?'))
 
     def _guard(self, run, path, under):
+        """Resolve ``path`` and refuse (ValueError) unless it lies strictly inside ``under`` and contains the
+        run's name: a safety net for every move and delete.
+        """
         rp, ru = os.path.realpath(path), os.path.realpath(under)
         if not rp.startswith(ru.rstrip('/') + '/') or rp == ru:
             raise ValueError('refusing: %s is not inside %s' % (rp, ru))
@@ -2042,6 +2202,10 @@ class Manager:
         return rp
 
     def to_trash(self, run):
+        """Move the run's scratch data to ``SCRATCH/.trash/<run>_<time>`` after ``cleanup_check`` passed.
+
+        Only a move (undo possible until the purge); a remote run is moved on its site. Returns a message.
+        """
         if run.ms.get('trash'):     # e.g. a second click: the run directory is gone, the check below cannot run
             raise ValueError('already in the trash: %s (undo, or approve the purge)' % run.ms['trash']['dir'])
         ok, msg = self.cleanup_check(run)
@@ -2109,6 +2273,7 @@ class Manager:
         return out
 
     def delete_text(self, run, pl):
+        """Human-readable list of what ``delete_run`` would remove (paths and sizes from ``delete_plan``)."""
         hm = retention.human
         lines = ['Delete %s completely: remove it from the manager and delete from scratch:' % run.name]
         tot = 0
@@ -2137,6 +2302,9 @@ class Manager:
         return '\n'.join(lines)
 
     def delete_run(self, run):
+        """Delete a run completely: its scratch data (here and on its site), its run.conf copies and its entry
+        in the configuration; the run is retired so the plan file does not set it up again.
+        """
         pl = self.delete_plan(run)           # checks again: no active job
         text = self.delete_text(run, pl)
         if run.remote:
@@ -2156,6 +2324,7 @@ class Manager:
         return 'deleted %s (archive untouched)\n%s' % (run.name, text)
 
     def undo_trash(self, run):
+        """Move the run's data back from the trash (refused if the original path exists again)."""
         T = run.ms.get('trash')
         if not T or run.ms.get('purged'):
             raise ValueError('nothing in the trash')
@@ -2181,6 +2350,9 @@ class Manager:
         return 'restored'
 
     def purge(self, run):
+        """Delete the run's trash directory for good, after re-checking every archive file against the manifest
+        (present, same size). Requires the move to the trash first.
+        """
         T = run.ms.get('trash')
         if not T:
             raise ValueError('nothing in the trash (approve the move to the trash first)')
@@ -2220,6 +2392,9 @@ class Manager:
         return est, max(0, est - done)
 
     def build_snapshot(self, derived):
+        """The state shown by the page (``/api/state``): one dict per run plus queues, disks, budgets, plan,
+        alerts and the tail of the manager log.
+        """
         runs = []
         for run in self.runs.values():
             D = derived.get(run.conf) or self.derive(run)
@@ -2264,6 +2439,9 @@ class Manager:
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
 
     def queues_view(self, derived):
+        """Rows of the queue table: state, limits and running/waiting simulation counts per (site, queue),
+        including the pseudo-queue ``archive`` of this host.
+        """
         keys = set(self.queues) | {(r.site, run_queue(r)) for r in self.runs.values()} | {(LOCAL, 'archive')}
         out = []
         for site, qn in sorted(keys):
@@ -2282,12 +2460,16 @@ class Manager:
         return out
 
     def verify_summary(self, run, D):
+        """Cached summary of the run's ``verify.json`` (kept while the run's storage is stalled)."""
         if getattr(run, 'stalled', None):
             return getattr(run, 'verify_cache', None)
         run.verify_cache = self._verify_summary(run)
         return run.verify_cache
 
     def _verify_summary(self, run):
+        """Summary of ``verify.json``: overall ok, time, per-check ok/errors/warnings (first five) and the P(k)
+        check's plot and ranges; None if missing or unreadable.
+        """
         f = os.path.join(run.P['state'], 'verify.json')
         if not os.path.isfile(f):
             return None
@@ -2303,6 +2485,7 @@ class Manager:
                             last=(pk.get('snapshots') or [None])[-1]) if pk else None)
 
     def tail_log(self):
+        """The last 40 lines of the manager log."""
         try:
             with open(LOGF) as f:
                 return f.readlines()[-40:]
@@ -2310,6 +2493,7 @@ class Manager:
             return []
 
     def _disk_bg(self):
+        """Thread: refresh the disk usage, then wake the main loop."""
         try:
             self.refresh_disk()
         except Exception as e:  # noqa: BLE001
@@ -2318,6 +2502,9 @@ class Manager:
         self.q.put(('wake',))
 
     def slow_action(self, a, box):
+        """Run a slow action (``SLOW``) in a worker thread so the main loop keeps going; ``box`` receives the
+        result and its event is set when done. The run is marked busy meanwhile (a second action is refused).
+        """
         run = next((r for r in self.runs.values() if r.name == a.get('run') or r.conf == a.get('run')), None)
         if run is None or run.busy:
             box['result'], box['ok'] = ('no run %s' % a.get('run')) if run is None else ('busy: %s' % run.busy), False
@@ -2326,6 +2513,7 @@ class Manager:
         run.busy = a['action']
 
         def work():
+            """Worker: run the action, store its result or error in ``box``, clear busy, wake the main loop."""
             try:
                 box['result'] = self.action(a)
                 box['ok'] = True
@@ -2339,6 +2527,13 @@ class Manager:
 
     # ------------------------------------------------------------------ main loop
     def serve(self):
+        """Main loop: start the unix-socket HTTP server and the sync and plan threads, then process file events,
+        actions and heartbeats until SIGTERM / Ctrl-C.
+
+        File events are collected in bursts; a change of ``config.json`` reloads the runs; actions are answered
+        immediately (slow ones in a thread); every ``heartbeat_s`` (or at an earlier ``recheck_at``) :meth:`tick`
+        runs and the snapshot is rebuilt.
+        """
         try:
             os.unlink(SOCK)
         except FileNotFoundError:
@@ -2422,19 +2617,26 @@ class Manager:
 
 
 def _sigterm(*_):
+    """SIGTERM handler: turn the signal into KeyboardInterrupt so ``serve`` shuts down cleanly."""
     raise KeyboardInterrupt
 
 
 class UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """Threaded HTTP server on a unix socket (the page is reached through an ssh-forwarded socket)."""
     daemon_threads = True
 
     def get_request(self):
+        """Accept a connection; report a dummy client address (unix sockets have none)."""
         req, _ = super().get_request()
         return req, ('local', 0)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    """HTTP handler of the manager page: ``/`` (ui.html), ``/api/state`` (JSON snapshot), ``/api/file``
+    (P(k) plots of registered runs) and POST ``/api/action`` (requires header ``X-Sahyadri: 1``).
+    """
     def log_message(self, *a):
+        """Silence the default per-request log lines."""
         pass
 
     def local_path(self, p):
@@ -2446,6 +2648,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return p
 
     def _send(self, code, body, ctype='application/json'):
+        """Send a complete response with ``Content-Type`` ``ctype`` and no caching."""
         b = body if isinstance(body, bytes) else body.encode()
         self.send_response(code)
         self.send_header('Content-Type', ctype)
@@ -2455,6 +2658,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def do_GET(self):
+        """Serve the page, the state snapshot, or a PNG that belongs to a registered run (path checked against
+        the runs' scratch and archive roots).
+        """
         mgr = self.server.mgr
         if self.path in ('/', '/index.html'):
             self._send(200, open(os.path.join(HERE, 'ui.html'), 'rb').read(), 'text/html; charset=utf-8')
@@ -2488,6 +2694,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, json.dumps(dict(error='not found')))
 
     def do_POST(self):
+        """Queue an action for the main loop and wait (up to 600 s) for its result; 403 without the
+        ``X-Sahyadri`` header, 504 on timeout.
+        """
         if self.path != '/api/action':
             self._send(404, '{}')
             return
@@ -2510,7 +2719,9 @@ def call(action):
     import http.client
 
     class C(http.client.HTTPConnection):
+        """HTTPConnection over the manager's unix socket."""
         def connect(self):
+            """Connect to ``SOCK`` instead of a TCP host."""
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self.sock.connect(SOCK)
     c = C('localhost', timeout=900)
@@ -2521,6 +2732,9 @@ def call(action):
 
 
 def main():
+    """Command line: ``serve``, ``add <conf>`` / ``add site:/conf``, and the CLI actions (see the module
+    docstring for the full list).
+    """
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     cmd = sys.argv[1]

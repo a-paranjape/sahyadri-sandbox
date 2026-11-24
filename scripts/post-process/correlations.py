@@ -1,3 +1,7 @@
+"""Clustering statistics in a periodic box: two-point correlation functions
+(:class:`TwoPointCorrelationFunctionPeriodic`, pair counts with a C kernel and the analytic RR of the box)
+and power spectra (:class:`PowerSpectrum`: CIC or NGP density on a grid, FFT, binned P(k), cross spectra).
+"""
 import numpy as np
 import scipy.fftpack as fft
 import scipy.spatial as syspat

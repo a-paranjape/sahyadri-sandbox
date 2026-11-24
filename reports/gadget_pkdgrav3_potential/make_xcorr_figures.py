@@ -29,6 +29,9 @@ CLAB = {'phi_Rvir': r'$R_{\rm vir}$', 'phi_rs': r'$r_s$', 'phi_R1p5vir': r'$1.5R
 
 
 def reduce(full, d):
+    """Copy the full xcorr outputs of the 256^3 comparison from ``full`` to ``d`` with only the arrays the
+    figures use.
+    """
     os.makedirs(d, exist_ok=True)
     for c in ('gadget256', 'pkd256'):
         for b in ('log', 'lin'):
@@ -39,10 +42,14 @@ def reduce(full, d):
 
 
 def load(d, b):
+    """The Gadget-4 and pkdgrav3 xcorr results with bins ``b`` ('log' or 'lin') from ``d``."""
     return [np.load(os.path.join(d, '%s_out100_xc_%s.npz' % (c, b))) for c in ('gadget256', 'pkd256')]
 
 
 def panel_set(G, P, ax, k, logx, bottom=None):
+    """Draw the mean difference, structure function and correlation of potential column ``k`` for both codes
+    into the axes ``ax`` (cross and auto pairs).
+    """
     pairs = [tuple(p) for p in G['pairs']]
     r = G['r_mid']
     cross = [p for p in pairs if p[0] != p[1]]
@@ -89,6 +96,7 @@ def panel_set(G, P, ax, k, logx, bottom=None):
 
 
 def main():
+    """Command line: the 256^3 potential cross-correlation figures (``--full`` to reduce first)."""
     here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser()
     ap.add_argument('--full')

@@ -1,3 +1,7 @@
+"""Shared helpers of the post-processing scripts: :class:`Paths` (code, scratch, simulation and halo
+directories; ``SAHYADRI_SCRATCH`` overrides the defaults), :class:`Constants` (physical constants) and
+:class:`Utilities` (logging, timing, selection helpers).
+"""
 import sys
 import numpy as np
 from time import time
@@ -14,6 +18,9 @@ class Paths(object):
         # self.home_path = '/mnt/home/project/chpc2501005/shadab/sahyadri-sandbox/'
         # self.scratch_path = '/mnt/home/project/chpc2501005/data/'
         # self.config_path = self.home_path + 'config/'
+        """Set the directories: home (this repository), scratch, config, python, sim and halo paths. The
+        environment variable ``SAHYADRI_SCRATCH`` (set by the pipeline) overrides the machine defaults.
+        """
         self.home_path = '/home/aseem/iucaa/Sahyadri/sahyadri-sandbox/' #'/mnt/home/faculty/caseem/'
         self.scratch_path = self.home_path + 'Test/' # '/scratch/aseem/'
         self.config_path = self.home_path + 'Test/' # 'config/'
@@ -53,6 +60,9 @@ class Constants(object):
     def __init__(self):
 
         # constants of nature
+        """Physical constants: c (km/s), c/H0 (Mpc/h), 1/H0 (Gyr/h), critical density ((Msun/h)/(Mpc/h)^3),
+        delta_c = 1.686, full sky in deg^2, unit conversions and small numbers.
+        """
         self.speed_of_light = 2.99792458e5 # c in km/s
         self.c_by_H0 = 0.01*self.speed_of_light # present Hubble radius in Mpc/h
         self.H0inv = 9.784619421 # 1/H0 in Gyr/h. 
@@ -79,12 +89,14 @@ class Utilities(object):
     """ Useful general-purpose functions. """
     ############################################################
     def __init__(self):
+        """Vectorised versions of the selection helpers."""
         self.select_these = np.vectorize(self.select_these_scalar)
         self.select_not_these = np.vectorize(self.select_not_these_scalar)
     ############################################################
 
     ############################################################
     def heaviside(self,x):
+        """Heaviside step function, 1/2 at 0."""
         return 0.5*(np.sign(x)+1)
     ############################################################
 
@@ -187,6 +199,7 @@ class Utilities(object):
 
     ############################################################
     def time_this(self,start_time,logfile=None):
+        """Print (or log) the time since ``start_time`` as minutes and seconds."""
         totsec = time() - start_time
         minutes = int(totsec/60)
         seconds = totsec - 60*minutes

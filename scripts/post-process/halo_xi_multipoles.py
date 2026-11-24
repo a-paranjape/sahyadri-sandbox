@@ -66,6 +66,12 @@ def uniform_from_id(ids, seed=0):
 
 
 def read_halos(d, snap, mass_col, hosts_only, phis):
+    """Halos of snapshot ``snap`` from the FITS tables in ``d`` (hosts only if ``hosts_only``).
+
+    Returns a dict: id, m (column ``mass_col``), pos (wrapped into the box), vel (km/s), L, a, om, ol (from the
+    header) and phi = {column: values matched by halo id, NaN if missing} for the columns ``phis``. Exits if the
+    vahc table has no .vpot columns.
+    """
     import fitsio
     with fitsio.FITS(os.path.join(d, 'out_%s_basic.fits.gz' % snap)) as f:
         h = f[1].read_header()
@@ -96,6 +102,7 @@ def read_halos(d, snap, mass_col, hosts_only, phis):
 
 
 def parse_sbins(s):
+    """Bin edges from ``lin:smin,smax,width`` or ``log:smin,smax,n`` (Mpc/h)."""
     kind, v = s.split(':', 1)
     v = [float(x) for x in v.split(',')]
     if kind == 'lin':
@@ -128,6 +135,7 @@ def multipoles(DD, npair, s_edges, mu_edges, L, W, ells):
 
 
 def main():
+    """Command line (see the module docstring)."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('dir'); ap.add_argument('snap'); ap.add_argument('out')
     ap.add_argument('--spaces', default='real,rsd,grav,rsd+grav')
@@ -260,6 +268,7 @@ def main():
         return multipoles(d, (nA[ip] - nA_k[ip, r]) * nBe[ip], s_edges, mu_edges, L, W, ells)
 
     def jerr(x, axis=2):  # jackknife error over the region axis (2 for (space, pair, region, ...); 1 for (pair, region, ...))
+        """Jackknife error over the region axis ``axis``: sqrt((n-1)/n sum (x - mean)^2)."""
         return np.sqrt((nreg - 1) / nreg * ((x - x.mean(axis=axis, keepdims=True))**2).sum(axis=axis))
 
     # mean over lines of sight and its jackknife

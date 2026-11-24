@@ -23,6 +23,7 @@ import numpy as np
 
 
 def files_of(path):
+    """The HDF5 files of a snapshot: ``path`` itself, or ``path.<n>.hdf5`` in numerical order (exits if none)."""
     if path.endswith('.hdf5'):
         return [path]
     fl = sorted(glob.glob(path + '.*.hdf5'), key=lambda f: int(f.split('.')[-2]))
@@ -32,6 +33,9 @@ def files_of(path):
 
 
 def main():
+    """Command line: ``gadget4_ic_to_gadget2.py <gadget4 ic (base)> <out>``: write the Gadget-4 HDF5 initial
+    conditions as one Gadget-2 format-1 binary file (header, positions, velocities, IDs).
+    """
     src, out = sys.argv[1], sys.argv[2]
     fl = files_of(src)
     pos, vel, ids = [], [], []
@@ -84,6 +88,7 @@ def main():
     assert len(h) == 256
 
     def block(f, arr):
+        """Write one Fortran-style record: 4-byte length, the bytes of ``arr``, 4-byte length."""
         b = np.ascontiguousarray(arr).tobytes()
         f.write(struct.pack('<I', len(b))); f.write(b); f.write(struct.pack('<I', len(b)))
 

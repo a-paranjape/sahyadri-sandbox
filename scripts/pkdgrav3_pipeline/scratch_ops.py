@@ -29,6 +29,9 @@ import retention  # noqa: E402
 
 
 def guard(E, path, under):
+    """Resolve ``path``; refuse (SystemExit with a JSON error) unless it is strictly inside ``under`` and
+    contains the run name.
+    """
     rp, ru = os.path.realpath(path), os.path.realpath(under)
     if not rp.startswith(ru.rstrip('/') + '/') or rp == ru:
         raise SystemExit(json.dumps(dict(ok=False, error='refusing: %s is not inside %s' % (rp, ru))))
@@ -38,6 +41,7 @@ def guard(E, path, under):
 
 
 def du(top):
+    """Total size in bytes of the files under ``top`` (``lstat``: links are not followed)."""
     tot = 0
     for dp, _ds, fs in os.walk(top):
         for f in fs:
@@ -67,6 +71,7 @@ def delete_targets(E):
 def rmtree_w(path):
     """shutil.rmtree, making read-only directories writable first (archive-style 0555 copies)."""
     def onerr(func, p, _exc):
+        """``shutil.rmtree`` error handler: make the parent (and a directory itself) writable and retry."""
         os.chmod(os.path.dirname(p), os.stat(os.path.dirname(p)).st_mode | stat.S_IWUSR)
         if os.path.isdir(p) and not os.path.islink(p):
             os.chmod(p, os.stat(p).st_mode | stat.S_IWUSR | stat.S_IXUSR)
@@ -104,6 +109,9 @@ def delete_run(E, plan_only):
 
 
 def main():
+    """Command line used by the manager (locally or over ssh): ``scratch_ops.py <cmd> <run.conf> [json]``
+    with cmd delete_plan, delete, stat, usage, trash, undo or purge. Prints a JSON result (see the module docstring).
+    """
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     cmd, conf = sys.argv[1], sys.argv[2]

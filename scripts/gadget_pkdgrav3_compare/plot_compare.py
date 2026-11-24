@@ -16,9 +16,11 @@ os.makedirs(out, exist_ok=True)
 
 
 def load(path):
+    """Read a CSV file into a dict of float arrays (non-numeric values become NaN)."""
     with open(path) as f:
         rows = list(csv.DictReader(f))
     def num(v):
+        """``float(v)``, or NaN if ``v`` is empty or not a number."""
         try:
             return float(v)
         except (TypeError, ValueError):

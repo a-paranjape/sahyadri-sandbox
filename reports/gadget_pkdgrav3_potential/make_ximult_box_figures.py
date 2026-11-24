@@ -36,6 +36,7 @@ LOS_LS = {'x': (0, (1, 1)), 'y': (0, (3, 1)), 'z': (0, (5, 2))}
 
 
 def load(d):
+    """Load ``L<L>_out100_ximult.npz`` of every box into a dict, with ``pairs_l`` as a list of tuples."""
     D = {}
     for L in BOXES:
         X = np.load(os.path.join(d, 'L%d_out100_ximult.npz' % L))
@@ -45,6 +46,7 @@ def load(d):
 
 
 def style(ax):
+    """Common axis style of the report figures."""
     ax.grid(True, color='#e6e5e0', lw=0.6)
     for s in ('top', 'right'):
         ax.spines[s].set_visible(False)
@@ -54,10 +56,12 @@ def style(ax):
 
 
 def pidx(X, p):
+    """Index of mass-bin pair ``p`` in result ``X``."""
     return X['pairs_l'].index(p)
 
 
 def fig_even(D, out):
+    """Figure: monopole, quadrupole and hexadecapole of the auto pairs per box, real and redshift space."""
     ells = [0, 2, 4]
     fig, axs = plt.subplots(3, 3, figsize=(13, 10), sharex=True, constrained_layout=True)
     for j, p in enumerate(AUTO):
@@ -97,16 +101,19 @@ REBIN = 4   # dipole figure: 4 adjacent 2 Mpc/h bins averaged (8 Mpc/h); errors 
 
 
 def rebin(x, n=REBIN):
+    """Average the last axis of ``x`` over groups of ``n`` bins (a remainder is dropped)."""
     m = (x.shape[-1] // n) * n
     return x[..., :m].reshape(x.shape[:-1] + (m // n, n)).mean(-1)
 
 
 def rebin_err(e, n=REBIN):
+    """Error of :func:`rebin` for independent errors ``e``: sqrt(sum e^2) / n."""
     m = (e.shape[-1] // n) * n
     return np.sqrt((e[..., :m].reshape(e.shape[:-1] + (m // n, n))**2).sum(-1)) / n
 
 
 def fig_dipole(D, out):
+    """Figure: the gravitational-redshift dipole (grav - real, rsd+grav - rsd) of the cross pairs per box."""
     fig, axs = plt.subplots(2, 3, figsize=(13, 7.5), sharex=True, constrained_layout=True)
     for i in range(2):
         for j, p in enumerate(CROSS):
@@ -141,6 +148,7 @@ def fig_dipole(D, out):
 
 
 def table(D, out):
+    """LaTeX table of the 10-40 Mpc/h dipole averages per cross pair and box."""
     rows = []
     for p in CROSS:
         for L in BOXES:
@@ -167,6 +175,7 @@ def table(D, out):
 
 
 def main():
+    """Command line: the 512^3 multipole figures and table (``--d``, ``--figs``, ``--table``)."""
     ap = argparse.ArgumentParser()
     ap.add_argument('--d', default=os.path.join(HERE, 'data', 'box512_L200_L500_L1000'))
     ap.add_argument('--figs', default=os.path.join(HERE, 'figs'))

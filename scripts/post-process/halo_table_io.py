@@ -45,19 +45,25 @@ def _scan(path):
 
 
 def header_lines(path):
+    """The ``#`` header lines of a halo table (text or binary)."""
     return _scan(path)[0]
 
 
 def names(path):
+    """Column names from the second header line."""
     h = header_lines(path)
     return h[1].lstrip('#').split()
 
 
 def is_binary(path):
+    """True if the table is in the binary format (header line with row count and dtype)."""
     return _scan(path)[1] is not None
 
 
 def _memmap(path):
+    """Memory map of the rows of a binary table, or None for a text table; raises ValueError if the file is
+    shorter than its header says.
+    """
     lines, info, off = _scan(path)
     if info is None:
         return None
@@ -71,6 +77,7 @@ def _memmap(path):
 
 
 def _to_float(rec):
+    """Structured array -> 2-D float64 array (one column per field)."""
     out = np.empty((rec.size, len(rec.dtype.names)))
     for j, n in enumerate(rec.dtype.names):
         out[:, j] = rec[n]
@@ -78,6 +85,7 @@ def _to_float(rec):
 
 
 def read(path):
+    """The whole table as a 2-D float64 array (text: ``np.loadtxt``; binary: memory map)."""
     m = _memmap(path)
     if m is None:
         return np.loadtxt(path, comments='#', ndmin=2)
@@ -85,6 +93,7 @@ def read(path):
 
 
 def read_records(path):
+    """The whole table as a structured array with the column names (binary: the memory map itself)."""
     m = _memmap(path)
     if m is not None:
         return m
@@ -97,6 +106,7 @@ def read_records(path):
 
 
 def iter_chunks(path, chunk):
+    """Yield the table as 2-D float64 arrays of at most ``chunk`` rows."""
     m = _memmap(path)
     if m is None:
         import pandas as pd
@@ -108,6 +118,7 @@ def iter_chunks(path, chunk):
 
 
 def column(path, name):
+    """One column by name as a 1-D array (binary: from the memory map; text: read with pandas)."""
     m = _memmap(path)
     if m is not None:
         return np.asarray(m[name])

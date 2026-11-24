@@ -45,6 +45,7 @@ lk, lp = np.log(kt), np.log(pt)
 
 
 def growth(a):
+    """Linear growth factor D(a) of flat LCDM (Heath integral; D = a during matter domination)."""
     E = lambda x: np.sqrt(OM / x**3 + 1 - OM)  # noqa: E731
     return 2.5 * OM * E(a) * quad(lambda x: 1 / (x * E(x))**3, 0, a)[0]
 
@@ -53,6 +54,7 @@ D49 = growth(1 / 50.)
 
 
 def pk(k, z):
+    """Linear P(k) at redshift ``z``: the tabulated z = 49 spectrum scaled by (D(z) / D(49))^2."""
     return np.exp(np.interp(np.log(k), lk, lp)) * (growth(1 / (1 + z)) / D49)**2
 
 
@@ -62,6 +64,7 @@ def cpot(z):
 
 
 def sigma(M, z):
+    """rms linear density contrast in a top-hat sphere of mass ``M`` (Msun/h) at redshift ``z``."""
     R = (3 * M / (4 * np.pi * 2.775e11 * OM))**(1 / 3)
     k = np.geomspace(1e-4, 1e2, 4000)
     x = k * R
@@ -70,6 +73,9 @@ def sigma(M, z):
 
 
 def tinker_bias(M, z):
+    """Linear halo bias of Tinker et al. (2010) for mass ``M`` (Msun/h) at redshift ``z``, with the halo
+    overdensity Delta = Delta_vir(z) / Omega_m(z) relative to the mean density (Bryan & Norman Delta_vir).
+    """
     a = 1 / (1 + z)
     Om_z = OM / a**3 / (OM / a**3 + 1 - OM)
     x = Om_z - 1
@@ -82,6 +88,7 @@ def tinker_bias(M, z):
 
 
 def j0(x):
+    """Spherical Bessel function j0(x) = sin(x) / x."""
     return np.sinc(x / np.pi)
 
 
@@ -145,6 +152,7 @@ def vbulk(g, z):
 
 
 def style(ax):
+    """Common axis style of the report figures (white background, light grid, no top/right spines)."""
     ax.set_facecolor('white')
     ax.grid(True, color='#e6e5e0', lw=0.6)
     for s in ('top', 'right'):
@@ -156,6 +164,9 @@ def style(ax):
 
 
 def load_all(d):
+    """Load the stacked potential (vprof) and potential cross-correlation (xcorr) results of every box and
+    snapshot from ``d``; returns a dict keyed by (L, z, mass bin) with r, values, errors and predictions.
+    """
     out = {}
     for L in BOXES:
         for s, z in SNAPS:
@@ -182,6 +193,7 @@ def load_all(d):
 
 
 def grid(title):
+    """3 x 3 figure (rows: snapshots, columns: mass bins) with shared x axes and a title."""
     fig, axs = plt.subplots(3, 3, figsize=(13, 11), sharex=True, constrained_layout=True)
     fig.suptitle(title, fontsize=10)
     for i, (s, z) in enumerate(SNAPS):
@@ -195,6 +207,9 @@ def grid(title):
 
 
 def fig_profiles(D, what, out):
+    """Figure of the measured profiles per box (``what`` = 'vprof': stacked potential; 'xcorr': structure
+    function) with the measured-minus-predicted box-size shift; saved to ``out``.
+    """
     sc = 1e5 if what == 'vprof' else 1e10
     ttl = ('Stacked volume-weighted potential around host halos, 512$^3$ boxes with matched seeds'
            if what == 'vprof' else
@@ -223,6 +238,9 @@ def fig_profiles(D, what, out):
 
 
 def fig_diff(D, what, out):
+    """Figure of the box-size difference relative to L = 1000 against the predictions (Fourier mode sum and
+    real-space integral constraint); saved to ``out``.
+    """
     sc = 1e5 if what == 'vprof' else 1e10
     if what == 'vprof':
         ttl = (r'Box-size difference of the stacked potential, $\langle\phi\rangle_L-\langle\phi\rangle_{1000}$'
@@ -266,6 +284,7 @@ def fig_diff(D, what, out):
 
 
 def table(D, out):
+    """LaTeX table of the box-size shifts, measured against predicted, per snapshot, mass bin and box."""
     rows = []
     for s, z in SNAPS:
         for b in BINS:
@@ -297,6 +316,9 @@ def table(D, out):
 
 
 def main():
+    """Command line: make the box-size figures and table from the reduced data (``--d``, ``--figs``,
+    ``--table``).
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument('--d', default=os.path.join(HERE, 'data', 'box512_L200_L500_L1000'))
     ap.add_argument('--figs', default=os.path.join(HERE, 'figs'))

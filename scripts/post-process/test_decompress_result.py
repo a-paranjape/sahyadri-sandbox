@@ -1,3 +1,6 @@
+"""Test of the compressed snapshot format: compare the decompressed particles of each subsample with the
+original Gadget snapshot (matched by ID) and plot the error distributions.
+"""
 #This make point by point comparision of compressed quanitities with raw values
 import numpy as np
 from readers import HaloReader,SnapshotReader
@@ -17,6 +20,7 @@ import pickle
 
 
 def ltime(date=True):
+    """Local time as ``d/m/yyyy h:m:s`` (``date`` False: only the time)."""
     tm=time.localtime()
     datestr=str(tm.tm_mday)+'/'+str(tm.tm_mon)+'/'+str(tm.tm_year)
     tmstr=str(tm.tm_hour)+':'+str(tm.tm_min)+':'+str(tm.tm_sec)
@@ -28,6 +32,9 @@ def ltime(date=True):
 #This function is used for index matching between compress and raw quantities
 def find_locations_kdtree(arr1, arr2):
     # Reshape arrays to make them 2D as required by KDTree
+    """For each value of ``arr2`` the index of the equal value in ``arr1`` (nearest neighbour in 1-D) and a
+    mask of exact matches; returns (indices, matched mask).
+    """
     arr1_2d = np.array(arr1).reshape(-1, 1)
     arr2_2d = np.array(arr2).reshape(-1, 1)
 
@@ -49,6 +56,10 @@ def find_locations_kdtree(arr1, arr2):
 def compare_quant(indices,mask,sr_o,sr_comp,quant_list=['ids'],subsamples_comp=[1],
                   raw_nfile=[0],res_dic={},Lbox=None):
     
+    """Compare the quantities ``quant_list`` of the original snapshot ``sr_o`` and the compressed one
+    ``sr_comp`` for the matched particles (``indices``, ``mask``) of each subsample; positions are compared with
+    periodic wrapping in ``Lbox``. Returns ``res_dic`` with the differences.
+    """
     if('pos' in quant_list):
         assert Lbox is not None
 
@@ -184,6 +195,9 @@ def plot_histogram_stats(fig,axarr,pl,data_dict,quant='pos'):
     pl.tight_layout()
 
 def get_matched_id(sr_o,sr_comp,subsamples=[1,3],raw_nfile=[0]):
+    """Match the particle IDs of each compressed subsample to the original files ``raw_nfile``; returns a
+    dict of (indices, mask) per subsample.
+    """
     tkey='ids'
     id_raw=sr_o.read_block(tkey,raw_nfile=raw_nfile)
     res_dic={}
@@ -207,6 +221,7 @@ def main():
     #sim_stem='sinhagad/default128'
     #on pegasus testing sinhagad
     #sim_stem='/scratch/csaee/sinhagad/data/sims/var_Om_m256/'
+    """Run the comparison for the configured run and snapshot (paths set in the code)."""
     if(False):#Sinhagad
         sim_name='Sinhagad'
         sim_stem='/mnt/home/project/chpc2501005/shadab/test_sinhagad/'

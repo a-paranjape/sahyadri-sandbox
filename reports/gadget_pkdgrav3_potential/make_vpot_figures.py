@@ -26,6 +26,7 @@ MB = {1e11: ('#9a9a9a', r'$10^{11}$-$10^{12}$'), 1e12: ('#1f5fa8', r'$10^{12}$-$
 
 
 def ratio_vs_radius(V, out):
+    """Figure: pkdgrav3 / Gadget-4 per-halo potential ratio against radius definition at four redshifts."""
     zs = np.unique(V['z'])
     pick = [zs[np.argmin(abs(zs - zp))] for zp in (3, 1, 0.5, 0)]
     x = np.arange(len(RADII))
@@ -50,6 +51,7 @@ def ratio_vs_radius(V, out):
 
 
 def vs_z(V, P, out):
+    """Figure: potential ratio against redshift for a few radii and mass bins, and the particle zero-point."""
     fig, ax = plt.subplots(1, 3, figsize=(15, 4))
     for a, k in zip(ax[:2], (1e12, 1e13)):
         for r, col in zip(('rs', 'Rvir', 'R4R200b', 'R5Mpch'), ('#c8553d', '#1f5fa8', '#6a9f58', '#333333')):
@@ -71,6 +73,7 @@ def vs_z(V, P, out):
 
 
 def main():
+    """Command line: the .vpot comparison figures from ``vpot_match.csv`` (``--d``, ``--figs``)."""
     here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser()
     ap.add_argument('--d', default=os.path.join(here, 'data', 'pkd256_vs_gadget256_r1'))

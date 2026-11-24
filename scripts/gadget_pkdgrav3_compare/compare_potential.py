@@ -48,6 +48,7 @@ H0 = 100.0  # km/s per Mpc/h
 
 
 def wrap(x, L):
+    """Wrap positions into [0, L) (also maps values that round to L onto 0, as cKDTree requires)."""
     x = np.mod(x, L)
     x[x >= L] = 0.0                                  # cKDTree(boxsize=L) needs [0, L)
     return x
@@ -64,6 +65,11 @@ def read_par(path):
 
 
 def read_gadget(path):
+    """Read a Gadget-4 HDF5 snapshot (dark matter only), ordered by particle ID.
+
+    Returns ``(a, L, pos, phi, vel)``: positions in Mpc/h, peculiar potential phi = Potential / a in (km/s)^2 and
+    peculiar velocities in km/s (Velocities * sqrt(a)).
+    """
     with h5py.File(path, 'r') as f:
         a = float(f['Header'].attrs['Time'])
         L = float(f['Header'].attrs['BoxSize'])
@@ -79,6 +85,11 @@ def read_gadget(path):
 
 
 def read_pkd(path, L):
+    """Read a pkdgrav3 HDF5 snapshot (rows ordered by iOrder) in the box ``L`` (Mpc/h).
+
+    Returns ``(a, pos, phi, U, vel)``: positions in [0, L), phi = Potential U^2 / a in (km/s)^2, the velocity
+    unit U = H0 L / sqrt(8 pi / 3) and peculiar velocities v U a in km/s.
+    """
     with h5py.File(path, 'r') as f:
         a = 1.0 / (1.0 + float(f['Header'].attrs['Redshift']))   # pkdgrav3's Header/Time is code time, not a
         assert abs(float(f['Header'].attrs['BoxSize']) - L) < 1e-6 * L, 'pkdgrav3 HDF5 BoxSize (units set?)'
@@ -105,6 +116,7 @@ def pkc_check(prefix, phi_hdf5):
 
 
 def cic_weights(pos, n, L):
+    """Cloud-in-cell cell index and fractional offset of each position on an ``n``^3 grid of box ``L``."""
     u = pos / L * n
     i0 = np.floor(u).astype(np.int64)
     f = u - i0
@@ -159,6 +171,9 @@ def fit(x, y):
 
 
 def read_hlist(path):
+    """Read a consistent-trees hlist (or Rockstar list) into a dict of column arrays, names without the
+    ``(n)`` suffix; an empty file gives empty columns.
+    """
     with open(path) as f:
         head = f.readline().lstrip('#').split()
     names = [re.sub(r'\(\d+\)$', '', h) for h in head]
@@ -224,6 +239,10 @@ def match(hg, hp, L):
 
 
 def main():
+    """Command line: compare the particle potentials of a Gadget-4 and a pkdgrav3 run from the same ICs
+    (particle by particle, against a grid Poisson solution, and around matched halos); writes CSV tables and
+    plots to ``out_dir``.
+    """
     ap = argparse.ArgumentParser()
     for k in ('gadget_dir', 'pkd_dir', 'gadget_halo_dir', 'pkd_halo_dir', 'out_dir'):
         ap.add_argument(k)
@@ -331,6 +350,7 @@ def main():
                                 xg=xg[sel].astype(np.float32), selfpot=selfpot)
 
     def write_csv(rows, path):
+        """Write a list of dicts to CSV, columns in order of first appearance."""
         keys = []
         for r_ in rows:
             keys += [k for k in r_ if k not in keys]

@@ -60,6 +60,10 @@ SUBSAMPLES = '1,3,5,9,10,12,15,20,25'
 
 
 def read_cosmo(name):
+    """Read ``cosmologies/<name>.cosmo`` (``KEY = value`` lines; COMMENT lines kept whole) into a dict.
+
+    Exits with the list of available cosmologies if the file does not exist.
+    """
     path = os.path.join(HERE, 'cosmologies', name + '.cosmo')
     if not os.path.isfile(path):
         sys.exit('no cosmology file %s (available: %s)' % (path, ', '.join(
@@ -76,6 +80,7 @@ def read_cosmo(name):
 
 
 def reals_of(s):
+    """Expand a realisation list like ``'1-3,7'`` to ``[1, 2, 3, 7]``."""
     out = []
     for part in s.split(','):
         a, _, b = part.partition('-')
@@ -84,6 +89,7 @@ def reals_of(s):
 
 
 def seed_of(r):
+    """Initial-condition seed of realisation ``r`` from ``config/sims/seeds.txt`` (exits if missing)."""
     for line in open(os.path.join(SANDBOX, 'config', 'sims', 'seeds.txt')):
         f = line.split()
         if len(f) >= 2 and int(f[0]) == r:
@@ -118,6 +124,7 @@ def ic_spectrum(c):
     sp = CubicSpline(lnk, np.log(P), bc_type='natural')   # = 2 spline(ln T) + ns ln k (splines are linear)
 
     def integrand(lk):
+        """Integrand of sigma_8^2 in ln k: P(k) k^3 W(8k)^2 / (2 pi^2), top-hat window of 8 Mpc/h."""
         kk = math.exp(lk)
         x = 8.0 * kk
         w = 3.0 * (math.sin(x) - x * math.cos(x)) / x**3
@@ -132,6 +139,11 @@ def ic_spectrum(c):
 
 
 def steps_plan(a_out, a_start, step_da):
+    """Number of pkdgrav3 steps per output interval and the cumulative step of each output.
+
+    ``a_out``: scale factors of the outputs; ``a_start``: initial a; ``step_da``: target step in a (at least one
+    step per interval). Returns ``(steps per interval, step number of each output)``.
+    """
     nst, steps, prev, s = [], [], a_start, 0
     for a in a_out:
         n = max(1, int(round((a - prev) / step_da)))
@@ -285,6 +297,7 @@ def resources_swarm(N):
 
 
 def fmt_l(L):
+    """Box size for run names: ``200`` for 200.0, ``12p5`` for 12.5."""
     return ('%d' % L) if float(L).is_integer() else ('%g' % L).replace('.', 'p')
 
 
@@ -314,6 +327,7 @@ KEEP_FULL_Z_PROD = '0 0.05 0.1 0.15 0.2 0.3 0.5 0.7137 0.8 1.0 1.9821 2.9563 4.9
 
 
 def write(path, text, force, mode=0o644):
+    """Write ``text`` to ``path`` with permissions ``mode``; exits if it exists unless ``force``."""
     if os.path.exists(path) and not force:
         sys.exit('%s exists; use --force to overwrite the configuration files' % path)
     with open(path, 'w') as f:
@@ -368,6 +382,9 @@ def schedule_run(conf, name, priority):
 
 
 def main():
+    """Command line (argparse, see ``--help``): set up the directories and configuration files of production
+    runs for the given box, particle number, cosmologies and realisations on a site.
+    """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--site', default='pawna', choices=sorted(SITES),
                     help='where the run is computed (pegasus: run this script on pegasus; the archive stays on pawna)')
@@ -448,6 +465,13 @@ def cosmo_names(spec):
 
 
 def setup_cosmo(a, cosmo):
+    """Set up every realisation of cosmology ``cosmo`` for the parsed arguments ``a``.
+
+    For each realisation writes, in the simulation directory: ``p.par`` (pkdgrav3 parameters), ``output_steps.txt``
+    (step, a, z of each output), ``run.conf`` (pipeline configuration), ``submit.sh``, ``postprocess.sh`` and
+    ``README.txt``; in the halo directory: ``rockstar_input.cfg`` and ``README.txt``. Also derives the run's
+    memory estimate, retention and resource requests (see the module docstring).
+    """
     a.cosmo = cosmo
     c = read_cosmo(a.cosmo)
     L, N = a.L, a.N

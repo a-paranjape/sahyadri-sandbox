@@ -1,4 +1,7 @@
 #!/home/aseem/anaconda3/bin/python
+"""Local development copy of ``voronoi_web.py`` with extra cosmic-web code (needs Aseem's PICASA and
+cosmology modules; not used by the pipeline).
+"""
 
 import numpy as np
 import scipy.spatial as spatial

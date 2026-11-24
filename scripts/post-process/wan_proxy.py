@@ -16,12 +16,15 @@ PORT, UP, RTT, BW = int(sys.argv[1]), sys.argv[2].rstrip('/'), float(sys.argv[3]
 
 
 class H(http.server.BaseHTTPRequestHandler):
+    """HTTP proxy to ``UP`` that adds ``RTT`` seconds per request (simulates a wide-area link)."""
     protocol_version = 'HTTP/1.1'
 
     def log_message(self, *a):
+        """Silence the default request log."""
         pass
 
     def _fwd(self, method):
+        """Forward the request (with its Range header) after the delay and relay status, headers and body."""
         time.sleep(RTT)
         req = urllib.request.Request(UP + self.path, method=method)
         if self.headers.get('Range'):
@@ -48,13 +51,16 @@ class H(http.server.BaseHTTPRequestHandler):
                     time.sleep(ahead)
 
     def do_GET(self):
+        """Forward a GET."""
         self._fwd('GET')
 
     def do_HEAD(self):
+        """Forward a HEAD."""
         self._fwd('HEAD')
 
 
 class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    """Threaded HTTP server (daemon threads, address reuse)."""
     daemon_threads = True
     allow_reuse_address = True
 

@@ -1,3 +1,6 @@
+"""Voronoi volume functions of halos (class :class:`Voronoi`): the Voronoi cell volume of each halo in a
+mass-threshold sample, estimated with random points, and its distribution (VVF).
+"""
 import numpy as np
 import scipy.spatial as spatial
 from readers import HaloReader
@@ -11,6 +14,9 @@ class Voronoi(HaloReader,Constants):
     ############################################################
     def __init__(self,sim_stem='scm1024',real=1,snap=200,Ran_Fac=30000,
                  verbose=True,logfile=None,seed=None,firstcall=False,N_Proc=1):
+        """Set up for snapshot ``snap``: halo catalogue, the number of randoms per halo (``Ran_Fac``), the grid
+        and memory limits, random seed and ``N_Proc`` processes.
+        """
         HaloReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose)
         Constants.__init__(self)
 

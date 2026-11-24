@@ -36,6 +36,7 @@ VBINS = np.logspace(1, 3.5, 51)
 
 
 def load(route, i):
+    """Columns ``COLS`` of Rockstar output ``out_<i>.list`` of input route ``route`` (None if missing)."""
     p = f'{a.rsval}/{route}/out_{i}.list'
     if not os.path.exists(p):
         return None
@@ -45,6 +46,7 @@ def load(route, i):
 
 
 def scale_factors(route):
+    """Scale factor of every output of ``route`` from the ``#a = `` header lines, in output order."""
     a_ = []
     for f in sorted(glob.glob(f'{a.rsval}/{route}/out_*.list'), key=lambda s: int(re.findall(r'out_(\d+)', s)[0])):
         with open(f) as fh:

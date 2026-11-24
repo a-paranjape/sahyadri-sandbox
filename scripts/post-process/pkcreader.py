@@ -53,6 +53,12 @@ _FIELDS = [  # (offset, struct code, name)
 
 
 def parse_header(b):
+    """Parse the fixed-size header of a snapcomp (.pkc) file from the bytes ``b``.
+
+    Returns a dict with the grid and quantisation parameters, particle counts, box size, velocity and potential
+    steps (``pot_step`` 0 if the file stores no potential), the info string, the cosmology (version 3) and
+    ``q`` = ncell x sub. Raises ValueError for a file that is not snapcomp or an unsupported version.
+    """
     if bytes(b[:8]) != _HEADER_MAGIC:
         raise ValueError("not a snapcomp file")
     version, hsize = struct.unpack_from("<II", b, 8)
@@ -75,6 +81,7 @@ def parse_header(b):
 
 
 def _unzigzag(u):
+    """Zig-zag decoding: unsigned integers back to signed (0, 1, 2, 3 -> 0, -1, 1, -2)."""
     u = u.astype(np.uint64)
     return (u >> np.uint64(1)).astype(np.int64) ^ -(u & np.uint64(1)).astype(np.int64)
 
@@ -144,6 +151,7 @@ class PKCFile:
     """One .pkc file, memory-mapped; blocks are decoded on demand."""
 
     def __init__(self, path):
+        """Memory-map one .pkc file, check its trailer and read the header and block index."""
         self.path = path
         with open(path, "rb") as f:
             self._mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
@@ -168,10 +176,14 @@ class PKCFile:
         return r if pot else r[:3]
 
     def blocks(self):
+        """Yield every block of the file decoded (see :meth:`block`)."""
         for i in range(len(self.offsets)):
             yield self.block(i)
 
     def read(self, units="mpc"):
+        """All particles of the file: positions (``units`` 'mpc': Mpc/h in [0, L); 'box': [-0.5, 0.5)),
+        velocities and IDs.
+        """
         h = self.header
         parts = list(self.blocks())
         if not parts:
@@ -194,6 +206,9 @@ class PkcSnapshot:
     """All files of one compressed snapshot (every subsample, every writer)."""
 
     def __init__(self, prefix, threads=None):
+        """Open every subsample file ``<prefix>.s*.pkc`` of a snapshot; ``threads`` decode blocks in parallel.
+        Raises FileNotFoundError if there is none.
+        """
         self.prefix = prefix
         paths = sorted(glob.glob(glob.escape(prefix) + ".s*.pkc"))
         if not paths:
@@ -226,6 +241,7 @@ class PkcSnapshot:
             raise ValueError(f"{prefix}: files hold {got} particles, header says {self.npart} (missing files?)")
 
     def _select(self, subsamples):
+        """The files of the requested subsample percentages (all if None); ValueError if none matches."""
         if subsamples is None or len(subsamples) == 0:
             return self.files
         out = [f for f in self.files if any(abs(f.percent - p) < 1e-9 for p in subsamples)]
@@ -234,6 +250,7 @@ class PkcSnapshot:
         return out
 
     def count(self, subsamples=None):
+        """Number of particles in the selected subsamples."""
         return int(sum(f.header["n_particles"] for f in self._select(subsamples)))
 
     def read(self, fields=("pos", "vel", "ids"), subsamples=None, units="mpc", dtype=np.float32):
@@ -257,6 +274,7 @@ class PkcSnapshot:
             out["pot"] = np.empty(start, dtype)
 
         def work(job):
+            """Decode one block (file, block index, output offset, count) into the preallocated output arrays."""
             f, i, s, n = job
             h = f.header
             X, V, ids, P = f.block(i, pot=True)

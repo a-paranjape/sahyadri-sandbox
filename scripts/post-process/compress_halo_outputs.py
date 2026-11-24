@@ -77,6 +77,9 @@ FLOAT64_COLS = {'scale', 'desc_scale', 'scale_of_last_mm', 'x', 'y', 'z'}
 
 
 def col_dtype(name):
+    """FITS column type of a halo-table column: big-endian int64 for IDs and counts (``INT64_COLS``),
+    float64 for positions and scale factors (``FLOAT64_COLS``), float32 for everything else.
+    """
     n = name.lower().strip().rstrip('?')
     if n in INT64_COLS:
         return '>i8'
@@ -94,6 +97,7 @@ def safe_tree_colname(name):
 
 
 def log(msg):
+    """Print ``msg`` with a time stamp (flushed, for PBS logs)."""
     print('[%s] %s' % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), msg), flush=True)
 
 
@@ -149,6 +153,9 @@ ROCKSTAR_KEYS = ['FILE_FORMAT', 'PARTICLE_MASS', 'BOX_SIZE', 'FORCE_RES', 'FORCE
 
 
 def card(name, value, comment=''):
+    """A FITS header card as a dict (name, value, comment); numpy scalars become Python types and numeric
+    strings become int or float.
+    """
     if isinstance(value, (bool, np.bool_)):
         value = bool(value)
     elif isinstance(value, (np.integer,)):
@@ -281,6 +288,9 @@ def provenance_table(prov):
 
 
 def gzip_file(src, dst, level, threads):
+    """Gzip ``src`` to ``dst`` at ``level``: pigz with ``threads`` if installed, else python-isal (level <= 3),
+    else zlib. Returns the tool used ('pigz', 'isal' or 'zlib').
+    """
     if shutil.which('pigz'):
         with open(dst, 'wb') as out:
             subprocess.run(['pigz', '-%d' % level, '-p', str(max(1, threads)), '-c', src], stdout=out, check=True)
@@ -316,6 +326,7 @@ class StreamTable:
     --selftest)."""
 
     def __init__(self, path):
+        """Open ``path`` and read its primary and table headers; set up the row dtype and row count of HDU 1."""
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import fits_to_parquet as FP
         self.FP, self.path = FP, path
@@ -339,18 +350,22 @@ class StreamTable:
         self.s.mark()
 
     def _read_data(self, hdu, H):
+        """Read (and checksum) the padded data of HDU ``hdu`` with header ``H``."""
         n = self.FP.data_bytes(H)
         self.s.read(self.FP.padded(n), checksum=True)
         self._sum(hdu, H)
 
     def _sum(self, hdu, H):
+        """Record (hdu, computed DATASUM, header DATASUM) if the header has one."""
         if 'DATASUM' in H:
             self.datasums.append((hdu, self.s.datasum(), int(H['DATASUM'])))
 
     def card(self, key):
+        """Value of header keyword ``key`` of HDU 1 (None if absent)."""
         return self.H.get(key)
 
     def read(self, n):
+        """The next ``n`` rows of the table (fewer at the end) as a structured array."""
         n = min(int(n), self.left)
         raw = self.s.read(n * self.dtype.itemsize, checksum=True) if n else b''
         self.left -= n
@@ -381,6 +396,9 @@ class TableWriter:
     temporary file, keeping per-column sums of what was written for the verification."""
 
     def __init__(self, tmp, dtype, extname, cards):
+        """Create the temporary FITS file ``tmp`` with header ``cards``; HDU 1 of ``dtype`` named ``extname``
+        is created on the first append.
+        """
         self.tmp, self.dtype, self.extname, self.cards = tmp, dtype, extname, cards
         self.f = fitsio.FITS(tmp, 'rw', clobber=True)
         self.f.write(None, header=cards)
@@ -391,6 +409,7 @@ class TableWriter:
         self.chunks = []  # rows per append: float sums are re-added in the same chunks on read-back (exact)
 
     def append(self, arr):
+        """Append the rows ``arr`` to HDU 1 and add them to the per-column sums and NaN counts."""
         if len(arr) == 0:
             return
         self.chunks.append(len(arr))
@@ -403,6 +422,9 @@ class TableWriter:
         self.nrows += len(arr)
 
     def close(self, prov_arr, extra_cards=()):
+        """Finish the file: an empty HDU 1 if nothing was appended, extra header cards on HDUs 0 and 1, the
+        provenance table as HDU 2, and CHECKSUM/DATASUM on every HDU.
+        """
         if not self.started:  # empty table: still write HDU 1 with the right columns
             self.f.write(np.zeros(0, dtype=self.dtype), extname=self.extname, header=self.cards)
         for c in extra_cards:
@@ -511,6 +533,13 @@ def halo_header_names(path, kind):
 
 
 def convert_halo_snapshot(task):
+    """Convert one snapshot's halo text outputs (``.trees`` hlist, ``.vahc``, ``.tens``, ``.vpot``) to the
+    FITS tables ``out_<snap>_{basic,extended,vahc,tens}.fits.gz``.
+
+    ``task`` = (snap, args, run cards, run provenance). Rows are streamed in chunks, each table is verified
+    after writing (re-read sums and NaN counts against what was written, DATASUM) and gzipped; returns one
+    result dict per table (``out``, rows, sizes, or ``skipped`` / ``error``).
+    """
     snap, args, run_cards, run_prov = task
     base = os.path.join(args.indir, 'out_%s' % snap)
     src = {k: base + '.' + k for k in ('trees', 'vahc', 'tens', 'vpot')}
@@ -645,6 +674,9 @@ def parse_tree_header(path):
 
 
 def convert_tree_file(task):
+    """Convert one consistent-trees ``tree_*.dat`` file to ``.fits.gz`` (verified like the halo tables);
+    ``task`` = (path, args, run cards, run provenance). Returns a list of result dicts.
+    """
     path, args, run_cards, run_prov = task
     name = os.path.basename(path)
     out = os.path.join(args.outdir, name.replace('.dat', '.fits.gz'))
@@ -704,6 +736,7 @@ def tree_rows(path, cols, dt, nskip, chunk_rows, roots, starts, nbefore):
 
 
 def check_ntrees(name, ntrees, cols, roots):
+    """Raise RuntimeError if the number of tree roots differs from the file header's tree count."""
     if ntrees is not None and 'Tree_root_ID' in cols and len(roots) != ntrees:
         raise RuntimeError('%s: %d trees found in the rows, header says %d' % (name, len(roots), ntrees))
 
@@ -890,6 +923,9 @@ def convert_tree_aux(args, run_cards, run_prov, tile_rows, merged=False):
 
 
 def select_snaps(indir, spec):
+    """Snapshots with an ``out_<snap>.trees`` file in ``indir``, filtered by ``spec`` ('all', '0-100',
+    '5,7,99'), in numerical order.
+    """
     snaps = sorted({os.path.basename(p)[4:-6] for p in glob.glob(os.path.join(indir, 'out_*.trees'))},
                    key=lambda s: (len(s), s))
     if not spec or spec == 'all':
@@ -908,9 +944,11 @@ class Safe:
     """Worker wrapper: an exception in one file is reported, the other files go on."""
 
     def __init__(self, fn):
+        """Remember the wrapped function."""
         self.fn = fn
 
     def __call__(self, task):
+        """Run the task; on an exception return ``[{'error': ..., 'task': ...}]``."""
         try:
             return self.fn(task)
         except Exception as e:  # noqa: BLE001
@@ -918,6 +956,9 @@ class Safe:
 
 
 def run_pool(fn, tasks, nproc):
+    """Run ``fn`` over ``tasks`` with ``nproc`` processes (in this process if ``nproc`` <= 1); returns the
+    concatenated result lists.
+    """
     fn = Safe(fn)
     results = []
     if nproc <= 1:
@@ -934,6 +975,7 @@ def run_pool(fn, tasks, nproc):
 
 
 def log_result(r):
+    """Log one result dict: ERROR, skip (with the reason) or the written file with its numbers."""
     if 'error' in r:
         log('ERROR %s' % r)
     elif 'skipped' in r:
@@ -944,6 +986,9 @@ def log_result(r):
 
 
 def main():
+    """Command line (see ``--help`` and the module docstring): convert the halo tables and/or merger trees of
+    a run directory to FITS.
+    """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('what', choices=['halos', 'trees', 'all'])
     ap.add_argument('--indir', required=True)

@@ -1,3 +1,4 @@
+"""Earlier version of ``correlations.py`` (kept for reference; ``correlations.py`` is the one in use)."""
 import numpy as np
 import scipy.fftpack as fft
 import scipy.spatial as syspat
@@ -176,6 +177,9 @@ class TwoPointCorrelationFunctionPeriodic(Utilities,Paths,Constants):
 
     #############################################################
     def RR_theory(self):
+        """Analytic random-random pair fraction per shell of a periodic box, 4/3 pi (s_hi^3 - s_lo^3) / L^3
+        (valid for s_max < L/2).
+        """
         if self.verbose:
             self.print_this("... ... calculating RR from theory",self.logfile)
         # valid for smax < Lbox/2, else see Deserno 04

@@ -32,6 +32,7 @@ KH = np.logspace(-3, np.log10(30.0), 400)   # h/Mpc
 
 
 def read_kv(path):
+    """Read a ``KEY = value`` file (comments after ``#``, quotes stripped) into a dict of strings."""
     out = {}
     for line in open(path):
         line = line.split('#', 1)[0].strip()
@@ -63,13 +64,16 @@ def growth(a_out, Om, Ok, w0, wa):
     Ode = 1.0 - Om - Ok
 
     def E2(a):
+        """E(a)^2 = H(a)^2 / H0^2 for matter, curvature and a (w0, wa) dark-energy fluid."""
         de = a**(-3 * (1 + w0 + wa)) * np.exp(-3 * wa * (1 - a))
         return Om / a**3 + Ok / a**2 + Ode * de
 
     def dlnE2(a, h=1e-5):
+        """d ln E^2 / d ln a by a central difference."""
         return (np.log(E2(a * (1 + h))) - np.log(E2(a * (1 - h)))) / (np.log1p(h) - np.log1p(-h))
 
     def rhs(lna, y):
+        """Right-hand side of the linear growth equation in ln a: y = (D, dD/dlna)."""
         a = np.exp(lna)
         D, dD = y
         return [dD, -(2 + 0.5 * dlnE2(a)) * dD + 1.5 * Om / a**3 / E2(a) * D]
@@ -79,6 +83,11 @@ def growth(a_out, Om, Ok, w0, wa):
 
 
 def main():
+    """Command line: ``class_pk.py <run.conf> [--force]``.
+
+    Writes the linear and non-linear CLASS P(k) of the run's cosmology at its output redshifts into
+    ``<halo dir>/pk`` (``class_pk_lin.txt``, ``class_pk_nl.txt``, ``class_meta.json``); skips if they exist.
+    """
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     E = retention.load_conf(sys.argv[1])

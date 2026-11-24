@@ -77,6 +77,7 @@ def planned_outputs(E, P=None):
 
 
 def subsample_pcts(E):
+    """Particle subsample percentages kept from ``SUBSAMPLES`` (e.g. ``'1,3,5'`` -> [1.0, 3.0, 5.0])."""
     return [float(x) for x in E['SUBSAMPLES'].split(',') if x.strip()]
 
 
@@ -120,6 +121,7 @@ def keep_full_snaps(E, outs):
 
 
 def pct_tag(p):
+    """File tag of a subsample percentage: 3 -> ``'s03'``."""
     return 's%02d' % int(round(p))
 
 
@@ -147,6 +149,7 @@ def kept_files(E, pl=None):
     out = []
 
     def add(cat, snap, src, rel=None):
+        """Add a kept file (category, snapshot, absolute path, archive-relative path) if it is a regular file."""
         if os.path.isfile(src) and not os.path.islink(src):
             assert src.startswith(root), src
             out.append((cat, snap, src, rel or src[len(root):]))
@@ -236,6 +239,7 @@ def content_sha(path):
 
 
 def human(n):
+    """Byte count as a human-readable string (B, KB, MB, GB, TB; powers of 1024)."""
     for u in ('B', 'KB', 'MB', 'GB', 'TB'):
         if abs(n) < 1024 or u == 'TB':
             return '%.1f %s' % (n, u) if u != 'B' else '%d B' % n
@@ -243,6 +247,9 @@ def human(n):
 
 
 def main():
+    """Command line: ``retention.py <run.conf>``: print the retention plan and the kept files per category
+    with their sizes.
+    """
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     E = load_conf(sys.argv[1])

@@ -1,3 +1,8 @@
+"""Convert a CLASS P(k) table (k, P) to the input format of NGenIC: log10 k and log10 Delta^2(k) =
+log10(k^3 P / 2 pi^2).
+
+Usage: ``python modify_class_output.py <file.dat>`` (prompts without an argument); writes ``<file>.txt``.
+"""
 import numpy as np
 import sys
 

@@ -1,6 +1,13 @@
+"""Compare two Rockstar ``out_0.list`` catalogues: exact input (HDF5) against .pkc input.
+
+Usage: ``python cmp_halos.py <exact dir> <pkc dir>``. Prints halo counts above particle-number cuts and, for
+halos with Np >= 100 matched within 0.1 Rvir (periodic, L = 200 Mpc/h), the Mvir, Vmax, position and bulk
+velocity differences.
+"""
 import sys, numpy as np
 from scipy.spatial import cKDTree
 def load(d):
+    """Read ``<d>/out_0.list``: Mvir, Vmax, Rvir, Np, positions and velocities of every halo."""
     a = np.loadtxt(d + "/out_0.list", comments="#")
     # columns: ID DescID Mvir Vmax Vrms Rvir Rs Np X Y Z VX VY VZ ...
     return dict(m=a[:,2], vmax=a[:,3], r=a[:,5], np_=a[:,7], x=a[:,8:11], v=a[:,11:14], pid=None)

@@ -83,12 +83,19 @@ def read_cat(d, i):
 
 
 def mf(m, edges, vol):
+    """Mass (or velocity) function: counts per bin, dn/dlog10 m per volume ``vol`` and its Poisson error."""
     n = np.histogram(m, edges)[0]
     dl = np.diff(np.log10(edges))
     return n, n / vol / dl, np.sqrt(n) / vol / dl
 
 
 def match(hg, hp, L):
+    """Match Gadget-4 halos ``hg`` to pkdgrav3 halos ``hp`` in a periodic box of size ``L``.
+
+    A pair matches if each is the other's nearest neighbour, the separation is below half the Gadget Rvir
+    (kpc/h -> Mpc/h) and the masses agree within a factor 10^0.5. Returns indices into ``hg`` and ``hp`` and
+    the separations.
+    """
     if len(hg['x']) == 0 or len(hp['x']) == 0:
         return np.zeros(0, int), np.zeros(0, int), np.zeros(0)
     cg = np.mod(np.vstack([hg['x'], hg['y'], hg['z']]).T, L)
@@ -103,6 +110,7 @@ def match(hg, hp, L):
 
 
 def pct(x):
+    """Median, 16th and 84th percentiles of the finite values of ``x`` (NaNs if none)."""
     x = x[np.isfinite(x)]
     if len(x) == 0:
         return np.nan, np.nan, np.nan
@@ -110,6 +118,9 @@ def pct(x):
 
 
 def main():
+    """Command line (see ``--help``): halo mass and velocity functions of the two codes and the matched-halo
+    ratios per output, written as CSV files to ``out_dir``.
+    """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('gadget_halo_dir'); ap.add_argument('pkd_halo_dir'); ap.add_argument('out_dir')
     ap.add_argument('--outs', required=True)
@@ -174,6 +185,7 @@ def main():
                  'b1' in G), flush=True)
 
     def write(rows, path):
+        """Write a list of dicts to CSV, columns in order of first appearance."""
         keys = []
         for r in rows:
             keys += [k for k in r if k not in keys]

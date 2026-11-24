@@ -1,3 +1,6 @@
+"""Driver that compresses one Sahyadri snapshot into subsamples with ``SnapshotReader.compress_snapshot``
+(paths and snapshot list set in the code; pegasus paths).
+"""
 import numpy as np
 from readers import HaloReader,SnapshotReader
 from correlations import PowerSpectrum
@@ -13,6 +16,7 @@ print(socket.gethostname())
 import time
 
 def ltime(date=True):
+    """Local time as ``d/m/yyyy h:m:s`` (``date`` False: only the time)."""
     tm=time.localtime()
     datestr=str(tm.tm_mday)+'/'+str(tm.tm_mon)+'/'+str(tm.tm_year)
     tmstr=str(tm.tm_hour)+':'+str(tm.tm_min)+':'+str(tm.tm_sec)

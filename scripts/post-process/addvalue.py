@@ -1,3 +1,9 @@
+"""Value-added halo properties from the density field around each halo (class :class:`AddValue`).
+
+On a CIC density grid (``PowerSpectrum``) of the snapshot: large-scale bias b1 per halo from the halo-matter
+cross-power at k < kmax, and the density, tidal tensor and Hessian eigenvalues smoothed on several scales
+(R2R200b ... R5Mpch). Used by ``postprocess.py`` and, with the fast grid code, ``vahc_fast.py``.
+"""
 import os
 import numpy as np
 from scipy import linalg
@@ -11,6 +17,10 @@ class AddValue(HaloReader):
     def __init__(self,sim_stem='scm1024',real=1,snap=200,kmax=0.1,massdef='m200b',
                  density=None,hpos=None,halos=None,ps=None,input_is_FTdensity=True,
                  grid=512,CIC=True,logfile=None,verbose=True):
+        """Set up for snapshot ``snap`` of run ``sim_stem`` / ``real``: read the halos (masses above ``Npmin``
+        particles of definition ``massdef``) unless ``halos``/``hpos`` are given, and use (or make) the density field
+        ``density`` on a ``grid``^3 grid (``input_is_FTdensity``: already Fourier transformed).
+        """
         HaloReader.__init__(self,sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,verbose=verbose)
         self.kmax = kmax
         self.massdef = massdef
@@ -131,6 +141,9 @@ class AddValue(HaloReader):
 
     ###############################################
     def calc_b1(self):
+        """Per-halo linear bias b1 from the cross-power of each halo with the matter density at k < ``kmax``,
+        divided by the matter power (halos done in batches); returns an array of length Nhalo.
+        """
         print("\n\n, in addvalue.py, we are calculating calc_b1\n")
         out = np.zeros(self.Nhalo)
         RANGE_MAX = np.max([1,np.rint(self.Nhalo/self.NTRC_SPLIT*(self.kmax - self.ps.Delta_k)/(0.1 - 2*np.pi/300)).astype(int)])

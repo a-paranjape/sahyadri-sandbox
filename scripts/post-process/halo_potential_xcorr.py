@@ -99,6 +99,10 @@ def uniform_from_id(ids, seed=0):
 
 
 def read_halos(d, snap, phis, mass_col, hosts_only):
+    """Halos of snapshot ``snap`` from the FITS tables in ``d``: positions (wrapped into the box), mass
+    ``mass_col``, the potential columns ``phis`` matched by halo id (NaN if missing), box size L and scale
+    factor a. ``hosts_only`` keeps pid = -1.
+    """
     import fitsio
     fb = os.path.join(d, 'out_%s_basic.fits.gz' % snap)
     fv = os.path.join(d, 'out_%s_vahc.fits.gz' % snap)
@@ -128,6 +132,7 @@ def read_halos(d, snap, phis, mass_col, hosts_only):
 
 
 def parse_rbins(s):
+    """Bin edges from ``log:rmin,rmax,n`` or ``lin:rmin,rmax,width`` (Mpc/h)."""
     kind, v = s.split(':', 1)
     v = [float(x) for x in v.split(',')]
     if kind == 'log':
@@ -173,6 +178,7 @@ def stats(S):
 
 
 def main():
+    """Command line (see the module docstring)."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('dir'); ap.add_argument('snap'); ap.add_argument('out')
     ap.add_argument('--phi', default=DEFAULT_PHI)
@@ -255,6 +261,7 @@ def main():
     jmd, jsf, jcov, jcorr = stats(jk)
 
     def jerr(x):
+        """Jackknife error over the region axis (axis 1), ignoring NaNs."""
         import warnings
         with np.errstate(invalid='ignore'), warnings.catch_warnings():
             warnings.simplefilter('ignore', RuntimeWarning)

@@ -25,6 +25,9 @@ class GridPower:
     """Binned auto/cross spectra of fields given as B = rfftn(delta) / W_CIC^2 (vahc_fast's convention)."""
 
     def __init__(self, ps):
+        """Precompute, for the ``PowerSpectrum`` ``ps`` grid, the k bin of every rfft mode, the weights of the
+        half-complex modes and the mean k per bin; checks the mode counts against ``ps.I_SIZE``.
+        """
         self.ps = ps
         N = ps.grid
         self.N = N
@@ -68,6 +71,7 @@ class GridPower:
 
 
 def mass_bins(spec):
+    """Halo mass bin edges from ``spec`` (comma separated, default ``MBINS_DEFAULT``) plus an open top edge."""
     edges = [float(x) for x in (spec or MBINS_DEFAULT).replace(' ', '').split(',') if x]
     return edges + [np.inf]
 
@@ -126,6 +130,9 @@ def measure(gp, Bm, npart, halos=None, hpos=None, mpart=None, mbins=None, thread
 
 
 def write(path, meta, cols, tab):
+    """Write the P(k) table ``tab`` with columns ``cols`` and a JSON ``meta`` header line to ``path``
+    (``.part`` then rename).
+    """
     tmp = path + '.part'
     with open(tmp, 'w') as f:
         f.write('# Power spectra of the CIC density on the vahc grid (pk_measure.py); units: k h/Mpc, P (Mpc/h)^3\n')

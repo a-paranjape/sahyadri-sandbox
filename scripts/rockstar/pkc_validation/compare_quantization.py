@@ -1,3 +1,7 @@
+"""Effect of the .pkc quantisation on Rockstar halos (pawna validation, 50 Mpc/h box): raw HDF5 input
+against .pkc, with two .pkc runs as the noise floor. Prints a table of count, match and property differences
+per mass bin and redshift (``D`` sets the data directory).
+"""
 # usage: python compare_quantization.py   (edit D below; output of the 512^3 run: compare_quantization_512.out)
 # Effect of .pkc quantization on Rockstar halos: raw (h5g, unquantized HDF5) vs pkc, with pkc vs pkc2
 # (same input, two Rockstar runs) as the noise floor. Halos matched by nearest centre (periodic KD tree).
@@ -6,12 +10,17 @@ from scipy.spatial import cKDTree
 D='/storage/shadab/pkc_rockstar/rsval/'; L=50.; mp=8.110260e7
 C=['Mvir','Vmax','Rvir','Rs','Spin','X','Y','Z','VX','VY','VZ']
 def ld(r,i):
+    """Columns ``C`` of Rockstar output ``out_<i>.list`` of route ``r``."""
     p=f'{D}{r}/out_{i}.list'
     with open(p) as fh: h=fh.readline()[1:].split()
     return pd.read_csv(p,comment='#',sep=r'\s+',header=None,names=h,usecols=C)[C].to_numpy()
 zs=[3,2,1,0.5,0.25,0]
 mb=[(1e10,1e11),(1e11,1e12),(1e12,1e13),(1e13,1e16)]
 def pair(a,b,tag,z):
+    """Statistics of catalogue ``a`` against ``b`` per mass bin at redshift ``z``: counts, match and
+    host/subhalo flip fractions and median differences of Mvir, Vmax, position, velocity, Rs and spin
+    (nearest centre within 10 kpc/h, 50 kpc/h above 1e12 Msun/h).
+    """
     t=cKDTree(b[:,5:8]%L,boxsize=L); out=[]
     for lo,hi in mb:
         m=(a[:,0]>=lo)&(a[:,0]<hi)

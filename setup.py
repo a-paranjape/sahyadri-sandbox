@@ -10,6 +10,7 @@ import subprocess
 
 # Read README for long description
 def read_readme():
+    """Contents of README.md for the long description (a default sentence if missing)."""
     try:
         with open("README.md", "r", encoding="utf-8") as fh:
             return fh.read()
@@ -18,6 +19,7 @@ def read_readme():
 
 # Get version from git or fallback
 def get_version():
+    """Package version from ``git describe`` (leading ``v`` removed); ``0.1.0-dev`` without git or tags."""
     try:
         # Try to get version from git tag
         version = subprocess.check_output(

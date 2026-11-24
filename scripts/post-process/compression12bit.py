@@ -1,3 +1,9 @@
+"""Bit packing of floats and integers (8, 12, 16, 32 or 64 bits), used by ``Nbody_Compression``.
+
+:func:`compress_12bit` / :func:`decompress_12bit` quantise floats in [0, max] or [-max, max] to 12 bits
+(two values in three bytes). :func:`compress_integer_array` packs integers at a chosen or optimal bit depth
+with the values that do not fit stored separately (overflow indices and values).
+"""
 import numpy as np
 
 def compress_12bit(data, max_value, allow_negative=True, little_endian=True,input_dtype='float'):
@@ -77,6 +83,11 @@ def decompress_12bit(compressed, max_value, output_size, allow_negative=True, li
 
 
 def compress_integer_array(arr, bit_depth=None,little_endian=True,possible_bit_depth= [8,12,16,32,64]):
+    """Pack the integer array ``arr`` (even length) at ``bit_depth`` bits (chosen by
+    :func:`find_optimal_bit_depth` if None); values too large for the depth go to an overflow list.
+
+    Returns (packed bytes, overflow indices, overflow values, original dtype, bit depth).
+    """
     arr = np.asarray(arr)
 
     if arr.size % 2 != 0:
@@ -123,6 +134,9 @@ def compress_integer_array(arr, bit_depth=None,little_endian=True,possible_bit_d
 #    return unpacked
 
 def decompress_integer_array(packed, overflow_indices, overflow_values, original_dtype, bit_depth, original_size, little_endian=True):
+    """Inverse of :func:`compress_integer_array`: unpack ``original_size`` values and put the overflow
+    values back.
+    """
     if bit_depth in (8, 16, 32, 64):
         # Use native types for these bit depths
         unpacked = packed.astype(original_dtype)
@@ -158,6 +172,9 @@ def decompress_integer_array(packed, overflow_indices, overflow_values, original
 
 
 def find_optimal_bit_depth(arr, overflow_threshold):
+    """The bit depth (8, 12, 16, 32, 64) that gives the smallest packed size including the overflow list,
+    among those with an overflow fraction at most ``overflow_threshold``; 64 if none qualifies.
+    """
     possible_bit_depths = [8, 12, 16, 32, 64]
     arr_max = np.max(arr)
 
@@ -184,6 +201,7 @@ def find_optimal_bit_depth(arr, overflow_threshold):
     return optimal_bit_depth or 64  # Default to 64 if no suitable bit depth found
 
 def calculate_packed_size(array_length, bit_depth):
+    """Bytes needed for ``array_length`` values at ``bit_depth`` bits (12 bits rounded up to whole bytes)."""
     if bit_depth in (8, 16, 32, 64):
         return array_length * (bit_depth // 8)
     elif bit_depth == 12:
@@ -196,6 +214,9 @@ def calculate_packed_size(array_length, bit_depth):
 
 # Test function (same as before)
 def test_12bit_compression(size=1000000):
+    """Round-trip test of the 12-bit float compression on ``size`` random values (signed and unsigned); prints
+    the errors.
+    """
     np.random.seed(42)
     
     # Test with negative numbers
@@ -231,6 +252,7 @@ def test_12bit_compression(size=1000000):
     # ...
 
 def test_compression_decompression(bit_depth, size=10000):
+    """Round-trip test of :func:`compress_integer_array` at ``bit_depth`` with values that overflow it."""
     np.random.seed(42)
     input_arr = np.random.randint(0, 1 << (bit_depth + 2), size=size, dtype=np.int64)
 

@@ -16,21 +16,26 @@ ROOT, PORT, LOG = os.path.realpath(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
 
 
 class H(http.server.BaseHTTPRequestHandler):
+    """HTTP/1.1 file server for ``ROOT`` with Range support and a JSON log of every request (bytes, time)."""
     protocol_version = 'HTTP/1.1'
 
     def log_message(self, *a):
+        """Silence the default request log (the JSON log replaces it)."""
         pass
 
     def _path(self):
+        """The requested file under ``ROOT`` (query string ignored), or None if outside ROOT or missing."""
         p = os.path.realpath(os.path.join(ROOT, self.path.split('?')[0].lstrip('/')))
         return p if p.startswith(ROOT + '/') and os.path.isfile(p) else None
 
     def _log(self, rng, n, t0):
+        """Append one JSON line (time, method, path, range, bytes, ms, client) to ``LOG``."""
         with open(LOG, 'a') as f:
             f.write(json.dumps(dict(t=time.time(), m=self.command, path=self.path, range=rng, bytes=n,
                                     ms=round(1e3 * (time.time() - t0), 2), client=self.client_address[0])) + '\n')
 
     def do_HEAD(self):
+        """Answer with the file size (or 404)."""
         t0 = time.time()
         p = self._path()
         if not p:
@@ -43,6 +48,7 @@ class H(http.server.BaseHTTPRequestHandler):
         self._log(None, 0, t0)
 
     def do_GET(self):
+        """Send the file or the requested byte range (206), or 404 / 416."""
         t0 = time.time()
         p = self._path()
         if not p:
@@ -79,6 +85,7 @@ class H(http.server.BaseHTTPRequestHandler):
 
 
 class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    """Threaded HTTP server (daemon threads, address reuse)."""
     daemon_threads = True
     allow_reuse_address = True
 

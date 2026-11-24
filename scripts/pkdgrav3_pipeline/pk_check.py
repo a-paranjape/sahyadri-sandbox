@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'post-process'))
 
 
 def load_class(pkdir):
+    """Read ``class_meta.json`` and the linear and non-linear CLASS P(k) tables from ``pkdir``."""
     meta = json.load(open(os.path.join(pkdir, 'class_meta.json')))
     lin = np.loadtxt(os.path.join(pkdir, 'class_pk_lin.txt'))
     nl = np.loadtxt(os.path.join(pkdir, 'class_pk_nl.txt'))
@@ -35,6 +36,7 @@ def load_class(pkdir):
 
 
 def interp_col(tab, col, k):
+    """Log-log interpolation of column ``col`` of table ``tab`` (k in column 0) at ``k``."""
     return np.exp(np.interp(np.log(k), np.log(tab[:, 0]), np.log(tab[:, col])))
 
 
@@ -139,6 +141,7 @@ def plot(rows, cm_path, png, title):
     if not rows:
         return None
     def zs(z):                       # no "-0.00" for the last output
+        """Redshift label with two decimals (``0.00`` instead of ``-0.00``)."""
         return '%.2f' % (0.0 if abs(z) < 0.005 else z)
     lin = np.loadtxt(os.path.join(cm_path, 'class_pk_lin.txt'))
     nl = np.loadtxt(os.path.join(cm_path, 'class_pk_nl.txt'))

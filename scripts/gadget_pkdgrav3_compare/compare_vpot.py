@@ -30,6 +30,11 @@ RADII = ['rs', 'R0p5vir', 'R200b', 'Rvir', 'R1p5vir', 'R2R200b', 'R4R200b', 'R6R
 
 
 def read(d, i):
+    """Halos of output ``i`` in directory ``d`` with their .vpot potentials, or None if the FITS files are missing.
+
+    Returns a dict of x, y, z, rvir, mvir, a and one array per radius in ``RADII`` (phi_<radius>, NaN for halos
+    without a value), aligned with the basic table.
+    """
     b = os.path.join(d, 'out_%d_basic.fits.gz' % i)
     v = os.path.join(d, 'out_%d_vahc.fits.gz' % i)
     if not (os.path.isfile(b) and os.path.isfile(v)):
@@ -54,11 +59,15 @@ def read(d, i):
 
 
 def pct(x):
+    """Median, 16th and 84th percentiles of the finite values (NaNs if fewer than 5)."""
     x = x[np.isfinite(x)]
     return (np.nan,) * 3 if len(x) < 5 else tuple(float(v) for v in np.percentile(x, [50, 16, 84]))
 
 
 def main():
+    """Command line (see ``--help``): compare the per-halo potentials (.vpot) of matched Gadget-4 and pkdgrav3
+    halos per mass bin and radius; writes ``out_csv``.
+    """
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('gadget_dir'); ap.add_argument('pkd_dir'); ap.add_argument('out_csv')
     ap.add_argument('--box', type=float, default=200.0)

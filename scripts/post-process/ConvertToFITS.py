@@ -1,3 +1,6 @@
+"""Convert Rockstar / consistent-trees text outputs to FITS tables (the first FITS converter; the
+pipeline now uses ``compress_halo_outputs.py``).
+"""
 # Author: Shadab Alam, Feb 2024
 import os
 import numpy as np

@@ -1,3 +1,4 @@
+"""Earlier version of ``postprocess.py`` (kept for reference)."""
 #Example run: python postprocess.py sinhagad/default256 200 200 1 100 0 200 1
 import os,sys
 import numpy as np
@@ -92,6 +93,7 @@ if calc_mf:
     mass_string += tags[-1]
 
 def out_file_root(sr,snap,quant='Pk',tag=''):
+   """Output path prefix ``<sim_path><stem>/stats/<quant>/<tag>_<snap>`` (directory created)."""
    outdir = '%s%s%s/%s/'%(sr.sim_path, sim_stem, '/stats/',quant)
    outroot='%s_%03d'%(tag,snap)
    #check if directory exists, otherwise create the directory
@@ -100,6 +102,7 @@ def out_file_root(sr,snap,quant='Pk',tag=''):
    return outdir+outroot
 
 def do_this_snap(snap):
+    """All post-processing of one snapshot (see the module docstring); writes the outputs and logs the time."""
     start_time_snap = time()
     sr = SnapshotReader(sim_stem=sim_stem,real=real,snap=snap,logfile=logfile,read_header=True)
     if calc_Pk | add_value:
@@ -338,6 +341,10 @@ def do_this_snap(snap):
 
 def estimate_2pcf(hpos,njn=0,Lbox=250,los=1,space='real',randfactor=2,interactive=1,xi2droot=None,xiprojroot=None):
     # Direct calling the function
+    """Halo two-point correlation function of positions ``hpos`` in a box ``Lbox`` (real or redshift space
+    along ``los``) with ``njn`` jackknife regions, using the external ``General_FITS_selection`` and
+    ``ccorr_utility_nopc`` codes; returns a dict of results.
+    """
     import General_FITS_selection as GFS
     import ccorr_utility_nopc as corrnopc
 
@@ -410,6 +417,7 @@ def estimate_2pcf(hpos,njn=0,Lbox=250,los=1,space='real',randfactor=2,interactiv
 
 def create_nested_directory(path, max_depth=20):
     # Convert the path to an absolute path
+    """Create ``path`` and its parents (at most ``max_depth`` levels); True on success."""
     abs_path = os.path.abspath(path)
 
     # Split the path into individual components
@@ -441,6 +449,7 @@ def create_nested_directory(path, max_depth=20):
 
 def small_number_to_filename(number):
     # Convert the number to a string in scientific notation
+    """A number as a file-name-safe string: 1.5e-4 -> ``1p50em4``."""
     sci_notation = f"{number:.2e}"
 
     # Use regex to separate the coefficient and exponent

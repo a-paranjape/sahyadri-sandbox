@@ -84,6 +84,11 @@ HALO_GROUP = 2048          # halo centres per KD-tree: bounds the pairs held at 
 
 # ------------------------------------------------------------------ halos
 def read_halos(path, mass_col):
+    """Read a consistent-trees hlist or Rockstar list into lower-case column arrays.
+
+    Adds ``pid`` = -1 for Rockstar lists (no host flag) and ``mass`` = the column ``mass_col``; exits if that
+    column is missing.
+    """
     with open(path) as f:
         first = f.readline()
     names = [re.sub(r'\(\d+\)$', '', h) for h in first.lstrip('#').split()]
@@ -104,6 +109,7 @@ def read_halos(path, mass_col):
 
 # ------------------------------------------------------------------ particle sources
 def gadget_files(path):
+    """The HDF5 files of a Gadget-4 snapshot: ``path`` or ``path.<i>.hdf5`` in order (exits if none)."""
     if path.endswith('.hdf5'):
         return [path]
     fl = sorted(glob.glob(path + '.*.hdf5'), key=lambda f: int(f.split('.')[-2]))
@@ -248,6 +254,9 @@ def uhash(ids, seed):
 
 
 def init(kind, units, bins, edges, levels, nreg, subtract, seed, vcache=None):
+    """Worker initialiser: store the run settings in the module global ``G`` and build periodic KD-trees of the
+    halo centres of every mass bin in groups of ``HALO_GROUP``.
+    """
     L = units['L']
     groups = []
     for b in bins:
@@ -260,6 +269,11 @@ def init(kind, units, bins, edges, levels, nreg, subtract, seed, vcache=None):
 
 
 def load_unit(u):
+    """Read one work unit of particles (an HDF5 slice or one .pkc file/subsample).
+
+    Returns positions wrapped into [0, L), the peculiar potential in (km/s)^2 minus ``G['subtract']`` and the
+    particle IDs.
+    """
     kind, L = G['kind'], G['units']['L']
     if kind in ('gadget', 'pkd'):
         f, s, e = u[1:]
@@ -336,6 +350,7 @@ def jackknife(n, s, nh, f):
 
 
 def main():
+    """Command line (see the module docstring): stacked potential profiles around halos per mass bin."""
     warnings.filterwarnings('ignore', category=RuntimeWarning)   # empty shells -> NaN
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('kind'); ap.add_argument('snapshot'); ap.add_argument('halos'); ap.add_argument('out')

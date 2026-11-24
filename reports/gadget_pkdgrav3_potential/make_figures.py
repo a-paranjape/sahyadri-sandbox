@@ -20,9 +20,11 @@ RUNC = {'32': '#9a9a9a', '256': '#1b1b1b'}
 
 
 def load_csv(path):
+    """Read a CSV file; returns (dict of float arrays, list of row dicts)."""
     with open(path) as f:
         rows = list(csv.DictReader(f))
     def num(v):
+        """``float(v)``, or NaN if not a number."""
         try:
             return float(v)
         except (TypeError, ValueError):
@@ -31,6 +33,7 @@ def load_csv(path):
 
 
 def particles_vs_z(R, out):
+    """Figure: particle-potential comparison statistics of the runs ``R`` against 1 + z; saved to ``out``."""
     fig, ax = plt.subplots(2, 3, figsize=(14, 7.5), sharex=True)
     for run, d in R.items():
         P = d['P']
@@ -67,6 +70,7 @@ def particles_vs_z(R, out):
 
 
 def snap_scatter(run, d, out):
+    """Figure: particle-by-particle potential scatter of the last snapshot of ``run``."""
     fl = sorted(glob.glob(os.path.join(d, 'snap_*.npz')))
     if not fl:
         return
@@ -95,6 +99,7 @@ def snap_scatter(run, d, out):
 
 
 def halo_mf(run, d, out):
+    """Figure: halo mass functions of both codes and their ratio for ``run``."""
     p = os.path.join(d, 'halos', 'halo_mf.csv')
     if not os.path.exists(p):
         return
@@ -121,6 +126,7 @@ def halo_mf(run, d, out):
 
 
 def halo_match(run, d, out):
+    """Figure: mass, position and potential ratios of matched halos against redshift for ``run``."""
     fl = sorted(glob.glob(os.path.join(d, 'halos', 'halo_match_out*.npz')), key=lambda f: int(f.split('out')[-1][:-4]))
     if not fl:
         return
@@ -172,6 +178,7 @@ def halo_match(run, d, out):
 
 
 def halo_potential(run, d, out):
+    """Figure: per-halo potential of the two codes from ``halos.csv`` for ``run``."""
     p = os.path.join(d, 'halos.csv')
     if not os.path.exists(p):
         return
@@ -210,6 +217,7 @@ def halo_potential(run, d, out):
 
 
 def main():
+    """Command line: ``make_figures.py <run dir>... [--figs DIR]``: all comparison figures of each run."""
     ap = argparse.ArgumentParser()
     ap.add_argument('runs', nargs='+')
     ap.add_argument('--figs', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'figs'))

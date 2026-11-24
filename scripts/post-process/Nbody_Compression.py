@@ -1,3 +1,12 @@
+"""Lossy compression of N-body snapshots on a grid (the HDF5 ``*_<quantity>.h5`` format used before
+snapcomp/.pkc).
+
+Positions are stored as an offset within their cell of an ``Ngrid``^3 grid (particles sorted by cell, cell
+counts kept), velocities and potentials quantised to 12 bits after a tanh transform (``vmax``, ``pmax``), IDs
+bit-packed (``compression12bit``). Subsamples are nested random fractions. Main functions:
+:func:`compress_nbody_data_optimized`, :func:`save_compressed_data`, :func:`load_compressed_data`,
+:func:`decompress_nbody_data`; :func:`test_compression` is a round-trip test on random data.
+"""
 import numpy as np
 import h5py
 import time
@@ -7,12 +16,15 @@ import compression12bit as c12b
 import sys
 
 def nonlinear_transform(x, alpha=0.99):
+    """tanh(x / alpha) / tanh(1 / alpha): maps [-1, 1] onto [-1, 1] with more resolution near 0."""
     return np.tanh(x / alpha) / np.tanh(1 / alpha)
 
 def inverse_nonlinear_transform(y, alpha=0.99):
+    """Inverse of :func:`nonlinear_transform`."""
     return alpha * np.arctanh(y * np.tanh(1 / alpha))
 
 def grid_index_to_3d(index, Ngrid):
+    """Flat cell index -> (x, y, z) cell indices on an ``Ngrid``^3 grid (x fastest)."""
     z = index // (Ngrid * Ngrid)
     y = (index % (Ngrid * Ngrid)) // Ngrid
     x = index % Ngrid
@@ -78,6 +90,9 @@ def create_subsamples(N, subsamples):
     return subsample_indices
 
 def Get_sorted_indices(positions,L, Ngrid):
+    """Flat cell index of every particle on an ``Ngrid``^3 grid of box ``L`` and the permutation that sorts
+    the particles by cell; returns (sorted cell indices, permutation).
+    """
     grid_size = L / Ngrid
     #memory expensive implemnetation
     #grid_indices = np.floor(positions / grid_size).astype(int)
@@ -175,6 +190,13 @@ def compress_nbody_data(original_quant, L, Ngrid, vmax, pmax,quant='positions',s
 def compress_nbody_data_optimized(original_quant, L, Ngrid, vmax, pmax, quant='positions', 
                                  sort_indices=None, full_count_bit_depth=12, 
                                  little_endian=True, npart=None,chunk_size=None):
+    """Compress one quantity of a snapshot.
+
+    ``quant`` 'positions': offset within the particle's cell (sorted by cell, ``sort_indices`` returned for the
+    other quantities), returns (compressed positions, cell counts dict, sort_indices); 'velocities' /
+    'potential': 12-bit after the tanh transform with ``vmax`` / ``pmax``; 'ids': bit-packed integers. Processes
+    ``chunk_size`` particles at a time if given.
+    """
     if (quant in ['positions', 'velocities'] and original_quant.shape[1] != 3):
         raise ValueError("Input positions and velocities should have shape (Ndata, 3)")
 
@@ -356,6 +378,10 @@ def compress_nbody_data_optimized(original_quant, L, Ngrid, vmax, pmax, quant='p
             return packed_ids #, overflow_indices, overflow_values, ids_dtype, ids_bit_depth 
 
 def decompress_nbody_data(file_root,subsample,attribute_dic,load_quant=[]):#compressed_dic,attribute_dic):
+    """Read and decompress the quantities ``load_quant`` of subsample ``subsample`` from the files
+    ``<file_root>_<quantity>.h5``, using the attributes ``attribute_dic`` (grid, ranges, endianness); returns a
+    dict of arrays.
+    """
     little_endian=attribute_dic['little_endian']
     assert sys.byteorder==attribute_dic['byteorder']
     res_dic={}
@@ -440,6 +466,7 @@ def decompress_nbody_data(file_root,subsample,attribute_dic,load_quant=[]):#comp
     return res_dic
 
 def compressed_filename(filename_prefix, quant):
+    """File name of quantity ``quant``: ``<prefix>_<quant>.h5``."""
     return f"{filename_prefix}_{quant}.h5"
 
 def print_this(print_string,logfile,overwrite=False):
@@ -453,6 +480,9 @@ def print_this(print_string,logfile,overwrite=False):
 
 def save_compressed_data(filename_prefix, compressed_data, attribute_dic, full_counts_dic=None, quant='positions',verbose=False):
    
+    """Write the compressed quantity ``quant`` with its attributes (and the cell counts for positions) to
+    ``<prefix>_<quant>.h5``.
+    """
     if(full_counts_dic is None and quant=='positions'):
         raise ValueError("full_counts_dic must not be None for positions to be saved")
 
@@ -495,6 +525,9 @@ def save_compressed_data(filename_prefix, compressed_data, attribute_dic, full_c
 
 def load_compressed_data(filename_prefix, load_quant=['positions','velocities','potentials','attributes','ids']):
 
+    """Read the compressed datasets and attributes of the quantities ``load_quant`` from the HDF5 files of
+    ``filename_prefix``; returns a dict.
+    """
     fname_dic={'positions':compressed_filename(filename_prefix,'positions'),
                 'velocities':compressed_filename(filename_prefix,'velocities'),
                 'potentials':compressed_filename(filename_prefix,'potential'),
@@ -543,6 +576,9 @@ def load_compressed_data(filename_prefix, load_quant=['positions','velocities','
 def test_compression(Ndata=100000, L=100.0, Ngrid=32, vmax=6000.0, pmax=1e5, subsamples=[1,4,5,20,30,40],
       full_count_bit_depth=12,little_endian=True):
     # Generate random data
+    """Round-trip test on random particles: compress, save, load, decompress for every subsample and print the
+    errors.
+    """
     positions = np.random.rand(Ndata, 3) * L
     velocities = (np.random.rand(Ndata, 3) * 2 - 1) * vmax
     potential = (np.random.rand(Ndata) * 2 - 1) * pmax

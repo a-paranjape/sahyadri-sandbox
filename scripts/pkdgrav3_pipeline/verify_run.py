@@ -38,6 +38,7 @@ import retention  # noqa: E402
 
 
 def events(state):
+    """All events of a run (``state/events/*.jsonl``) sorted by time; unreadable lines are skipped."""
     out = []
     for f in sorted(glob.glob(os.path.join(state, 'events', '*.jsonl'))):
         for line in open(f):
@@ -61,14 +62,20 @@ def ids_of(path, col):
 
 
 class Report:
+    """Collects the checks of a verification: per check ok flag, errors and warnings (at most 200 each) and
+    info values; written to ``verify.json``.
+    """
     def __init__(self):
+        """No checks yet."""
         self.checks = {}
 
     def check(self, name):
+        """The record of check ``name`` (created ok and empty on first use)."""
         c = self.checks.setdefault(name, dict(ok=True, errors=[], warnings=[], info={}))
         return c
 
     def fail(self, name, msg):
+        """Record an error for check ``name`` and mark it failed."""
         c = self.check(name)
         c['ok'] = False
         if len(c['errors']) < 200:
@@ -76,15 +83,23 @@ class Report:
         c['info']['n_errors'] = c['info'].get('n_errors', 0) + 1
 
     def warn(self, name, msg):
+        """Record a warning for check ``name`` (does not fail it)."""
         c = self.check(name)
         if len(c['warnings']) < 200:
             c['warnings'].append(msg)
 
     def ok(self):
+        """True if every check passed."""
         return all(c['ok'] for c in self.checks.values())
 
 
 def main():
+    """Command line: ``verify_run.py <run.conf> [--threads N]``.
+
+    Checks a finished run: snapshots (all outputs, sizes, ``pkc_check`` of each compressed output in
+    parallel), subsamples, Rockstar, consistent-trees, vahc and FITS products, halo counts and P(k) against
+    CLASS; writes ``state/verify.json`` and exits non-zero if a check failed.
+    """
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     threads = int(sys.argv[sys.argv.index('--threads') + 1]) if '--threads' in sys.argv else os.cpu_count()
@@ -153,6 +168,7 @@ def main():
         per = max(1, threads // nproc)
 
         def run(task):
+            """Run ``pkc_check`` on one output; returns (snapshot, completed process, seconds)."""
             snap, pre = task
             t1 = time.time()
             r = subprocess.run([pkc_check, '--threads', str(per), pre], capture_output=True, text=True)
@@ -392,6 +408,7 @@ def check_parquet(R, ev, P, pl, comp):
 
 
 def jobnum(j):
+    """Numeric PBS job id (``'2539127.pawna'`` -> 2539127; -1 if not a number)."""
     try:
         return int(str(j).split('.')[0])
     except ValueError:

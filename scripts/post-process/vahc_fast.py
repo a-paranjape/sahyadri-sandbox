@@ -125,6 +125,7 @@ def streamed_fields(pkc, ps, threads, halos=None, hpos=None, Om=None, chunk=1 <<
         tsph = 0.0
 
         def flush():
+            """Add the buffered particles to the per-halo sphere sums (C ``sphere_sums``); MemoryError if it fails."""
             nonlocal buf, nbuf, tsph
             if not nbuf:
                 return
@@ -142,6 +143,7 @@ def streamed_fields(pkc, ps, threads, halos=None, hpos=None, Om=None, chunk=1 <<
     jobs = [(f, i) for f in pkc.files for i in range(len(f.counts))]
 
     def decode(job):
+        """Decode one .pkc block to positions (Mpc/h) and, if wanted, potentials minus the self term."""
         f, i = job
         h = f.header
         if want_pot:
@@ -191,6 +193,9 @@ class FastAddValue(AddValue):
     """
 
     def __init__(self, density_real, threads=1, timing=None, vpot=None, **kw):
+        """``AddValue`` on a density grid already in hand (``density_real``) with multithreaded FFTs
+        (``threads``); ``vpot`` holds the per-halo potential sums for the .vpot output.
+        """
         kw['density'] = None
         kw['input_is_FTdensity'] = True
         AddValue.__init__(self, **kw)
@@ -230,6 +235,7 @@ class FastAddValue(AddValue):
     def _irfft(self, H):
         # H is always a temporary product here: overwrite_x lets the transform use it as work space instead of a
         # copy (8.6 GB at grid 1024); same arithmetic
+        """Inverse real FFT to the N^3 grid, overwriting the (temporary) input to save memory."""
         return sfft.irfftn(H, s=(self.N,) * 3, workers=self.threads, overwrite_x=True)
 
     def _kernel(self, Rs):
@@ -461,6 +467,7 @@ class FastAddValue(AddValue):
 
     # ------------------------------------------------------------------
     def header(self, kind):
+        """Header lines of the ``kind`` output ('vahc', 'tens' or 'vpot'): description, units and column names."""
         if kind == 'vpot':
             V = self.vpot
             h = ("# Mean %s particle potential around halos, (km/s)^2, self term %.6g (km/s)^2 removed; "

@@ -57,11 +57,15 @@ class Stream:
     """A .fits.gz (or .fits) read sequentially, with the FITS checksum of every byte read since mark()."""
 
     def __init__(self, path):
+        """Open ``path`` (gzip-decompressed on the fly for ``.gz``) and reset the running checksum."""
         raw = pa.OSFile(path, 'rb')
         self.f = pa.CompressedInputStream(raw, 'gzip') if path.endswith('.gz') else raw
         self.sum, self.tail = 0, b''
 
     def read(self, n, checksum=False):
+        """Read exactly ``n`` bytes (raises EOFError if the file ends first); with ``checksum`` add them to the
+        running FITS checksum.
+        """
         out = []
         left = n
         while left > 0:
@@ -76,9 +80,13 @@ class Stream:
         return data
 
     def mark(self):
+        """Restart the running checksum (at the start of an HDU's data)."""
         self.sum, self.tail = 0, b''
 
     def _add(self, data):
+        """Add ``data`` to the 32-bit ones'-complement FITS checksum; a trailing partial word is kept for the
+        next call.
+        """
         d = self.tail + data
         k = len(d) - len(d) % 4
         self.tail = d[k:]
@@ -87,6 +95,7 @@ class Stream:
             self.sum += s
 
     def datasum(self):
+        """The FITS DATASUM of the bytes checksummed since :meth:`mark` (carries folded into 32 bits)."""
         s = self.sum
         if self.tail:
             s += int.from_bytes(self.tail + b'\0' * (4 - len(self.tail)), 'big')
@@ -95,10 +104,14 @@ class Stream:
         return s
 
     def close(self):
+        """Close the file."""
         self.f.close()
 
 
 def card_value(card):
+    """Value of an 80-character FITS header card: string (quotes undone), bool, int or float (``D``
+    exponents allowed), the raw text otherwise; None for a card without ``= ``.
+    """
     if card[8:10] != '= ':
         return None
     v = card[10:].strip()
@@ -118,6 +131,9 @@ def card_value(card):
 
 
 def read_header(s):
+    """Read one FITS header (2880-byte blocks up to END) from stream ``s``; returns (non-empty cards, dict of
+    keyword values).
+    """
     cards, H = [], {}
     while True:
         blk = s.read(BLOCK).decode('ascii', 'replace')
@@ -133,6 +149,7 @@ def read_header(s):
 
 
 def data_bytes(H):
+    """Size in bytes of an HDU's data from its header (BITPIX, NAXISn; PCOUNT for tables)."""
     if H.get('NAXIS', 0) == 0:
         return 0
     n = abs(H['BITPIX']) // 8
@@ -142,6 +159,7 @@ def data_bytes(H):
 
 
 def padded(n):
+    """``n`` rounded up to a whole number of 2880-byte FITS blocks."""
     return (n + BLOCK - 1) // BLOCK * BLOCK
 
 
@@ -238,6 +256,7 @@ def col_hash_update(h, arr):
 
 
 class _Stopped(Exception):
+    """Raised in a pipeline thread when another thread has failed."""
     pass
 
 
@@ -251,6 +270,7 @@ def pipeline(s, w, cols, rowbytes, nrows, block, schema, hashes, threads):
     stop, err = threading.Event(), []
 
     def put(q, x):
+        """Put ``x`` on queue ``q``, waking every 0.2 s; False if the pipeline was stopped."""
         while True:
             try:
                 q.put(x, timeout=0.2)
@@ -260,6 +280,7 @@ def pipeline(s, w, cols, rowbytes, nrows, block, schema, hashes, threads):
                     return False
 
     def get(q):
+        """Get from queue ``q``, waking every 0.2 s; raises ``_Stopped`` if the pipeline was stopped."""
         while True:
             try:
                 return q.get(timeout=0.2)
@@ -268,10 +289,12 @@ def pipeline(s, w, cols, rowbytes, nrows, block, schema, hashes, threads):
                     raise _Stopped()
 
     def fail(e):
+        """Record the error ``e`` and stop all pipeline threads."""
         err.append(e)
         stop.set()
 
     def reader():
+        """Thread: read the table rows in blocks (checksummed) and queue the raw bytes."""
         try:
             done = 0
             while done < nrows:
@@ -284,6 +307,7 @@ def pipeline(s, w, cols, rowbytes, nrows, block, schema, hashes, threads):
             fail(e)
 
     def writer():
+        """Thread: write the converted Arrow tables to the Parquet file in order."""
         try:
             while True:
                 x = get(q_tab)
@@ -327,6 +351,13 @@ def pipeline(s, w, cols, rowbytes, nrows, block, schema, hashes, threads):
 
 # ------------------------------------------------------------------------------------------------ one file
 def convert(src, dst, block_mb, threads=4):
+    """Convert one FITS table ``src`` (``.fits.gz``) to Parquet ``dst``.
+
+    The table is streamed in blocks of ``block_mb`` (reader, ``threads`` converters, writer), never held whole
+    in memory. Verified: FITS DATASUM of every HDU, and a column-hash read-back of the Parquet file against the
+    FITS rows. Header cards and the source size and mtime go into the Parquet metadata; written as ``dst.part``
+    and renamed. Returns a result dict (rows, sizes, seconds).
+    """
     t0 = time.time()
     name = os.path.basename(src)
     s = Stream(src)
@@ -414,6 +445,7 @@ def convert(src, dst, block_mb, threads=4):
 
 
 def up_to_date(src, dst):
+    """True if ``dst`` exists and its metadata records the current size and mtime of ``src`` (resume)."""
     if not os.path.isfile(dst):
         return False
     try:
@@ -425,6 +457,9 @@ def up_to_date(src, dst):
 
 
 def plan(src_dir, dst_dir):
+    """Files to convert under ``src_dir`` (``*.fits.gz`` and ``trees/*.fits.gz``): returns (jobs not up to
+    date, Parquet files without a FITS source, number of Parquet files wanted).
+    """
     jobs, want = [], set()
     for f in sorted(glob.glob(os.path.join(src_dir, '*.fits.gz')) + glob.glob(os.path.join(src_dir, 'trees', '*.fits.gz'))):
         rel = os.path.relpath(f, src_dir)[:-len('.fits.gz')] + '.parquet'
@@ -438,6 +473,9 @@ def plan(src_dir, dst_dir):
 
 
 def main_convert(a):
+    """Convert a directory: remove orphan Parquet and stale ``.part`` files, then run :func:`convert` on the
+    jobs in ``a.procs`` processes; exits non-zero on any failure.
+    """
     jobs, orphans, n_all = plan(a.src, a.dst)
     for p in orphans:
         print('removing %s (no FITS source)' % p, flush=True)
@@ -470,6 +508,9 @@ def main_convert(a):
 
 
 def selftest(paths):
+    """Check the streaming reader against fitsio on each FITS file in ``paths`` (rows and DATASUM); returns
+    the number of failures.
+    """
     import fitsio
     bad = 0
     for p in paths:
@@ -502,6 +543,7 @@ def selftest(paths):
 
 
 def main():
+    """Command line: ``fits_to_parquet.py <src dir> <dst dir> [--procs N ...]`` or ``--selftest <files>``."""
     if len(sys.argv) > 1 and sys.argv[1] == '--selftest':
         return selftest(sys.argv[2:])
     ap = argparse.ArgumentParser()

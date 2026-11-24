@@ -27,12 +27,16 @@ bad = 0
 
 
 def ok(cond, msg):
+    """Print PASS/FAIL ``msg`` and count failures in the global ``bad``."""
     global bad
     print(('PASS ' if cond else 'FAIL ') + msg, flush=True)
     bad += (not cond)
 
 
 def same(v, a):
+    """True if FITS column ``v`` equals the text-table values ``a`` at the column's precision (int64, float64
+    exactly, float32 after rounding; NaNs equal).
+    """
     if v.dtype.kind == 'i':
         return np.array_equal(v, a.astype(np.int64))
     if v.dtype.itemsize == 8:
@@ -41,6 +45,9 @@ def same(v, a):
 
 
 def check_snapshot(R, out, snap):
+    """Compare the FITS tables of snapshot ``snap`` in ``out`` with the text outputs in run directory ``R``:
+    row counts, every column, header cards and checksums.
+    """
     names = C.halo_header_names(os.path.join(R, 'out_%s.trees' % snap), 'trees')
     A = np.loadtxt(os.path.join(R, 'out_%s.trees' % snap), ndmin=2)
     got = {}
@@ -216,6 +223,9 @@ def _task(task):
 
 
 def main():
+    """Command line (see ``--help``): check the compressed halo tables and trees of a run directory; exits
+    non-zero on any failure.
+    """
     global bad
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('rundir')

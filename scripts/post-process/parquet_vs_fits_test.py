@@ -26,6 +26,7 @@ VARIANTS = [('zstd3', dict(compression='zstd', compression_level=3), False),
 
 
 def best(f, n=3):
+    """Best (minimum) wall time of ``n`` calls of ``f`` and the last result."""
     t = []
     for _ in range(n):
         t0 = time.perf_counter(); r = f(); t.append(time.perf_counter() - t0)
@@ -33,10 +34,14 @@ def best(f, n=3):
 
 
 def header_json(h):
+    """FITS header records as a JSON list of [name, value, comment] (for the Parquet metadata)."""
     return json.dumps([[r['name'], str(r['value']), r.get('comment', '')] for r in h.records() if r['name']])
 
 
 def main():
+    """Command line: ``parquet_vs_fits_test.py <out dir> <file.fits.gz>...``: size, write and read times of
+    FITS against Parquet per file, with a round-trip check.
+    """
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
     print('%-34s %-12s %9s %8s %8s %8s %8s  %s' % ('file', 'format', 'MB', 'write s', 'read all', 'read 2c', 'cut', 'round trip'))
