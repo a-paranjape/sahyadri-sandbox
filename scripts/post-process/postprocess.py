@@ -272,20 +272,8 @@ def do_this_snap(snap):
                     del halos_cut,hpos_cut
                     gc.collect()
 
-        if calc_vvf and False:
-            outfile_vvf = sr.halo_path + sim_stem + '/r'+str(real)+'/vvf/vvf_{0:d}.txt'.format(snap)
-            sr.print_this('Writing to file: '+outfile_vvf,sr.logfile)
-            fv = open(outfile_vvf,'w')
-            fv.write("#\n# Voronoi volume functions for " + sim_stem + '/'+'r'+str(real)+'/out_' + str(snap)+"\n")
-            fv.write("# This file contains VVF percentiles for various number density thresholds.\n")
-            fv.write("#\n# percentile | n (Mpc-3) = 1e4 * ["+','.join(['{0:.2f}'.format(1e4*n) for n in n_cuts])+"]\n")
-            fv.close()
-            for s in range(stats.shape[1]):
-                vlist = [vvf_percs[s]]
-                for m in range(stats.shape[0]):
-                    vlist.append(stats[m,s])
-                sr.write_to_file(outfile_vvf,vlist)
-                
+        # (the per-snapshot VVF table written here from a `stats` array was replaced by the per-cut files
+        #  vvf_<space>_<ncut> above; the old block was switched off and referred to an undefined name)
 
         #!!!!!!!#########
         if calc_2pcf:

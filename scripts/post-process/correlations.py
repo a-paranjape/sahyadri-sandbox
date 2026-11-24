@@ -692,7 +692,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
         if pos.shape[0] != 3:
             raise TypeError("Inconsistent data dimensions!! Try again.")
 
-        if np.any(pos) < 0.0:
+        if np.any(pos < 0.0):
             raise ValueError("Positions should be in range (0,Lbox) along each dimension!!")
 
         ndata = 1*pos.shape[1]
@@ -1264,7 +1264,7 @@ class PowerSpectrum(Utilities,Paths,Constants):
         if pos.shape[0] != 3:
             raise TypeError("Inconsistent data dimensions!! Try again.")
 
-        if np.any(pos) < 0.0:
+        if np.any(pos < 0.0):
             raise ValueError("Positions should be in range (0,Lbox) along each dimension!!")
 
         ndata = 1*pos.shape[1]
