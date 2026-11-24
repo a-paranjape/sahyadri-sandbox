@@ -71,6 +71,10 @@ first, then oldest, when all of these hold:
   +10 %.
   The page shows the numbers; a run that does not fit waits (the *Submit simulation* button can override).
 
+The start order is on the page: the *Upcoming* tab begins with a **Start order** table (per site: position, run,
+priority, when scheduled, what it waits for), its run cards are sorted in that order, and every scheduled run's card
+carries a badge `#k of n to start on <site>`. Order in the plan file does not matter, only the priority column.
+
 A simulation that stops cleanly at its wall time (checkpoint written, outputs missing) is queued again with
 priority −1 and restarts from its newest checkpoint, at most `max_sim_restarts` (5) times. A simulation that
 fails stops the run as usual.
@@ -104,7 +108,7 @@ until it ends and comes back. Limits in `config.json`:
 | `sim_stalled` | a running simulation's `run.<job>.log` has not changed | max(`sim_stall_s` 2 h, `sim_stall_steps` 5 × its step time) |
 | `drain_stalled` | a staged snapshot or checkpoint is "finished" in `drain.<job>.log` but not "drained" (it exists only on the node's disk) | `drain_stall_s` 3 h |
 | `drain_direct` | the drain points pkdgrav3 straight at NFS (node disk below `--min-free-gb`) | — |
-| `swap` | the node has more swap in use (`node_mem` events from `job_sim.pbs`, every 30 min) | `swap_alert_gb` 16 |
+| `swap` | the node is swapping: more swap in use than `swap_alert_gb` and pages moving in or out of swap at `swap_alert_mb_s` or more between two `node_mem` events (`job_sim.pbs`, every 30 min; jobs started before 24 Nov 2026 lack the counters), or less memory available than `swap_alert_avail_gb`. Swap merely in use is no alert: a 2048³ run keeps ~120 GB of idle pages in swap with no swap traffic | `swap_alert_gb` 16, `swap_alert_mb_s` 1, `swap_alert_avail_gb` 2 |
 | `stage_leftover` | a new simulation job found a stage of an earlier job on its node and set it aside (`<stage>.left.<job>`) | — |
 | `rs_redo` | Rockstar output of snapshots that a restart rewrote; Rockstar runs on them again | — |
 

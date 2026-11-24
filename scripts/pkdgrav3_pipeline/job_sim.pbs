@@ -105,11 +105,14 @@ snap_watch() {
 snap_watch < /dev/null > /dev/null 2>&1 &
 SNAPWATCH_PID=$!
 # node memory for the manager's watchdog (node_mem every SIM_MEMWATCH_S, default 30 min): 20-22 Nov 2026 the 2048^3
-# nodes ran with 2-8 GB available and ~125 GB swapped; one simulation and the drains hung (NFS writes stuck)
+# nodes ran with 2-8 GB available and ~125 GB swapped; one simulation and the drains hung (NFS writes stuck).
+# pswpin/pswpout (/proc/vmstat, pages swapped in/out since boot): the manager alerts on swap traffic between two
+# samples, not on swap merely in use (a 2048^3 run keeps ~120 GB of idle pages in swap at no cost, 24 Nov 2026)
 mem_watch() {
   while kill -0 $$ 2>/dev/null; do
-    awk '/^MemAvailable:/{a=$2} /^SwapTotal:/{st=$2} /^SwapFree:/{sf=$2} END{printf "%d %d\n", a/1024, (st-sf)/1024}' /proc/meminfo |
-      { read -r av sw; event node_mem avail_mb="$av" swap_used_mb="$sw"; }
+    { awk '/^MemAvailable:/{a=$2} /^SwapTotal:/{st=$2} /^SwapFree:/{sf=$2} END{printf "%d %d ", a/1024, (st-sf)/1024}' /proc/meminfo
+      awk '/^pswpin /{i=$2} /^pswpout /{o=$2} END{printf "%d %d\n", i, o}' /proc/vmstat; } |
+      { read -r av sw si so; event node_mem avail_mb="$av" swap_used_mb="$sw" pswpin="$si" pswpout="$so"; }
     sleep "${SIM_MEMWATCH_S:-1800}"
   done
 }

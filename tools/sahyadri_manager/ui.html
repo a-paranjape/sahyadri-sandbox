@@ -122,10 +122,19 @@ function stageInfo(run, st){
   if(st==='sim' && run.sim) extra = `<br>z=${run.sim.z.toFixed(2)}`;
   return {cls, txt: `${h(j.status)} <span class="muted">${h(j.job)}</span>${extra}`};
 }
+// start order: S.queue is the scheduler's list, per site in submission order (priority, lower first; then the time
+// it was scheduled). queuePos(name) -> {pos, n, site, x} with pos counted within the site, or null.
+function queuePos(name){
+  const Q=S.queue||[], x=Q.find(y=>y.run===name); if(!x) return null;
+  const same=Q.filter(y=>(y.site||'')===(x.site||''));
+  return {pos: same.indexOf(x)+1, n: same.length, site: x.site||'', x};
+}
 function phaseBadge(r){
   const p=r.phase; let c='b-run';
   if(p==='failed') c='b-bad'; else if(p==='scheduled'||p==='waiting to restart') c='b-wait'; else if(['archived','purged','verified (no archive)'].includes(p)) c='b-ok'; else if(p==='not started'||r.paused) c='b-off'; else if(p==='in trash') c='b-wait';
-  return `<span class="badge ${c}">${h(p)}${r.paused?' · paused':''}${r.busy?' · '+h(r.busy)+'…':''}</span>`;
+  const qp=queuePos(r.name);
+  const ord=qp?` <span class="badge b-wait" title="${h('start order on '+qp.site+' (priority '+qp.x.priority+'; waiting for: '+(qp.x.wait||'submitting')+')')}">#${qp.pos} of ${qp.n} to start on ${h(qp.site)}</span>`:'';
+  return `<span class="badge ${c}">${h(p)}${r.paused?' · paused':''}${r.busy?' · '+h(r.busy)+'…':''}</span>${ord}`;
 }
 function renderRun(r, idx){
   const id='r'+idx;
@@ -296,7 +305,7 @@ function render(){
   document.getElementById('hdr').innerHTML = `${h(S.host)} · qstat ${S.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(S.qtime)} · next check ${ago(S.next_heartbeat)} · page ${new Date().toLocaleTimeString()}`;
   document.getElementById('disk').innerHTML = diskTable();
   const L=S.limits||{};
-  const q=(S.queue||[]).map((x,i)=>`<tr><td>${i+1}</td><td>${h(x.site||'')}</td><td>${h(x.queue||'')}</td><td>${h(x.run)}</td><td>${x.restart?'restart':'new'}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`).join('');
+  const q=(S.queue||[]).map((x,i)=>`<tr><td>${queuePos(x.run).pos}</td><td>${h(x.site||'')}</td><td>${h(x.queue||'')}</td><td>${h(x.run)}</td><td>${x.restart?'restart':'new'}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`).join('');
   const lim=(k,label,w,src,pre)=>`<label class="small">${label} <input name="${(pre||'')+k}" value="${h((src||L)[k])}" style="width:${w||60}px" type="text"></label>`;
   const siteRows=Object.entries(S.sites||{}).map(([n,x])=>`<div class="row" style="margin-top:6px"><b>${h(n)}</b>
      <span class="muted small" title="${h('qsub/qstat on '+x.login+'; files from '+x.data)}">running ${x.sims_running} · waiting in PBS ${x.sims_queued} · qstat ${x.qok===false?'<b style="color:var(--bad)">failed</b> ':''}${ago(x.qtime)}</span><span class="sp"></span>
@@ -338,7 +347,14 @@ function renderTabs(){
   document.querySelectorAll('section[data-tab]').forEach(sct=>sct.classList.toggle('on', sct.dataset.tab===TAB));
   const cards=(list,empty)=>list.length?list.map(([r,i])=>renderRun(r,i)).join(''):`<div class="card muted">${empty}</div>`;
   document.getElementById('runs-active').innerHTML = cards(groups.active, 'No run is simulating or post-processing.');
-  document.getElementById('runs-upcoming').innerHTML = cards(groups.upcoming, 'No registered run is waiting to start.');
+  // upcoming: in start order (scheduled runs by site and position), then runs not scheduled (paused, held, not started)
+  const rank=r=>{const qp=queuePos(r.name); return qp?[0,qp.site,qp.pos]:[1,r.site||'',0];};
+  groups.upcoming.sort(([a],[b])=>{const x=rank(a), y=rank(b); return x[0]-y[0] || (x[1]<y[1]?-1:x[1]>y[1]?1:0) || x[2]-y[2];});
+  const Q=S.queue||[];
+  const order=Q.length?`<div class="card"><b>Start order</b> <span class="muted small">per site: lower priority number first, then the earlier scheduled; a run starts when its site has a free slot (max running / max waiting in PBS) and its queue is open</span>
+    <table style="margin-top:6px"><tr><th>site</th><th>#</th><th>run</th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${
+    Q.map(x=>{const qp=queuePos(x.run); return `<tr><td>${h(x.site||'')}</td><td><b>${qp.pos}</b></td><td>${h(x.run)}${x.restart?' <span class="muted small">(restart)</span>':''}</td><td>${h(x.priority)}</td><td>${ago(x.t)}</td><td class="small">${h(x.wait||'submitting')}</td></tr>`;}).join('')}</table></div>`:'';
+  document.getElementById('runs-upcoming').innerHTML = order + cards(groups.upcoming, 'No registered run is waiting to start.');
   const fin=groups.finished.filter(([r])=>r.phase!=='purged'), purged=groups.finished.filter(([r])=>r.phase==='purged');
   document.getElementById('runs-finished').innerHTML = (fin.length?fin.map(([r,i])=>renderFinished(r,i)).join(''):'<div class="card muted">No archived run with data in scratch.</div>') +
     (purged.length?`<div class="card"><b>Purged</b> <span class="muted small">archived; scratch data deleted</span><table style="margin-top:6px"><tr><th>run</th><th>site</th><th>archive</th><th>purged</th></tr>${

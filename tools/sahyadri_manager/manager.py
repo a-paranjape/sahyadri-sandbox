@@ -89,9 +89,12 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    # watchdog (alerts on the page and in the log; nothing is killed or resubmitted by it):
                    # a running simulation whose log has not changed for max(sim_stall_s, sim_stall_steps x its step
                    # time); a staged snapshot or checkpoint finished but not drained to NFS after drain_stall_s, or
-                   # the drain writing straight to NFS (node disk full); swap in use on the node above swap_alert_gb
-                   # (job_sim.pbs node_mem events); a stage left on a node by an earlier job (stage_leftover)
-                   sim_stall_s=7200, sim_stall_steps=5, drain_stall_s=10800, swap_alert_gb=16,
+                   # the drain writing straight to NFS (node disk full); the node swapping: above swap_alert_gb in
+                   # swap and pages moving in or out of swap at swap_alert_mb_s or more between two node_mem events
+                   # (job_sim.pbs, every 30 min), or less than swap_alert_avail_gb of memory available; a stage left
+                   # on a node by an earlier job (stage_leftover)
+                   sim_stall_s=7200, sim_stall_steps=5, drain_stall_s=10800, swap_alert_gb=16, swap_alert_mb_s=1.0,
+                   swap_alert_avail_gb=2,
                    local_codes='/user/shadab/sahyadri_prod/codes',
                    # planned runs: set up, registered and scheduled by the manager; queues: which PBS queues take
                    # jobs (open | drain | closed) and their own limits. Both in the manager's directory (edited there,
@@ -366,6 +369,35 @@ def reals_of(spec):
         a, _, b = part.partition('-')
         out += list(range(int(a), int(b or a) + 1))
     return out
+
+
+def swap_alert(mem, cfg):
+    """Swap alert text from a job's node_mem events (oldest first), or None. Swap merely in use is not an alert: a
+    2048^3 run on pawna keeps ~120 GB of idle pages in swap with no swap traffic and runs normally (24 Nov 2026). Alert
+    when swap is above swap_alert_gb and pages moved in or out of swap at swap_alert_mb_s or more (average between the
+    last two samples; needs the pswpin/pswpout counters of job_sim.pbs from 24 Nov 2026 on), or when less than
+    swap_alert_avail_gb of memory is available (20-22 Nov 2026: hangs with 2-8 GB available)."""
+    e = mem[-1]
+    swap = float(e.get('swap_used_mb') or 0) / 1024
+    avail = float(e.get('avail_mb') or 0) / 1024
+    when = e.get('time', '')[:16]
+    if 'avail_mb' in e and avail < float(cfg.get('swap_alert_avail_gb', 2)):
+        return ('%.1f GB memory available, %.0f GB swap in use (%s): the simulation and its drain may hang'
+                % (avail, swap, when))
+    if swap <= float(cfg.get('swap_alert_gb', 16)) or len(mem) < 2:
+        return None
+    p = mem[-2]
+    if p.get('host') != e.get('host') or any(k not in x for x in (p, e) for k in ('pswpin', 'pswpout')):
+        return None                     # job_sim.pbs without the counters (jobs started before 24 Nov 2026)
+    dt = float(e.get('t', 0)) - float(p.get('t', 0))
+    pages = (int(e['pswpin']) - int(p['pswpin'])) + (int(e['pswpout']) - int(p['pswpout']))
+    if dt <= 0 or pages < 0:
+        return None
+    rate = pages * 4096 / dt / 1e6
+    if rate < float(cfg.get('swap_alert_mb_s', 1.0)):
+        return None
+    return ('swapping: %.1f MB/s in+out of swap over the last %.0f min, %.0f GB swap in use, %.1f GB memory available '
+            '(%s): the simulation and its drain may hang' % (rate, dt / 60, swap, avail, when))
 
 
 def read_plan(path):
@@ -1347,12 +1379,9 @@ class Manager:
                                        % (sim['job'], cur[0], cur[1]))
         mem = [e for e in run.ev if e['ev'] == 'node_mem' and e['job'] == sim['job']]
         if mem:
-            e = mem[-1]
-            swap = float(e.get('swap_used_mb') or 0) / 1024
-            if swap > float(self.cfg.get('swap_alert_gb', 16)):
-                out['swap'] = ('job %s on %s: %.0f GB of swap in use, %.1f GB memory available (%s): the node is '
-                               'swapping; the simulation and its drain may hang' % (
-                                   sim['job'], e.get('host'), swap, float(e.get('avail_mb') or 0) / 1024, e.get('time', '')[:16]))
+            msg = swap_alert(mem, self.cfg)
+            if msg:
+                out['swap'] = 'job %s on %s: %s' % (sim['job'], mem[-1].get('host'), msg)
         return out
 
     def load_queues(self):
