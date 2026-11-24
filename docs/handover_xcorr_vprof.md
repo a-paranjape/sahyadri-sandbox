@@ -75,6 +75,9 @@ phi_R3Mpch, phi_R5Mpch` (smoothed grid). Snapshot 100 is z = 0.
 
 Each script has a full docstring (usage, options, algorithm, output format): read it first.
 
+Code fixes of 24-25 Nov in the older post-processing modules (correlations, readers, compression, postprocess) are
+listed in section 16.4 of the pipeline guide; the API reference of every module is in `docs/api/README.md`.
+
 | Tool | Script | PBS stage | Guide section (`docs/pkdgrav3_pipeline_pawna.md`) |
 |---|---|---|---|
 | Halo-halo potential cross-correlation (mean diff, structure function, covariance of phi between mass bins vs r) | `scripts/post-process/halo_potential_xcorr.py` (+ `halo_pair_sums.c`) | `scripts/pkdgrav3_pipeline/job_xcorr.pbs` | 12 |

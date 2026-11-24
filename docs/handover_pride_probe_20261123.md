@@ -1,5 +1,15 @@
 # Handover: pride / leap / flock / raft probe (session in worktree sahyadri-sandbox-pride, 20–23 Nov 2026)
 
+> **Status 25 Nov 2026.** `pride-probe` has been merged into `run-manager` (891d42d). The guide, section 16 of
+> [pkdgrav3_pipeline_pawna.md](pkdgrav3_pipeline_pawna.md), describes the merged state.
+>
+> - **leap r100:** the first job, 945009, failed on 24 Nov: `leap/env_leap.sh` was missing after the leap install
+>   was switched to run-manager.
+> - **Restart:** r100 was set up again with the production settings (integer positions) and resubmitted as
+>   **945011.leap**, running since 25 Nov 00:08.
+> - **Installs:** both the leap and pride installs are now on run-manager.
+> - **Out of date below:** the 'not merged' and 'do not switch' statements no longer apply.
+
 These notes hand the probe over to the session that manages the full programme (worktree ../sahyadri-sandbox, branch
 run-manager). Everything here is on branch `pride-probe` (pushed; HEAD 1261a53). The branch is **not merged** into run-manager.
 Merging needs the user's approval. The project memory file `pride-probe-brief.md` has the same facts in short form.

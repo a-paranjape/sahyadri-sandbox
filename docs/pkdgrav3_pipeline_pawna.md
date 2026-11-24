@@ -1131,9 +1131,96 @@ tree: `/var/tmp` when `df` shows room, else `$HALO_DIR/.fits_tmp_<job>`); parque
 ### 15.5 Deploying code changes to the sites
 
 The manager and the jobs run the code of each site's install (`/user/shadab/sahyadri_prod/sahyadri-sandbox`,
-`/user1/shadab/sahyadri_pipeline/sahyadri-sandbox`, `~/sahyadri_pipeline/sahyadri-sandbox` on pegasus).
+`/user1/shadab/sahyadri_pipeline/sahyadri-sandbox`, `~/sahyadri_pipeline/sahyadri-sandbox` on pegasus,
+`/user1/shadab/sahyadri_pride/sahyadri-sandbox` on pride, `/user1/shadab/sahyadri_c7/sahyadri-sandbox` on leap). Every
+install stays on branch `run-manager` (`git pull --ff-only`): switching an install to another branch removes the files
+only that branch has, and the next job of that site fails (leap r100 945009, 24 Nov 2026: `leap/env_leap.sh` missing
+after the leap install was switched from pride-probe to run-manager before the merge).
 Pull there only while no vahc, fits or parquet job of that site is running: `run_addvalue.py` starts a new Python
 process per snapshot, which loads the new module with the old job's arguments (this broke a running vahc job once,
 19 Nov). Jobs already queued keep the job script they were submitted with (PBS copies it at `qsub`). After editing
 a `run.conf`, reload it in the manager (`reload_conf`); for a swarm/pegasus run refresh the mirror config first
 (`manager.mirror_conf`).
+
+## 16. TIFR sites pride and leap (merged into run-manager 25 Nov 2026)
+
+Branch `pride-probe` (probe of the TIFR theory clusters, 20–23 Nov; notes in
+[handover_pride_probe_20261123.md](handover_pride_probe_20261123.md)) was merged into `run-manager` on 25 Nov 2026.
+Only site-specific code came with it; the production settings of pawna, swarm and pegasus are unchanged, and the
+run-manager production defaults (integer positions `bMemIntegerPosition`, `SIM_CHK_BPP`, memory model, watchdog,
+swap alert) now apply to pride and leap as well.
+
+### 16.1 The sites
+
+| | pride | leap |
+|---|---|---|
+| Login | `shadab@pride.theory.tifr.res.in` | `shadab@leap.theory.tifr.res.in` |
+| Nodes | 16 × 20 Haswell (E5-2660 v3, AVX2), ~252 GB (one 189, one 220); 1 GbE | 12 × 32 Skylake (Gold 6142), 187 GB; 100 Gb/s hfi1 (Omni-Path) |
+| OS | Ubuntu, gcc 11 | CentOS 7: glibc 2.17, bash 4.2, kernel 3.10 |
+| PBS | `workq`, 72 h; compute nodes cannot qsub | `workq`, 72 h; compute nodes cannot qsub |
+| Install | `install_production.sh pride` → `/user1/shadab/sahyadri_pride/{codes,pkdgrav3_io,sahyadri-sandbox}` (pkdgrav3 for Haswell) | `leap/build_c7.sh` → `/user1/shadab/sahyadri_c7/{pkdgrav3_io,sahyadri-sandbox}` (glibc-2.17 conda env, skylake-avx512); Python steps use pride's venv |
+| Scratch | `/user1/shadab/sahyadri_scratch_pride` | `/user1/shadab/sahyadri_scratch_leap` |
+| Run-time env | `pride/env_pride.sh` | `leap/env_leap.sh`: `--mca pml ucx`, `UCX_TLS=rc_verbs,ud_verbs,self,sm`, `UCX_NET_DEVICES=hfi1_0:1`; `leap/ssh_noconda` |
+| Use | halo stages; simulations up to 1024^3 | 2048^3 simulation on 6 nodes; no halo stages (Rockstar etc. not built for glibc 2.17) |
+
+Both share swarm's Lustre `/user1` (read-only for anything of swarm's). The pawna manager has `sites.pride` and
+`sites.leap` in its code defaults (`~/.sahyadri_mgr/config.json` overrides them; leap: `max_sim_restarts 15`), and
+`queues.txt` has `leap workq open`.
+
+### 16.2 Resources (`setup_production.py --site pride|leap`)
+
+| Stage (2048^3) | pride (`resources_pride`) | leap (`resources_leap`) |
+|---|---|---|
+| sim | 5 × 20 cores, 230 GB, 72 h (untested over 1 GbE; not recommended) | 6 × 32 cores, 175 GB each, 72 h, 2 ranks per node, `place=scatter:excl`, nodes named by `SIM_SELECT` |
+| rockstar | 20 writers per node, nodes from the Rockstar memory estimate (≤ 240 GB each) | (not installed) |
+| ctrees | 20 cores, 128 GB | – |
+| vahc | 20 cores, 245 GB, 2 snapshots at a time (measured peak 238.9 GB PSS, grid 1024) | – |
+| fits | 16 cores, 160 GB, 24 h | – |
+
+**leap `SIM_SELECT`.** PBS cannot leave a node out, so a multi-node simulation names its nodes: the first `SIM_NODES` of
+`LEAP_FABRIC_NODES` (compute-4-2, 4-4, 4-5, 4-6, 4-8, 4-9, 4-11, 4-12: an active hfi1 port on 22 Nov; 4-3 has its port
+down, 4-7 is down). Restarts reuse it; if a named node goes down, edit `SIM_SELECT` in `run.conf` (or update
+`LEAP_FABRIC_NODES` and rerun `setup_production.py ... --force`), then refresh the manager's mirror config and reload.
+
+Measured simulation speed (512^3 L200 restart, 2 ranks/node, s/step): leap 34.3 (1 node), 20.0 (2), 10.5 (4),
+7.8 (6); pride 63.3, 40.7, 25.5 (1, 2, 4); swarm 22–24.5 (1 × 32 cores). Pride 2048^3 post-processing test: Rockstar
+~57 min per snapshot on 3 nodes, vahc ~75 min per snapshot (2 at a time), consistent-trees 43 GB.
+
+### 16.3 leap r100 (2048^3, seed 471913)
+
+- **Set up:** 22 Nov. **Approved:** 23 Nov. **First submission:** 945009, started 24 Nov 19:10. It failed after 20 s
+  (`env_leap.sh: No such file or directory`, pkdgrav3 exit 255, no output written) because the leap install had been
+  switched to run-manager before the merge (section 15.5).
+- **25 Nov:**
+  - Leap install updated to the merged run-manager (88065e3).
+  - r100's configuration rewritten with the current production settings:
+    `setup_production.py --site leap --L 200 --N 2048 --cosmo default --real 100 --force`.
+  - The only changes: `bMemIntegerPosition = True` in `p.par` and `SIM_CHK_BPP=36` in `run.conf`. Steps, outputs,
+    seed and resources are the same. The old files are in `r100/config_before_20261125/`.
+  - Manager: mirror config refreshed (`manager.mirror_conf`), `reload_conf`, `retry` (acknowledges 945009),
+    `submit_sim` → **945011.leap**, running since 25 Nov 00:08 on compute-4-2, 4-4, 4-5, 4-6, 4-8, 4-9. Log:
+    `/user/shadab/r5_rescue/restart_r100_leap.log` on pawna.
+- **Expected:** about 1.1–1.4 × swarm's s/step and about 10 72-hour jobs. The manager restarts it from the newest
+  checkpoint (at most 15 times).
+- **Halo stages:** not decided yet. Options: run them on pride (same `/user1`) with a second run.conf, or add a
+  separate post-processing site per run to the manager.
+
+### 16.4 Code fixes, 24–25 Nov 2026 (post-processing)
+
+Found by pyflakes and smoke tests while documenting the code (API reference: [docs/api](api/README.md)). Each name
+below was undefined or never set, so the line raised an error whenever it ran:
+- `readers.SnapshotReader.hdf5_to_json`
+- `compression12bit.compress_integer_array` (the automatic bit depth)
+- `Nbody_Compression.print_this`
+- `correlations.PowerSpectrum.wtd_ngp_field`, used by `voronoi_web` for the Voronoi volume functions: three missing
+  names, and `ndata` is now passed as `c_long`
+- `postprocess.py`: `int_`; and the switched-off VVF writer that used an undefined `stats`, now removed
+- `submit_CiPod.sh`: `SCRATH_DIR`
+
+`correlations.density_field` and `wtd_ngp_field` also checked positions with `np.any(pos) < 0.0`, which is never
+true. They now raise ValueError for a negative position.
+
+The fixed functions above are not used by the pkdgrav3 production stages. The exception is `density_field`:
+`run_addvalue.py` and `pk_measure.py` call it, but only with positions already wrapped into [0, L). The halo positions
+go through `% Lbox` in `readers.HaloReader`, and the particle positions are decoded into [0, L). So the new check does
+not change their results.
