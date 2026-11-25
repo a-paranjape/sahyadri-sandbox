@@ -450,6 +450,33 @@ Output lines "t_s nproc pss_kb rss_kb"; peaks shorter than the interval can be m
 pawna puts all PBS jobs in one cgroup (/system.slice/pbs.service), so there is no per-job memory.peak.
 ```
 
+## `scripts/pkdgrav3_pipeline/node_check.sh`
+
+Source: [node_check.sh](../../scripts/pkdgrav3_pipeline/node_check.sh)
+
+```text
+Health check of the node it runs on, before a pipeline job starts (pipeline_env.sh) and as the run manager's
+periodic probe (tools/sahyadri_manager, `ssh <node> bash -s -- ARGS < node_check.sh`: the script comes over
+stdin, so a hung /user does not stop it from being read). Takes ~15 s; no probe can block it (each runs in the
+background with a deadline). Problems seen on pawna (Nov 2026) that it detects:
+  bad   (the job should not start here):
+    io        a small write + fsync + read on each --paths directory (NFS /user, /storage) not done in --io-s (20 s)
+    pressure  memory pressure "full" avg60 > --psi (20 %): all tasks stalled on memory (node1: ~90 % with idle CPUs)
+    mem       MemAvailable < --mem GB (the job's request; page cache that cannot be dropped counts as used)
+    tmp       free space in --tmpdir < --tmp GB (staging of checkpoints and snapshots, Rockstar local output)
+  warn  (shown, the job still starts):
+    writeback Writeback in /proc/meminfo > 0 kB and unchanged over 3 samples 5 s apart: an NFS commit that never
+              completes (kworker flush-0:5x in D state). On node1 (23-25 Nov) it came with the hang that stopped
+              every job; on nodes 2 and 4 (since 20 Nov) the other I/O still works (drains at 34 MB/s). Reboot due
+    dstate    processes in D state for more than 10 min (hung root cron `sync` on nodes 1, 2, 4 since 20 Nov)
+    tmp_low   free space in --tmpdir < --tmp-warn GB
+Also lists this user's directories in --tmpdir (<user>_stage_*, <user>_rockstar_*) with their size, so that
+leftovers of killed jobs can be found (the manager decides which are not in use).
+usage: node_check.sh [--paths "DIR ..."] [--mem GB] [--tmp GB] [--tmp-warn GB] [--tmpdir /var/tmp] [--psi 20]
+                     [--io-s 20] [--user USER]
+Output: a summary on stderr and, last on stdout, `NODECHECK {json}`. Exit 0 (ok or warn) or 3 (bad).
+```
+
 ## `scripts/pkdgrav3_pipeline/pipeline_env.sh`
 
 Source: [pipeline_env.sh](../../scripts/pkdgrav3_pipeline/pipeline_env.sh)

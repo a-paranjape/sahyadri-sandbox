@@ -1873,8 +1873,9 @@ class Manager:
                 return 'stage set aside', False, 'set aside by job %s (not drained: may hold the only copy of outputs)' % m.group(3)
             for run in self.runs.values():
                 if run.site == LOCAL and '%s_r%s' % (run.E.get('STEM', '').replace('/', '_'), run.E.get('REAL')) == m.group(1):
-                    on = [j for j in self.qjobs.values() if j.get('node') == host and j.get('state') in ('R', 'E')
-                          and (j.get('name') or '') == 'sim_%s' % run.E.get('REAL')]
+                    ids = {x['job'] for x in run.ms.get('submitted', []) if x.get('stage') == 'sim'}
+                    on = [i for i in ids if (self.qjobs.get(i) or {}).get('node') == host
+                          and self.qjobs[i].get('state') in ('R', 'E')]
                     return 'stage', bool(on), ('stage of %s (simulation running here)' % run.name if on else
                                                'stage of %s; no simulation of it here (check it holds nothing undrained)' % run.name)
             return 'stage', False, 'stage of an unknown run'
