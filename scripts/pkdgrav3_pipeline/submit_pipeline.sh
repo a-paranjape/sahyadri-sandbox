@@ -10,19 +10,20 @@
 #   (tools/sahyadri_manager submits them itself)
 # Rockstar batch: --stages rockstar --rs-snaps A-B (snapshots A..B, see job_rockstar.pbs)
 #
-# usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits,parquet] [--after JOBID] [--hold] [--restart CHK] [--wall HH:MM:SS] [--dry-run]
+# usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits,parquet] [--after JOBID] [--hold] [--restart CHK] [--wall HH:MM:SS] [--host NODE] [--dry-run]
 #   --stages  any subset, in pipeline order (e.g. "ctrees,vahc,fits" to redo the later stages)
 #   --after   make the first stage wait for an existing job (afterok), e.g. a running simulation
 #   --hold    submit the first job held (qrls <id> to start the chain)
 #   --restart CHK  the sim stage continues from checkpoint CHK (latest = newest $SIM_DIR/checkpoints/*.chk)
 #   --wall    wall time of every stage at most HH:MM:SS (the run manager before a maintenance window; a simulation
 #             is stopped before it with a STOP file, its iWallRunTime in the parameter file stays as it is)
+#   --host    run every (single-node) stage on node NODE (the run manager, to avoid a node that failed its check)
 #   --dry-run print the qsub commands only
 # Prints the job ids; the chain is also written to $LOGS/chain.<run>.<date>.txt.
 set -eu
 [ $# -ge 1 ] || { sed -n '2,12p' "$0"; exit 1; }
 CONF=$(readlink -f "$1"); shift
-STAGES=sim,rockstar,ctrees,vahc,fits,parquet; AFTER=; HOLD=; DRY=; RESTART=; RSSNAPS=; WALLCAP=
+STAGES=sim,rockstar,ctrees,vahc,fits,parquet; AFTER=; HOLD=; DRY=; RESTART=; RSSNAPS=; WALLCAP=; HOSTPIN=
 while [ $# -gt 0 ]; do
   case $1 in
     --stages) STAGES=$2; shift 2 ;;
@@ -32,6 +33,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1; shift ;;
     --rs-snaps) RSSNAPS=$2; shift 2 ;;
     --wall) WALLCAP=$2; shift 2 ;;
+    --host) HOSTPIN=$2; shift 2 ;;
     *) echo "unknown option $1"; exit 1 ;;
   esac
 done
@@ -77,6 +79,7 @@ for st in sim rockstar ctrees vahc vpot fits parquet xcorr ximult vprof verify a
     verify)   R="select=1:ncpus=${VF_NCPU:-8}:mem=${VF_MEM:-32gb}"; W=${VF_WALL:-12:00:00} ;;
     archive)  R="select=1:ncpus=${AR_NCPU:-2}:mem=${AR_MEM:-8gb}"; W=${AR_WALL:-72:00:00} ;;
   esac
+  if [ -n "$HOSTPIN" ] && [[ $R == select=1:* ]] && [[ $R != *host=* ]]; then R="select=1:host=$HOSTPIN:${R#select=1:}"; fi
   if [ -n "$WALLCAP" ]; then      # HH[:MM[:SS]] -> seconds, keep the shorter
     tos() { local IFS=:; set -- $1; echo $(( 10#${1:-0} * 3600 + 10#${2:-0} * 60 + 10#${3:-0} )); }
     [ "$(tos "$WALLCAP")" -lt "$(tos "$W")" ] && W=$WALLCAP

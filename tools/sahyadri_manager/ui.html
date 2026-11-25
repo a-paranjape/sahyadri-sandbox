@@ -73,6 +73,7 @@ section[data-tab] { display: none; } section[data-tab].on { display: block; }
   <section data-tab="summary">
     <div class="card" id="summarycard"></div>
     <div class="card" id="queuecard"></div>
+    <div class="card" id="nodescard"></div>
     <details class="card" open><summary>Manager log</summary><pre id="mlog"></pre></details>
   </section>
   <section data-tab="active"><div id="runs-active"></div></section>
@@ -256,6 +257,33 @@ async function delRun(name){
   act({run:name, action:'delete_run', confirm:name});
 }
 function postproc(name,what){ if(confirm('Submit post-processing "'+what+'" for '+name+'?')) act({run:name, action:'postprocess', what:what}); }
+function setProbe(){ const v=document.getElementById('probemin').value.trim(); if(v!=='') act({action:'set_limits', node_probe_min:v}); }
+function delLeftover(host,dir){ const b=dir.split('/').pop(); const t=prompt('Delete '+host+':'+dir+' ?\nThis cannot be undone. Type the directory name to confirm:\n'+b, ''); if(t!==null) act({action:'delete_leftover', host:host, dir:dir, confirm:t.trim()}); }
+function nodesCard(){
+  const N=S.nodes||[];
+  const badge=st=>`<span class="badge ${st==='ok'?'b-ok':st==='warn'||st==='not probed'?'b-wait':'b-bad'}">${h(st)}</span>`;
+  const rows=N.map(n=>{ const p=n.pbs||{}; const wb=n.writeback_kb||[];
+    return `<tr><td><b>${h(n.host)}</b></td><td>${badge(n.status||'?')}${n.avoided?' <span class="badge b-bad" title="'+h(n.avoided)+'">avoided</span>':''}</td>
+      <td class="small">${h(p.state||n.pbs_state||'')}${p.ncpus_free!=null?' · '+p.ncpus_free+' cores, '+Math.round(p.mem_free_gb)+' GB free':''}</td>
+      <td class="num">${n.psi_full60!=null?n.psi_full60+' %':''}</td><td class="num">${wb.length?wb.join('/')+' kB':''}</td>
+      <td class="num">${n.memavail_gb!=null?n.memavail_gb+' GB':''}</td><td class="num">${n.tmp_free_gb!=null?n.tmp_free_gb+' GB':''}</td>
+      <td class="num">${n.dstate!=null?n.dstate:''}</td><td class="small">${Object.values(n.io_ms||{}).map(x=>x<0?'<b style="color:var(--bad)">hung</b>':x+' ms').join(', ')}</td>
+      <td class="small muted">${ago(n.t)}</td></tr>
+      ${(n.bad||[]).concat(n.warn||[]).length||n.avoided?`<tr><td></td><td colspan="9" class="small">${(n.bad||[]).map(x=>'<div style="color:var(--bad)">'+h(x)+'</div>').join('')}${(n.warn||[]).map(x=>'<div class="muted">'+h(x)+'</div>').join('')}${n.avoided?'<div style="color:var(--bad)">avoided: '+h(n.avoided)+'</div>':''}</td></tr>`:''}`; }).join('');
+  const dirs=N.flatMap(n=>(n.dirs||[]).map(d=>Object.assign({host:n.host},d)));
+  const drows=dirs.map(d=>`<tr><td>${h(d.host)}</td><td class="small">${h(d.dir)}</td><td class="num">${d.gb>=0?d.gb+' GB':'?'}</td><td class="small">${ago(d.mtime)}</td>
+      <td class="small">${h(d.kind)}${d.in_use?' · <b>in use</b>':''}</td><td class="small muted">${h(d.note||'')}</td>
+      <td>${d.deleting?'<span class="muted small">deleting…</span>':d.in_use?'':`<button onclick="delLeftover('${h(d.host)}','${h(d.dir)}')">delete</button>`}</td></tr>`).join('');
+  const editing=document.activeElement&&document.activeElement.id==='probemin';
+  if(editing) return;
+  document.getElementById('nodescard').innerHTML=`<div class="row"><b>Nodes</b> <b>${h(S.local_site||'')}</b>
+    <span class="muted small">node_check.sh over ssh: I/O on /user and /storage, stuck writeback, memory pressure, D state, /var/tmp · a bad node is avoided (jobs pinned to a healthy one) · next probe ${S.node_probe_next>0?ago(S.node_probe_next):S.node_probe_min>0?'soon':'off'}</span><span class="sp"></span>
+    <label class="small">probe every <input id="probemin" value="${h(S.node_probe_min)}" style="width:45px" type="text"> min (0 = off)</label>
+    <button onclick="setProbe()">Save</button><button onclick="act({action:'probe_nodes'})">Probe now</button></div>
+    ${rows?`<table style="margin-top:6px"><tr><th>node</th><th>health</th><th>PBS</th><th class="num">mem pressure</th><th class="num">writeback</th><th class="num">mem available</th><th class="num">/var/tmp free</th><th class="num">D &gt;10 min</th><th>I/O probe</th><th>checked</th></tr>${rows}</table>`:'<div class="muted small" style="margin-top:6px">not probed yet</div>'}
+    <div style="margin-top:10px"><b>Our directories in /var/tmp</b> <span class="muted small">staging and Rockstar output; leftovers of ended jobs can be deleted (type the name to confirm)</span>
+    ${drows?`<table style="margin-top:4px"><tr><th>node</th><th>directory</th><th class="num">size</th><th>changed</th><th>kind</th><th></th><th></th></tr>${drows}</table>`:'<div class="muted small">none</div>'}</div>`;
+}
 function setQueue(site,q,st){ if(confirm('Set queue '+site+':'+q+' to '+st+'?')) act({action:'set_queue', site:site, queue:q, state:st}); }
 function purge(name){
   const t=prompt('Permanently delete the trash of '+name+'?\nThe archive copy stays. Type the run name to confirm:');
@@ -317,6 +345,7 @@ function render(){
      ${lim('max_sim_running','max running')}${lim('max_sim_queued','max waiting in PBS')}${lim('max_sim_restarts','restarts')}${lim('max_rockstar','Rockstar at once')}${lim('scratch_reserve_gb','reserve GB',70)}
      <button onclick="setLimits()">Save limits</button></div>${siteRows}</div>
      ${q?`<table style="margin-top:8px"><tr><th>#</th><th>site</th><th>queue</th><th>run</th><th></th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${q}</table>`:'<div class="muted small" style="margin-top:6px">no simulations scheduled</div>'}`;
+  nodesCard();
   renderTabs();
   document.getElementById('mlog').textContent = (S.log||[]).join('');
 }

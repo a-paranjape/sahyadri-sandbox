@@ -65,6 +65,7 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
 
 ## Contents
 
+- [`mem_gb`](#mem_gb) - PBS memory `700gb` / `792078740kb` / `1tb` -&gt; GB (float); 0 if not understood.
 - [`post_of`](#post_of) - Post-processing stages of a run, in order: with PARQUET=1 in run.conf, stage parquet (Parquet copy of the FITS, archived and verified with them) between fits and verify.
 - [`scratch_estimate`](#scratch_estimate) - Bytes a run will occupy in SCRATCH at most (before its deletion is approved): every snapshot in full (10.5 B/particle measured with the potential at z &lt;= 0.5: 128^3 and 512^3 runs), SIM\_KEEPCHK checkpoints (SIM\_CHK\_BPP: 48 B/particle, 36 with integer positions), halo catalogues/trees/FITS (~0.5 of the snapshots at 64^3, a small fraction at large N; 0.15 used), plus 10 %.
 - [`archive_estimate`](#archive_estimate) - Bytes a run's archive will hold (retention plan): full snapshots 10.5 B/particle each, the other outputs at the subsample fractions of that, halo catalogues + trees as FITS 106 B/particle and as Parquet 88 B/particle more, 48 B/particle with the checkpoint. Calibrated on today's 512^3 archives (L200/L500/L1000: estimate 55.5 / 54 / 52 GB, archived 53.0 / 54.1 / 48.9 GB; halo products from L200, the largest).
@@ -87,6 +88,7 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
 - [`read_queues`](#read_queues) - queues.txt -&gt; ({(site, queue): dict(state, max\_running, max\_waiting, lineno)}, [errors]). Columns: site queue state [max\_running|-] [max\_waiting|-] [# comment]. A queue not listed is open, without limits of its own.
 - [`set_queue_state`](#set_queue_state) - Rewrite the state column of site/queue in queues.txt (appends a line when the queue is not listed).
 - [`class MaintWait`](#class-maintwait) - A submission refused because of a maintenance window of the site (the message says which and why).
+- [`class NodeWait`](#class-nodewait) - A submission held back: bad nodes are usable in PBS and no healthy node has room for the job now.
 - [`parse_when`](#parse_when) - `YYYY-MM-DDTHH:MM` (or with a space or `_` instead of `T`; local time) -&gt; epoch seconds.
 - [`read_maint`](#read_maint) - maintenance.txt -&gt; ({site: [dict(start, end, note, lineno)] sorted by start}, [errors]).
 - [`set_maint`](#set_maint) - Add a window `site start end` to maintenance.txt, or (`start` None) remove all lines of `site`.
@@ -101,13 +103,21 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
 - [`jtime`](#jtime) - When a job was submitted (the manager's clock), else started: orders PBS jobs and head-node processes (L&lt;epoch&gt;) alike, which job numbers cannot.
 - [`jobnum`](#jobnum) - PBS job number; local processes (archive pulls) are 'L&lt;epoch&gt;'.
 - [`short`](#short) - PBS job id without the server suffix: `'2539127.pawna'` -&gt; `'2539127'`.
-- [`class Run`](#class-run) - 
+- [`class Run`](#class-run) - One simulation realisation known to the manager, described by its run.conf.
 - [`class Manager`](#class-manager) - The run manager: one process that watches all runs, submits their pipeline stages and serves the page.
 - [`_sigterm`](#_sigterm) - SIGTERM handler: turn the signal into KeyboardInterrupt so `serve` shuts down cleanly.
 - [`class UnixHTTPServer`](#class-unixhttpserver) - Threaded HTTP server on a unix socket (the page is reached through an ssh-forwarded socket).
 - [`class Handler`](#class-handler) - HTTP handler of the manager page: `/` (ui.html), `/api/state` (JSON snapshot), `/api/file` (P(k) plots of registered runs) and POST `/api/action` (requires header `X-Sahyadri: 1`).
 - [`call`](#call) - Send an action to the running manager (its socket), as the page does.
 - [`main`](#main) - Command line: `serve`, `add <conf>` / `add site:/conf`, and the CLI actions (see the module docstring for the full list).
+
+## mem_gb
+
+```python
+mem_gb(text)
+```
+
+PBS memory `700gb` / `792078740kb` / `1tb` -&gt; GB (float); 0 if not understood.
 
 ## post_of
 
@@ -383,6 +393,14 @@ class MaintWait(Exception)
 
 A submission refused because of a maintenance window of the site (the message says which and why).
 
+## class NodeWait
+
+```python
+class NodeWait(MaintWait)
+```
+
+A submission held back: bad nodes are usable in PBS and no healthy node has room for the job now.
+
 ## parse_when
 
 ```python
@@ -508,7 +526,13 @@ PBS job id without the server suffix: `'2539127.pawna'` -&gt; `'2539127'`.
 class Run
 ```
 
-_No docstring._
+One simulation realisation known to the manager, described by its run.conf.
+
+Holds the configuration (`E`), the derived paths (`P`, from `retention.paths`), the manager's own state
+file `ms` (paused, scheduled, failed, trash, acknowledged jobs, action history), the events written by the
+pipeline jobs (`state/events/*.jsonl`) and caches of the simulation progress. `derive` turns events and the
+PBS queue into the run's current status; `submit` starts pipeline stages. Remote runs (another site) keep a
+local mirror of their state directory and are submitted over ssh.
 
 ### Run.__init__
 
@@ -809,6 +833,96 @@ Watchdog for one simulation job: returns alerts for a stalled job and for memory
 A job is stalled when its own log `run.<job>.log` has not changed for `max(sim_stall_s,
 sim_stall_steps / rate)` (catches a hang before the first step), and alerts on swap activity or low memory
 from the job's `node_mem` events (`swap_alert`).
+
+### Manager.pbs_nodes
+
+```python
+pbs_nodes(self, max_age=60)
+```
+
+`pbsnodes -a -F json` -&gt; {host: dict(state, usable, ncpus\_free, mem\_free\_gb, jobs)}, cached `max_age` s.
+
+### Manager.probe_loop
+
+```python
+probe_loop(self)
+```
+
+Thread: probe the nodes every `node_probe_min` minutes (0: only on request, the page's "probe now").
+
+### Manager.probe_one
+
+```python
+probe_one(self, host, args)
+```
+
+node\_check.sh on `host` over ssh (script on stdin); its JSON result, or a 'bad' result if no answer.
+
+### Manager.probe_nodes
+
+```python
+probe_nodes(self)
+```
+
+Probe every compute node PBS lists (in parallel threads) and keep the results in `self.nodes`;
+log changes of a node's status and clear a job's bad-node flag once a probe after it passes.
+
+### Manager.bad_nodes
+
+```python
+bad_nodes(self)
+```
+
+{host: reasons} of this site's nodes to avoid: the newest probe was bad (not older than 3 intervals or
+2 h), or a job's node check failed there within `node_bad_h` h (and no probe has passed since).
+
+### Manager.place
+
+```python
+place(self, run, stages)
+```
+
+Node for the job of `stages` of a run here when bad nodes are usable in PBS: the healthy node with room
+(cores and memory free now) with the most free cores; None when no bad node is usable (PBS chooses);
+NodeWait when no healthy node has room (submitted at a later pass). Remote runs and multi-node jobs: None.
+
+### Manager.node_bad_job
+
+```python
+node_bad_job(self, run, j, D)
+```
+
+A job that exited 75 (its node failed the check in pipeline\_env.sh): avoid that node and resubmit the job
+(a simulation is rescheduled, other stages retried automatically), at most `node_retry_max` times a day per
+run; returns True if the run's automation waits.
+
+### Manager.classify_dir
+
+```python
+classify_dir(self, host, d)
+```
+
+Kind of a directory of ours in a node's /var/tmp and whether a job uses it: (kind, in\_use, note).
+Rockstar output of a job still in PBS, or the stage of a run whose simulation runs on that node, is in use;
+the rest are leftovers of ended jobs.
+
+### Manager.nodes_view
+
+```python
+nodes_view(self)
+```
+
+Nodes for the page: probe result, PBS state, avoided or not (and why), our directories in /var/tmp.
+
+### Manager.delete_leftover
+
+```python
+delete_leftover(self, host, d, confirm)
+```
+
+Delete a leftover directory of ours in a node's /var/tmp (page button, the name typed as confirmation):
+only a &lt;user&gt;\_stage\_\* / &lt;user&gt;\_rockstar\_\* directory listed by the newest probe and not used by a job.
+`rm -rf` over ssh in a thread; the nodes are probed again afterwards.
 
 ### Manager.load_maint
 

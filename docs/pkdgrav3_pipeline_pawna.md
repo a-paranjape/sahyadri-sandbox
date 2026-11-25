@@ -1264,3 +1264,29 @@ State on Wed 25 Nov, 12:00 IST (qstat on pawna and swarm; steps from the run log
 | leap r100 | leap, 945011 (6 nodes, 72 h wall) | step 22 at 12:50 Wed (~35 min/step) | STOP Fri 06:00 (`maint_stop_h` 2 h; checkpoint straight to Lustre); restarts after 20:30 |
 | pride | | no jobs | nothing submitted 08:00-20:30 |
 | pegasus runs | | not affected | jobs keep running; while pawna is down nothing is submitted for them |
+
+## 18. Node health checks, leftovers and checkpoint checks (25 Nov 2026)
+
+These follow the node1 incident (sections 16 and 17). The full description is in `tools/sahyadri_manager/README.md` (Node health):
+
+1. **The job checks its node** (`scripts/pkdgrav3_pipeline/node_check.sh`, called by `pipeline_env.sh` in every
+   PBS job on pawna). A bad node means the job exits 75 before doing anything. The manager then avoids the node and
+   resubmits the job elsewhere.
+2. **The manager handles bad nodes:** it avoids the node for 6 h or until a probe passes, and pins new jobs to a
+   healthy node with room (`submit_pipeline.sh --host`).
+3. **Periodic probe** of all nodes by the manager, every `node_probe_min` minutes, set on the page (Summary, Nodes).
+4. **Leftovers** in the nodes' `/var/tmp` are listed on the page and deleted with a button and a typed
+   confirmation. A restart also takes the newest *complete* checkpoint (`chk_skipped` otherwise).
+
+First probe of all four nodes (25 Nov, 16:25 IST, `node_check.sh` over ssh from pawna):
+
+| Node | Result | Details |
+|---|---|---|
+| node1 | ok | rebooted 15:36; r4 restart 2539173 loading (MemAvailable 31 GB); leftovers `shadab_rockstar_2539124` 450 GB, `shadab_rockstar_2539163` 327 GB |
+| node2 | warn | Writeback 824 kB unchanged, `flush-0:56` (`/user`) in D state for 5.3 d, 30 hung `sync`; r5's drain still copies at 34 MB/s |
+| node3 | ok | |
+| node4 | warn | Writeback 3240 kB unchanged, `flush-0:58` (`/user`) and a `python3` in `wait_on_commit` for 5.2 d, 30 hung `sync` |
+
+A stuck Writeback alone is a warning, not a reason to avoid the node. On nodes 2 and 4 the rest of the I/O still
+works. On node1 the same symptom came with the memory pressure and I/O hang that stopped every job. Nodes 2 and 4
+need the reboot of 27 Nov.

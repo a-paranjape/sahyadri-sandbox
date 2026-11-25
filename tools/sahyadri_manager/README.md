@@ -131,6 +131,45 @@ node running them):
 When pawna itself is down the manager stops with it; start it again after the reboot
 (`start_manager.sh start`), it then catches up as described.
 
+## Node health (pawna compute nodes)
+
+pawna's nodes can be degraded in ways that only show up hours later as a stalled job: an NFS client that hangs
+(node1, 23-25 Nov 2026: memory pressure "full" ~90 %, Writeback stuck, a kernel flush thread in D state; the r4
+restart and two Rockstar batches stalled), commits that never complete (nodes 2 and 4 since 20 Nov, other I/O still
+working), or a local disk filled by what killed jobs left in `/var/tmp`. `scripts/pkdgrav3_pipeline/node_check.sh`
+checks a node in ~15 s, with no probe able to block it:
+
+| Result | Check |
+|---|---|
+| bad | write + fsync + read of a small file on `/user` (the run's state directory) and `/storage` not done in 20 s; memory pressure full avg60 > 20 %; MemAvailable below 90 % of the job's memory request; `/var/tmp` free space below what the job needs (staged 2048^3 checkpoint ~430 GB; Rockstar local output ~65 GB per 2048^3 snapshot, bad below half of that) |
+| warn | Writeback unchanged and > 0 over 10 s (a hung NFS commit; reboot due); processes in D state for more than 10 min; `/var/tmp` below the Rockstar estimate |
+
+It is used in three places:
+
+* **Every PBS job on pawna** runs it first (`pipeline_env.sh`; `NODE_CHECK=0` in run.conf turns it off, other sites
+  have it off unless `NODE_CHECK=1`). On a bad node the job writes a `node_bad` event and exits with code 75 before
+  touching anything. The manager does not count that as a failure: the node is avoided for `node_bad_h` (6) h or
+  until a probe passes, a simulation is scheduled again (not counted in `max_sim_restarts`), and any other stage is
+  resubmitted at once on another node. More than `node_retry_max` (3) such exits of one run in 24 h stop its
+  automation.
+* **The manager probes every node** that PBS lists over ssh every `node_probe_min` minutes (default 30, 0 = off).
+  Set this in the Summary tab's Nodes card ("probe every ... min", Save), which also has "Probe now". A node whose
+  newest probe is bad is avoided.
+* **Avoiding a node:** while a bad node is usable in PBS, the manager pins each new single-node job
+  (`submit_pipeline.sh --host`) to the healthy node with the most free cores that has the job's cores and memory
+  free. If none has, the job waits with the reason on the run's card. A node that is down or offline in PBS needs no
+  pinning.
+
+The Nodes card also lists our directories in each node's `/var/tmp` (staging, Rockstar output) with size, age and
+whether a job still uses them: Rockstar output of a job still in PBS, or the stage of a run whose simulation runs
+there. A leftover can be deleted with its button. You type the directory name to confirm, the manager checks it is
+not in use and runs `rm -rf` on the node. A stage set aside after a killed job (`*.left.<job>`) may hold outputs
+that were never drained; look before deleting it.
+
+Restarts take the newest *complete* checkpoint (`job_sim.pbs`): the restart file `.chk`, its `.pkl`, and as many
+non-empty data files `.chk.<i>` as `.chk.<i>.dec` files. An incomplete one is skipped (event `chk_skipped`) and the
+one before it is used. The `sim_rewind` that follows handles the outputs after it.
+
 ## Watchdog (alerts)
 
 Red **ALERT** lines on a run's card, also written to `manager.log` and the run's actions once when they start and

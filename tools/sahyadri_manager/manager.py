@@ -117,6 +117,11 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    # shutdown are resubmitted then instead of stopping the run's automation
                    maintenance_file=os.path.join(HOME, 'maintenance.txt'), maint_guard_min=30, maint_min_sim_h=4,
                    maint_stop_h=6, maint_settle_min=30,
+                   # node health (this site's compute nodes; scripts/pkdgrav3_pipeline/node_check.sh): probed over ssh
+                   # every node_probe_min minutes (0 = off; page: Nodes); a node that fails (probe or a job's own check,
+                   # exit 75) is avoided for node_bad_h hours or until a probe passes: jobs are pinned to a healthy node
+                   # with room; a run's job is resubmitted after a failed node check at most node_retry_max times a day
+                   node_probe_min=30, node_bad_h=6, node_retry_max=3, node_probe_paths=None,
                    scratch_root='/user/shadab/sahyadri_scratch',
                    sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
                                            scratch_root='/data/project/hpc2502016/shadab/sahyadri_scratch',
@@ -156,7 +161,9 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                                        mirror='/user/shadab/sahyadri_mirror/leap', sync_s=120,
                                        max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=0,
                                        scratch_reserve_gb=2000, max_pbs_queued=4)))
-LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s')
+LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s',
+              'node_probe_min')
+ZERO_OK = ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb', 'node_probe_min')   # limits that may be 0
 # max_pbs_queued: our jobs waiting in the site's PBS at most (pegasus queued_jobs_threshold: project 6, debug 2 per
 # user); with it, the post-processing stages are submitted one at a time, each after the previous one finished
 SITE_LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb',
@@ -167,6 +174,23 @@ STAGE_WALL = dict(sim=('SIM_WALL', '24:00:00'), rockstar=('RS_WALL', '12:00:00')
                   parquet=('PQ_WALL', '02:00:00'), xcorr=('XC_WALL', '24:00:00'), ximult=('XM_WALL', '06:00:00'),
                   vprof=('VPROF_WALL', '48:00:00'), verify=('VF_WALL', '12:00:00'), archive=('AR_WALL', '72:00:00'),
                   archb=('AR_WALL', '72:00:00'))
+# cores and memory of a stage's job (run.conf keys and submit_pipeline.sh defaults), for placing it on a node
+STAGE_RES = dict(sim=('SIM_NCPU', 'SIM_MEM', 192, '700gb'), rockstar=('RS_NCPU', 'RS_MEM', 64, '480gb'),
+                 ctrees=('CT_NCPU', 'CT_MEM', 2, '32gb'), vahc=('PP_NCPU', 'PP_MEM', 16, '400gb'),
+                 vpot=('PP_NCPU', 'PP_MEM', 16, '400gb'), fits=('FITS_NCPU', 'FITS_MEM', 16, '100gb'),
+                 parquet=('PQ_NCPU', 'PQ_MEM', 8, '16gb'), xcorr=('XC_NCPU', 'XC_MEM', 16, '16gb'),
+                 ximult=('XM_NCPU', 'XM_MEM', 32, '32gb'), vprof=('VPROF_NCPU', 'VPROF_MEM', 32, '160gb'),
+                 verify=('VF_NCPU', 'VF_MEM', 8, '32gb'))
+NODE_CHECK = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'node_check.sh')
+NODE_RC = 75     # exit code of a job whose node failed its check (pipeline_env.sh)
+
+
+def mem_gb(text):
+    """PBS memory ``700gb`` / ``792078740kb`` / ``1tb`` -> GB (float); 0 if not understood."""
+    m = re.match(r'^\s*(\d+(?:\.\d+)?)\s*([kmgt]?b)?\s*$', str(text or '').lower())
+    if not m:
+        return 0.0
+    return float(m.group(1)) * {'b': 2**-30, 'kb': 2**-20, 'mb': 2**-10, 'gb': 1, 'tb': 1024}[m.group(2) or 'b']
 MAINT_STOP_H_REMOTE = 2    # sites without node staging: the checkpoint goes straight to Lustre (minutes)
 POST = ['ctrees', 'vahc', 'fits', 'verify']
 
@@ -565,6 +589,10 @@ class MaintWait(Exception):
     """A submission refused because of a maintenance window of the site (the message says which and why)."""
 
 
+class NodeWait(MaintWait):
+    """A submission held back: bad nodes are usable in PBS and no healthy node has room for the job now."""
+
+
 def parse_when(text):
     """``YYYY-MM-DDTHH:MM`` (or with a space or ``_`` instead of ``T``; local time) -> epoch seconds."""
     return time.mktime(time.strptime(re.sub(r'[ _]', 'T', text.strip())[:16], '%Y-%m-%dT%H:%M'))
@@ -744,7 +772,6 @@ def short(job):
 
 # ====================================================================================================== one run
 class Run:
-    GATE = None      # Manager.maint_gate, set by the manager: every submission passes it
     """One simulation realisation known to the manager, described by its run.conf.
 
     Holds the configuration (``E``), the derived paths (``P``, from ``retention.paths``), the manager's own state
@@ -754,6 +781,8 @@ class Run:
     local mirror of their state directory and are submitted over ssh.
     """
     CFG = None          # the manager's configuration (sites), set by Manager.load_runs
+    GATE = None         # Manager.maint_gate, set by the manager: every submission passes it
+    PLACE = None        # Manager.place: the node for a job when some nodes are bad
 
     def __init__(self, conf, paused=False):
         """Load the run from ``conf`` (absolute path); ``paused`` marks a newly added run paused."""
@@ -1088,6 +1117,11 @@ class Run:
             if cap:
                 extra = list(extra) + ['--wall', cap]
                 what = dict(what or {}, wall_cap=cap)
+        if Run.PLACE and not (stages in ('archive', 'archb')) and '--host' not in extra:
+            host = Run.PLACE(self, stages)      # a healthy node when bad ones are usable in PBS (NodeWait if none)
+            if host:
+                extra = list(extra) + ['--host', host]
+                what = dict(what or {}, host=host)
         if stages in ('archive', 'archb') and (self.remote or (Run.CFG or {}).get('archive_on_head', True)):
             return self.start_pull(what, stage=stages)
         if self.remote:     # qsub on the site's login node, with the run's own run.conf there
@@ -1167,6 +1201,12 @@ class Manager:
                 log('%s: copied the template %s' % (p, t))
         self.queues, self.queue_errors, self.queues_mtime = {}, [], None
         self.maint_windows, self.maint_errors, self.maint_mtime = {}, [], None
+        self.nodes = {}            # this site's compute nodes: host -> newest node_check.sh result (+ pbs state)
+        self.node_flags = {}       # host -> dict(t, reasons, job, run): a job's node check failed there (exit 75)
+        self.pbsn, self.pbsn_t = {}, 0.0     # pbsnodes: host -> dict(state, ncpus_free, mem_free_gb)
+        self.probe_ev = threading.Event()
+        self.probe_next = 0.0
+        self.deleting = {}         # (host, dir) -> time a deletion of a leftover directory started
         self.q = queue.Queue()
         self.runs = {}
         self.qjobs, self.qtime, self.qok = {}, 0.0, None
@@ -1194,6 +1234,7 @@ class Manager:
         self.cfg = load_cfg()
         Run.CFG = self.cfg
         Run.GATE = self.maint_gate
+        Run.PLACE = self.place
         want = {r['conf']: r for r in self.cfg['runs']}
         for conf in list(self.runs):
             if conf not in want:
@@ -1653,6 +1694,243 @@ class Manager:
                 out['swap'] = 'job %s on %s: %s' % (sim['job'], mem[-1].get('host'), msg)
         return out
 
+    # ------------------------------------------------------------------ node health (this site's compute nodes)
+    def pbs_nodes(self, max_age=60):
+        """``pbsnodes -a -F json`` -> {host: dict(state, usable, ncpus_free, mem_free_gb, jobs)}, cached ``max_age`` s."""
+        if now() - self.pbsn_t < max_age and self.pbsn:
+            return self.pbsn
+        try:
+            r = subprocess.run([PBS + '/pbsnodes', '-a', '-F', 'json'], capture_output=True, text=True, timeout=60)
+            data = json.loads(r.stdout)['nodes']
+        except Exception as e:  # noqa: BLE001
+            log('pbsnodes: %s' % e)
+            return self.pbsn
+        out = {}
+        for h, n in data.items():
+            av, asg = n.get('resources_available', {}), n.get('resources_assigned', {})
+            st = n.get('state', '')
+            out[h] = dict(state=st, usable=not any(x in st for x in ('down', 'offline', 'unknown', 'unresolvable')),
+                          ncpus_free=int(av.get('ncpus', 0)) - int(asg.get('ncpus', 0)),
+                          mem_free_gb=mem_gb(av.get('mem')) - mem_gb(asg.get('mem')),
+                          jobs=sorted({short(j) for j in n.get('jobs', [])}), comment=n.get('comment', ''))
+        self.pbsn, self.pbsn_t = out, now()
+        return out
+
+    def probe_loop(self):
+        """Thread: probe the nodes every ``node_probe_min`` minutes (0: only on request, the page's "probe now")."""
+        time.sleep(20)
+        while True:
+            iv = float(self.cfg.get('node_probe_min', 30) or 0) * 60
+            if self.probe_next == 0 or (iv > 0 and now() >= self.probe_next):
+                try:
+                    self.probe_nodes()
+                except Exception as e:  # noqa: BLE001
+                    log('node probe: %s\n%s' % (e, traceback.format_exc()))
+                self.probe_next = now() + iv if iv > 0 else -1
+            elif iv > 0 and self.probe_next < 0:      # switched on again from the page
+                self.probe_next = now()
+                continue
+            self.probe_ev.wait(timeout=60)
+            self.probe_ev.clear()
+
+    def probe_one(self, host, args):
+        """node_check.sh on ``host`` over ssh (script on stdin); its JSON result, or a 'bad' result if no answer."""
+        cmd = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host,
+               'bash -s -- ' + ' '.join(shlex.quote(x) for x in args)]
+        try:
+            with open(NODE_CHECK) as fh:
+                r = subprocess.run(cmd, stdin=fh, capture_output=True, text=True, timeout=180)
+            line = [l for l in r.stdout.splitlines() if l.startswith('NODECHECK ')]
+            if line:
+                return json.loads(line[-1][len('NODECHECK '):])
+            why = 'node check gave no result (rc %d): %s' % (r.returncode, (r.stderr or '').strip()[-200:])
+        except subprocess.TimeoutExpired:
+            why = 'node check did not answer within 180 s (ssh or the node hangs)'
+        except Exception as e:  # noqa: BLE001
+            why = 'node check failed: %s' % e
+        return dict(host=host, t=now(), status='bad', bad=[why], warn=[], dirs=[])
+
+    def probe_nodes(self):
+        """Probe every compute node PBS lists (in parallel threads) and keep the results in ``self.nodes``;
+        log changes of a node's status and clear a job's bad-node flag once a probe after it passes."""
+        pn = self.pbs_nodes(max_age=0)
+        u = os.environ.get('USER', '')
+        paths = self.cfg.get('node_probe_paths') or [os.path.join(self.cfg['scratch_root'], 'state')] + (
+            ['/storage/' + u] if u and os.path.isdir('/storage/' + u) else [])
+        args = ['--paths', ' '.join(paths), '--user', u]
+        res = {}
+
+        def one(h):
+            """Probe node ``h`` into ``res``."""
+            res[h] = self.probe_one(h, args)
+        th = []
+        for h, n in pn.items():
+            if 'down' in n['state']:
+                res[h] = dict(host=h, t=now(), status='down', bad=[], warn=['PBS: %s %s' % (n['state'], n.get('comment', ''))], dirs=[])
+                continue
+            t = threading.Thread(target=one, args=(h,), daemon=True)
+            t.start()
+            th.append(t)
+        for t in th:
+            t.join(200)
+        for h, r in list(res.items()):
+            r['pbs_state'] = pn.get(h, {}).get('state')
+            old = self.nodes.get(h, {})
+            if old.get('status') != r.get('status'):
+                log('node %s: %s -> %s%s' % (h, old.get('status', 'not probed'), r.get('status'),
+                                            (': ' + '; '.join(r.get('bad', []) + r.get('warn', []))) if r.get('bad') or r.get('warn') else ''))
+            f = self.node_flags.get(h)
+            if f and r.get('status') in ('ok', 'warn') and r.get('t', 0) > f['t']:
+                log('node %s: probe passed after the failed node check of job %s; no longer avoided' % (h, f.get('job')))
+                self.node_flags.pop(h, None)
+            self.nodes[h] = r
+        self.q.put(('wake',))
+
+    def bad_nodes(self):
+        """{host: reasons} of this site's nodes to avoid: the newest probe was bad (not older than 3 intervals or
+        2 h), or a job's node check failed there within ``node_bad_h`` h (and no probe has passed since)."""
+        out, t = {}, now()
+        iv = max(float(self.cfg.get('node_probe_min', 30) or 0) * 60 * 3, 7200)
+        for h, r in self.nodes.items():
+            if r.get('status') == 'bad' and t - r.get('t', 0) < iv:
+                out[h] = 'probe: ' + '; '.join(r.get('bad', []))
+        for h, f in list(self.node_flags.items()):
+            if t - f['t'] > float(self.cfg.get('node_bad_h', 6)) * 3600:
+                self.node_flags.pop(h, None)
+            else:
+                out.setdefault(h, 'job %s: %s' % (f.get('job'), f.get('reasons')))
+        return out
+
+    def place(self, run, stages):
+        """Node for the job of ``stages`` of a run here when bad nodes are usable in PBS: the healthy node with room
+        (cores and memory free now) with the most free cores; None when no bad node is usable (PBS chooses);
+        NodeWait when no healthy node has room (submitted at a later pass). Remote runs and multi-node jobs: None."""
+        if run.remote or run.site != LOCAL or run.E.get('SIM_SELECT'):
+            return None
+        bad = self.bad_nodes()
+        if not bad:
+            return None
+        pn = self.pbs_nodes()
+        if not any(pn.get(h, {}).get('usable') for h in bad):
+            return None
+        ncpu, mem = 0, 0.0
+        for st in stages.split(','):
+            if st in STAGE_RES:
+                kc, km, dc, dm = STAGE_RES[st]
+                ncpu = max(ncpu, int(run.E.get(kc) or dc))
+                mem = max(mem, mem_gb(run.E.get(km) or dm))
+        good = sorted((h for h, n in pn.items() if n['usable'] and h not in bad and n['ncpus_free'] >= ncpu
+                       and n['mem_free_gb'] >= mem), key=lambda h: -pn[h]['ncpus_free'])
+        if good:
+            return good[0]
+        raise NodeWait('node(s) %s avoided (%s); no healthy node has %d cores and %.0f GB free now: %s waits' % (
+            ', '.join(sorted(bad)), '; '.join('%s: %s' % x for x in sorted(bad.items())), ncpu, mem, stages))
+
+    def node_bad_job(self, run, j, D):
+        """A job that exited 75 (its node failed the check in pipeline_env.sh): avoid that node and resubmit the job
+        (a simulation is rescheduled, other stages retried automatically), at most ``node_retry_max`` times a day per
+        run; returns True if the run's automation waits."""
+        run.ms.setdefault('acked', []).append(j['job'])
+        host = j.get('host') or '?'
+        ev = [e for e in run.ev if e['ev'] == 'node_bad' and e['job'] == j['job']]
+        why = ev[-1].get('reasons', '') if ev else 'node check failed'
+        self.node_flags[host] = dict(t=now(), reasons=why, job=j['job'], run=run.name)
+        log('node %s: avoided for %s h: node check of %s job %s failed: %s' % (host, self.cfg.get('node_bad_h', 6), j['stage'], j['job'], why))
+        recent = [t for t in run.ms.get('nodebad', []) if now() - t < 86400] + [now()]
+        run.ms['nodebad'] = recent
+        if len(recent) > int(self.cfg.get('node_retry_max', 3)):
+            run.ms['failed'] = dict(stage=j['stage'], job=j['job'], rc=NODE_RC, t=now(), first=j.get('first'), last=j.get('last'),
+                                    msg='node check failed %d times in 24 h (last on %s: %s); automation stopped' % (len(recent), host, why))
+            run.note('%s job %s: node check failed on %s (%s), %d times in 24 h; automation stopped' % (j['stage'], j['job'], host, why, len(recent)))
+            run.save()
+            return True
+        if j['stage'] == 'sim':
+            restart = self.has_checkpoint(run, D)
+            run.ms['scheduled'] = dict(t=now(), priority=-1, restart=restart, maint=True, after=j['job'])
+            run.note('simulation job %s did not start: node %s failed its check (%s); scheduled again on another node '
+                     '(not counted in max_sim_restarts)' % (j['job'], host, why))
+            run.save()
+            return False
+        run.ms['failed'] = dict(stage=j['stage'], job=j['job'], rc=NODE_RC, log=j.get('log'), t=now(), auto_retry=True,
+                                first=j.get('first'), last=j.get('last'),
+                                msg='node %s failed its check (%s); resubmitted on another node' % (host, why))
+        run.note('%s job %s did not start: node %s failed its check (%s); resubmitted on another node' % (j['stage'], j['job'], host, why))
+        run.save()
+        return True
+
+    def classify_dir(self, host, d):
+        """Kind of a directory of ours in a node's /var/tmp and whether a job uses it: (kind, in_use, note).
+        Rockstar output of a job still in PBS, or the stage of a run whose simulation runs on that node, is in use;
+        the rest are leftovers of ended jobs."""
+        base = os.path.basename(d['dir'])
+        m = re.match(r'^[\w.-]+?_rockstar_(\d+)$', base)
+        if m:
+            q = self.qjobs.get(m.group(1))
+            return 'rockstar output', bool(q), ('job %s %s' % (m.group(1), q['state']) if q else 'job %s ended' % m.group(1))
+        m = re.match(r'^[\w.-]+?_stage_(.+?)(\.left\.(\d+))?$', base)
+        if m:
+            if m.group(2):
+                return 'stage set aside', False, 'set aside by job %s (not drained: may hold the only copy of outputs)' % m.group(3)
+            for run in self.runs.values():
+                if run.site == LOCAL and '%s_r%s' % (run.E.get('STEM', '').replace('/', '_'), run.E.get('REAL')) == m.group(1):
+                    on = [j for j in self.qjobs.values() if j.get('node') == host and j.get('state') in ('R', 'E')
+                          and (j.get('name') or '') == 'sim_%s' % run.E.get('REAL')]
+                    return 'stage', bool(on), ('stage of %s (simulation running here)' % run.name if on else
+                                               'stage of %s; no simulation of it here (check it holds nothing undrained)' % run.name)
+            return 'stage', False, 'stage of an unknown run'
+        return 'other', True, ''
+
+    def nodes_view(self):
+        """Nodes for the page: probe result, PBS state, avoided or not (and why), our directories in /var/tmp."""
+        bad = self.bad_nodes()
+        out = []
+        for h in sorted(set(self.nodes) | set(self.pbsn)):
+            r = dict(self.nodes.get(h) or dict(host=h, status='not probed', bad=[], warn=[], dirs=[]))
+            r['pbs'] = self.pbsn.get(h, {})
+            r['avoided'] = bad.get(h)
+            dirs = []
+            for d in r.get('dirs', []):
+                kind, used, note = self.classify_dir(h, d)
+                dirs.append(dict(d, kind=kind, in_use=used, note=note, deleting=(h, d['dir']) in self.deleting))
+            r['dirs'] = dirs
+            out.append(r)
+        return out
+
+    def delete_leftover(self, host, d, confirm):
+        """Delete a leftover directory of ours in a node's /var/tmp (page button, the name typed as confirmation):
+        only a <user>_stage_* / <user>_rockstar_* directory listed by the newest probe and not used by a job.
+        ``rm -rf`` over ssh in a thread; the nodes are probed again afterwards."""
+        u = os.environ.get('USER', '')
+        if not re.match(r'^/var/tmp/%s_(stage|rockstar)_[\w.-]+$' % re.escape(u), d or '') or '..' in d:
+            raise ValueError('not a directory the manager deletes: %s' % d)
+        if confirm != os.path.basename(d):
+            raise ValueError('not deleted: type the directory name (%s) to confirm' % os.path.basename(d))
+        r = self.nodes.get(host) or {}
+        hit = [x for x in r.get('dirs', []) if x['dir'] == d]
+        if not hit:
+            raise ValueError('%s:%s is not in the newest probe of %s; probe again' % (host, d, host))
+        kind, used, note = self.classify_dir(host, hit[0])
+        if used:
+            raise ValueError('%s:%s is in use (%s)' % (host, d, note))
+        if (host, d) in self.deleting:
+            raise ValueError('already being deleted')
+        self.deleting[(host, d)] = now()
+        log('deleting %s:%s (%s, %.1f GB; %s), confirmed on the page' % (host, d, kind, hit[0].get('gb', -1), note))
+
+        def work():
+            """rm -rf over ssh, then probe again."""
+            try:
+                p = subprocess.run(['ssh', '-o', 'BatchMode=yes', host, 'rm -rf -- %s' % shlex.quote(d)],
+                                   capture_output=True, text=True, timeout=3600)
+                log('deleted %s:%s (rc %d %s)' % (host, d, p.returncode, p.stderr.strip()[-200:]))
+            except Exception as e:  # noqa: BLE001
+                log('deleting %s:%s failed: %s' % (host, d, e))
+            self.deleting.pop((host, d), None)
+            self.probe_next = 0
+            self.probe_ev.set()
+        threading.Thread(target=work, daemon=True).start()
+        return 'deleting %s:%s (%.1f GB)' % (host, d, hit[0].get('gb', -1))
+
     # ------------------------------------------------------------------ maintenance windows
     def load_maint(self):
         """Re-read maintenance.txt (windows per site) if it changed; log it."""
@@ -1875,7 +2153,7 @@ class Manager:
         try:
             msg = self.action(dict(action='retry', run=run.name))
             run.note('after the maintenance: %s' % msg)
-        except MaintWait as e:
+        except MaintWait as e:      # (also NodeWait: no healthy node with room yet)
             run.ms['failed'] = f
             run.maint_msg = str(e)
         except Exception as e:  # noqa: BLE001
@@ -1956,8 +2234,9 @@ class Manager:
         if getattr(run, 'stalled', None):
             return 0
         f = run.ms.get('failed')
-        if (f and f.get('maint') and not (run.busy or run.err or run.ms.get('paused'))
-                and not self.maint_now(run.site) and not (f.get('stage') in ('archive', 'archb') and self.maint_now(LOCAL))):
+        if f and not (run.busy or run.err or run.ms.get('paused')) and (f.get('auto_retry') or (
+                f.get('maint') and not self.maint_now(run.site)
+                and not (f.get('stage') in ('archive', 'archb') and self.maint_now(LOCAL)))):
             self.maint_retry(run)
             return 0
         if run.busy or run.err or run.ms.get('paused') or run.ms.get('failed') or run.ms.get('trash') or run.ms.get('purged'):
@@ -1985,6 +2264,10 @@ class Manager:
                 run.ms['scheduled'] = dict(t=now(), priority=-1, restart=True, after=j['job'])
                 run.note('simulation job %s stopped cleanly before the last output (wall time); scheduled to restart '
                          'from the newest checkpoint (restart %d of at most %d)' % (j['job'], n + 1, SC.get('max_sim_restarts', 5)))
+                continue
+            if j['status'] == 'failed' and j.get('rc') == NODE_RC and not self.acked(run, j):
+                if self.node_bad_job(run, j, D):
+                    return 0
                 continue
             if j['status'] in ('failed', 'gone') and not self.acked(run, j) and self.maint_killed(run, j):
                 if j['status'] == 'gone':     # the usual grace: it may be an end event still on its way
@@ -2288,6 +2571,12 @@ class Manager:
             self.next_hb = 0
             return ('%s: maintenance %s - %s' % (site, a['start'], a.get('end') or 'end not known')) if a.get('start') else (
                 '%s: maintenance windows removed' % site)
+        if act == 'probe_nodes':
+            self.probe_next = 0
+            self.probe_ev.set()
+            return 'probing the nodes (results in about a minute)'
+        if act == 'delete_leftover':
+            return self.delete_leftover(a.get('host'), a.get('dir'), a.get('confirm'))
         if act == 'set_limits':
             changed = []
             for site, S in self.cfg['sites'].items():
@@ -2303,12 +2592,15 @@ class Manager:
             for k in LIMIT_KEYS:
                 if a.get(k) not in (None, ''):
                     v = int(float(a[k]))
-                    if v < (0 if k in ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb') else 1):
-                        raise ValueError('%s must be >= %d' % (k, 0 if k in ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb') else 1))
+                    if v < (0 if k in ZERO_OK else 1):
+                        raise ValueError('%s must be >= %d' % (k, 0 if k in ZERO_OK else 1))
                     if self.cfg.get(k) != v:
                         self.cfg[k] = v
                         changed.append('%s=%d' % (k, v))
             save_cfg(self.cfg)
+            if any(c.startswith('node_probe_min=') for c in changed):
+                self.probe_next = 0
+                self.probe_ev.set()      # the probe thread picks up the new interval now
             log('limits: %s' % (', '.join(changed) or 'unchanged'))
             return 'set %s' % (', '.join(changed) or 'nothing changed')
         run = next((r for r in self.runs.values() if r.name == name or r.conf == name), None)
@@ -2846,7 +3138,8 @@ class Manager:
                                  plan_file=self.cfg.get('plan_file'), queues_file=self.cfg.get('queues_file'),
                                  queue_errors=self.queue_errors, queues=self.queues_view(derived),
                                  maintenance=self.maint_view(), maintenance_file=self.cfg.get('maintenance_file'),
-                                 maintenance_errors=self.maint_errors,
+                                 maintenance_errors=self.maint_errors, nodes=self.nodes_view(),
+                                 node_probe_min=self.cfg.get('node_probe_min', 30), node_probe_next=self.probe_next,
                                  queue=getattr(self, 'queue_view', []), qtime=self.qtime, qok=self.qok,
                                  next_heartbeat=self.next_hb, heartbeat_s=self.cfg['heartbeat_s'],
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
@@ -2957,6 +3250,7 @@ class Manager:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         threading.Thread(target=self.sync_loop, daemon=True).start()
         threading.Thread(target=self.plan_loop, daemon=True).start()
+        threading.Thread(target=self.probe_loop, daemon=True).start()
         log('manager on %s, page on %s, %d runs' % (socket.gethostname(), SOCK, len(self.runs)))
         signal.signal(signal.SIGTERM, _sigterm)
         derived = {}

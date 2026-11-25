@@ -58,6 +58,41 @@ else
   memmon_report() { :; }
 fi
 trap _on_exit EXIT
+# ---------------------------------------------------------------- node check before the job's work (node_check.sh)
+# A job on a node whose NFS client hangs, whose memory is held by unreclaimable cache or whose local disk is full
+# stalls for hours (pawna node1, 23-25 Nov 2026). PBS jobs check the node first: NODE_CHECK=1 (default where SITE is
+# unset or pawna; 0 = off). On a bad node: event node_bad (host, reasons) and exit 75 before anything is touched;
+# the run manager marks the node bad and resubmits the job on another node (not a failure of the run).
+_ncdef=0; [ "${SITE:-pawna}" = pawna ] && _ncdef=1
+if [ -n "${PBS_JOBID:-}" ] && [ "${NODE_CHECK:-$_ncdef}" = 1 ] && [ "${STAGE:-}" != archive ] && [ "${STAGE:-}" != archb ]; then
+  _gb() { case $1 in *gb) echo "${1%gb}" ;; *tb) echo $(( ${1%tb} * 1024 )) ;; *) echo 0 ;; esac; }
+  _ncm=0; _nct=0; _ncw=0
+  case ${STAGE:-} in
+    sim)      _ncm=$(_gb "${SIM_MEM:-0}")
+              # staged checkpoint (~45 B/particle measured: 385 GB at 2048^3) plus a snapshot
+              [ "${SIM_STAGING:-0}" = 1 ] && { _nct=$(awk -v n="$NPART" 'BEGIN{printf "%.0f", n^3 * 50 / 1e9}'); _ncw=$_nct; } ;;
+    rockstar) _ncm=$(_gb "${RS_MEM:-0}")
+              # local output ~65 GB per 2048^3 snapshot (r3/r4 batches, 25 Nov); bad below half of the estimate
+              if [ "${RS_LOCAL_OUT:-1}" = 1 ] && [ "${RS_NODES:-1}" = 1 ]; then
+                _k=$(( ${RS_SNAP_LAST:-0} - ${RS_SNAP_FIRST:-0} + 1 ))
+                _ncw=$(awk -v n="$NPART" -v k="$_k" 'BEGIN{printf "%.0f", 65 * k * (n / 2048)^3}'); _nct=$((_ncw / 2))
+              fi ;;
+    ctrees)   _ncm=$(_gb "${CT_MEM:-0}") ;;
+    vahc|vpot) _ncm=$(_gb "${PP_MEM:-0}") ;;
+    fits)     _ncm=$(_gb "${FITS_MEM:-0}") ;;
+    verify)   _ncm=$(_gb "${VF_MEM:-0}") ;;
+  esac
+  _ncm=$(( _ncm * 9 / 10 ))      # MemAvailable at least 90 % of the request
+  _ncout=$(bash "$PIPE/node_check.sh" --paths "$STATE_DIR" --mem "$_ncm" --tmp "$_nct" --tmp-warn "$_ncw" 2>&1)
+  _ncrc=$?
+  echo "$_ncout" | grep -v '^NODECHECK' | while read -r l; do stamp "$l"; done
+  if [ $_ncrc = 3 ]; then
+    _ncr=$(echo "$_ncout" | grep ' BAD ' | sed 's/^node_check [^ ]* BAD  //' | paste -sd ';' -)
+    event node_bad reasons="$_ncr"
+    stamp "node $(hostname -s) failed the node check: $_ncr; exit 75 (the manager resubmits on another node)"
+    exit 75
+  fi
+fi
 # A simulation job without RESTART starts from the ICs. Refuse that when the run already has checkpoints or
 # snapshots: e.g. PBS re-running a first job after a node or power failure (jobs are rerunnable by default) would
 # otherwise write over the run's outputs and rotate away its good checkpoints. Restart from a checkpoint instead
