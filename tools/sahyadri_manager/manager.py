@@ -13,6 +13,7 @@
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
   manager.py unschedule <stem/rN>
   manager.py queue <site> <queue> open|drain|closed   change a queue's state in the queues file (~/.sahyadri_mgr/queues.txt)
+  manager.py reload-conf <[site:]stem/rN>   read the run.conf again (a remote run: fetched from its site first)
   manager.py queue-once <stem/rN> <queue> [project]   the run's next simulation job only on that queue (pegasus: project hpc2502016); no queue: clear
   manager.py maint [<site> <start> <end|-> [note] | <site> clear]   list / add / remove maintenance windows
                                    (~/.sahyadri_mgr/maintenance.txt; YYYY-MM-DDTHH:MM local time; see below)
@@ -970,6 +971,8 @@ class Run:
         self.remote = self.site != LOCAL and bool(self.E.get('REMOTE_CONF'))
         # runs of another site are named <site>:<stem>/r<real> (the same run name may exist on both sites)
         self.name = '%s%s/r%s' % (self.site + ':' if self.remote else '', self.E['STEM'], self.E['REAL'])
+        # halo stages on another cluster sharing the run's file system (post_site_conf.py: POST_SITE, POST_CONF)
+        self.post_site = (self.E.get('POST_SITE') or None) if self.remote and self.E.get('POST_CONF') else None
         self.outs = retention.planned_outputs(self.E, self.P)
         self.step_index = {o[1]: o[0] for o in self.outs}
         os.makedirs(os.path.join(self.P['state'], 'events'), exist_ok=True)
@@ -1245,6 +1248,13 @@ class Run:
             return 'rockstar'
         return 'simulation'
 
+    def stage_site(self, stages):
+        """Where ``stages`` (comma separated) run: ``POST_SITE`` for halo stages of a run that has one, else the run's
+        site (the simulation and the archive pulls always stay with the run's site)."""
+        if self.post_site and stages and all(x not in ('sim', 'archive', 'archb') for x in stages.split(',')):
+            return self.post_site
+        return self.site
+
     # ------------------------------------------------------------------ submission
     def submit(self, stages, extra=(), what=None, cfg=None):
         # archive as a process on this (head) node: always for a remote run (a pull from its data node), and for a
@@ -1273,7 +1283,14 @@ class Run:
         if once:            # the next simulation job only: another queue/project (Manager.action 'queue_once')
             extra = list(extra) + ['--queue', once['queue'], '--project', once.get('project') or '']
             what = dict(what or {}, queue=once['queue'], project=once.get('project') or '')
-        if self.remote:     # qsub on the site's login node, with the run's own run.conf there
+        psite = self.stage_site(stages)
+        if self.remote and psite != self.site:     # halo stages on the post site, with its configuration
+            S = (cfg or Run.CFG)['sites'][psite]
+            sub = os.path.join(S['sandbox'], 'scripts', 'pkdgrav3_pipeline', 'submit_pipeline.sh')
+            line = ' '.join(shlex.quote(x) for x in ['bash', sub, self.E['POST_CONF'], '--stages', stages] + list(extra))
+            r = ssh(S['login'], 'PATH=/opt/pbs/bin:$PATH ' + line)
+            what = dict(what or {}, site=psite)
+        elif self.remote:     # qsub on the site's login node, with the run's own run.conf there
             BUDGETS.check(cfg or Run.CFG, self, stages, project=(once.get('project') or '') if once else None)
             sub = os.path.join(self.E['REMOTE_SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'submit_pipeline.sh')
             line = ' '.join(shlex.quote(x) for x in ['bash', sub, self.E['REMOTE_CONF'], '--stages', stages] + list(extra))
@@ -1439,12 +1456,16 @@ class Manager:
         """``run.derive`` with the qstat snapshot of the run's own site."""
         if run.remote:
             jobs, qt, _ok = self.qsite.get(run.site, ({}, 0.0, None))
+            if run.post_site:      # its halo jobs are in the post site's PBS
+                pj, pqt, _pok = self.qsite.get(run.post_site, ({}, 0.0, None))
+                jobs, qt = dict(jobs, **pj), min(qt, pqt)
             return run.derive(jobs, qt)
         return run.derive(self.qjobs, self.qtime)
 
     def sites(self):
-        """Names of the remote sites with at least one run."""
-        return sorted({r.site for r in self.runs.values() if r.remote})
+        """Names of the remote sites with at least one run (as its site or its post-processing site)."""
+        return sorted({r.site for r in self.runs.values() if r.remote}
+                      | {r.post_site for r in self.runs.values() if getattr(r, 'post_site', None)})
 
     def refresh_qstat_site(self, site):
         """qstat of our jobs on another site's login node."""
@@ -1705,9 +1726,12 @@ class Manager:
                 self.watch(run, D)
             except Exception as e:  # noqa: BLE001  (the watchdog never stops the manager)
                 log('%s: watchdog error: %s' % (run.name, e))
-            active_rs[run.site] = active_rs.get(run.site, 0) + sum(1 for j in D['active'] if j['stage'] == 'rockstar')
-            self.waiting[run.site] = self.waiting.get(run.site, 0) + sum(
-                1 for j in D['active'] if j['status'] in ('submitted', 'queued', 'held') and not j['job'].startswith('L'))
+            rss = run.stage_site('rockstar')
+            active_rs[rss] = active_rs.get(rss, 0) + sum(1 for j in D['active'] if j['stage'] == 'rockstar')
+            for j in D['active']:
+                if j['status'] in ('submitted', 'queued', 'held') and not j['job'].startswith('L'):
+                    js = run.stage_site(j['stage'])
+                    self.waiting[js] = self.waiting.get(js, 0) + 1
         try:
             self.maint_actions(derived)
         except Exception as e:  # noqa: BLE001  (never stops the manager)
@@ -1724,7 +1748,8 @@ class Manager:
         for run in sorted(self.runs.values(), key=waiting):
             D = derived[run.conf]
             try:
-                active_rs[run.site] = active_rs.get(run.site, 0) + self.policy(run, D, active_rs.get(run.site, 0))
+                rss = run.stage_site('rockstar')
+                active_rs[rss] = active_rs.get(rss, 0) + self.policy(run, D, active_rs.get(rss, 0))
                 run.budget_wait = None
                 run.maint_msg = None
             except MaintWait as e:
@@ -2179,7 +2204,8 @@ class Manager:
         ``maint_guard_min`` before its start; return a shorter wall time (``HH:MM:SS``) when the requested one
         would run past the start, else None. A simulation needs ``maint_min_sim_h`` of computing before its STOP
         (``maint_stop_h`` before the start); it stops cleanly there and restarts after the window."""
-        sites = [run.site] + ([LOCAL] if stages in ('archive', 'archb') and run.site != LOCAL else [])
+        home = run.stage_site(stages)        # the post site for halo stages of a run that has one
+        sites = [home] + ([LOCAL] if stages in ('archive', 'archb') and run.site != LOCAL else [])
         cap = None
         t = now()
         for site in sites:
@@ -2205,7 +2231,7 @@ class Manager:
                     raise MaintWait('%s: %s needs ~%.1f h (earlier jobs, else its wall time), %.1f h left before the '
                                     'start (maint_guard_min %s): waits until after the window' % (
                                         lab, stages, need / 3600., max(0, left) / 3600., self.cfg.get('maint_guard_min', 30)))
-            if site == run.site and stages not in ('archive', 'archb') and left < max(self.stage_wall_s(run, x) for x in st):
+            if site == home and stages not in ('archive', 'archb') and left < max(self.stage_wall_s(run, x) for x in st):
                 cap = hms(left)
         return cap
 
@@ -2282,7 +2308,7 @@ class Manager:
         """Did job ``j`` (failed or vanished) end because of a maintenance window: started (or submitted) before a
         window of its site (archive copies and pulls: also of this host) began, and ended no earlier than an hour
         before it (or has no end event)? Windows that ended more than 7 days ago are not considered."""
-        sites = {run.site} | ({LOCAL} if j['stage'] in ('archive', 'archb') else set())
+        sites = {run.stage_site(j['stage'])} | ({LOCAL} if j['stage'] in ('archive', 'archb') else set())
         t = now()
         on, off = j.get('start') or j.get('submitted') or 0, j.get('end') or t
         for site in sites:
@@ -2418,6 +2444,10 @@ class Manager:
         E = run.E
         SC = site_cfg(self.cfg, run.site)
         qtime = self.qsite.get(run.site, ({}, 0.0))[1] if run.remote else self.qtime
+        PS = run.stage_site('rockstar')       # halo stages: the post site when the run has one
+        PC = site_cfg(self.cfg, PS)
+        if PS != run.site:
+            qtime = min(qtime, self.qsite.get(PS, ({}, 0.0))[1])
         # failures and vanished jobs
         waiting_gone = False
         for j in D['jobs']:
@@ -2491,6 +2521,8 @@ class Manager:
             return 0
         if self.qinfo(run)['state'] == 'closed':     # nothing new into a closed queue (drain: post-processing goes on)
             return 0
+        if PS != run.site and (self.queues.get((PS, DEFAULT_QUEUE.get(PS, 'workq'))) or {}).get('state') == 'closed':
+            return 0                                 # the post site's queue is closed
         n_out = len(run.outs)
         rs_done = set(D['rs_done'])
         # ---- Rockstar
@@ -2507,17 +2539,17 @@ class Manager:
                 if k == 0:
                     return 0
                 if k >= nmin or D['sim_done']:          # after the simulation: whatever is left
-                    if active_rs >= int(SC.get('max_rockstar', 1)) or not self.pbs_room(run.site):
+                    if active_rs >= int(PC.get('max_rockstar', 1)) or not self.pbs_room(PS):
                         return 0
                     last = first + k - 1
                     run.submit('rockstar', ['--rs-snaps', '%d-%d' % (first, last)], dict(first=first, last=last))
-                    self.took(run.site)
+                    self.took(PS)
                     return 1
                 return 0
-            if (D['sim_done'] and active_rs < int(SC.get('max_rockstar', 1)) and not D['last'].get('rockstar')
-                    and self.pbs_room(run.site)):
+            if (D['sim_done'] and active_rs < int(PC.get('max_rockstar', 1)) and not D['last'].get('rockstar')
+                    and self.pbs_room(PS)):
                 run.submit('rockstar', [], dict(first=0, last=n_out - 1))
-                self.took(run.site)
+                self.took(PS)
                 return 1
             return 0
         # ---- post-processing chain, once Rockstar covers everything
@@ -2526,15 +2558,15 @@ class Manager:
         lv = D['last'].get('verify')
         archived = bool(D['archive'] and int(D['archive'].get('ok', 0)))
         post = [s for s in post_of(E) if not (archived and s == 'parquet')]   # an archived run stays as archived
-        if site_cfg(self.cfg, run.site).get('max_pbs_queued') is not None:
+        if PC.get('max_pbs_queued') is not None:
             # one stage at a time: the first whose newest job is not a success newer than the previous stage's
             prev = None
             for st in post:
                 j = D['last'].get(st)
                 if j is None or j['status'] != 'done' or (prev and jobnum(j['job']) < jobnum(prev['job'])):
-                    if self.pbs_room(run.site):
+                    if self.pbs_room(PS):
                         run.submit(st, [], dict(chain=st, sequential=True))
-                        self.took(run.site)
+                        self.took(PS)
                     return 0
                 prev = j
         elif not any(D['last'].get(s) for s in post):
@@ -2834,6 +2866,8 @@ class Manager:
             run.note('automation resumed')
             return 'resumed'
         if act == 'reload_conf':
+            if run.remote and run.E.get('REMOTE_CONF'):     # fetch the site's run.conf again (e.g. POST_SITE added)
+                mirror_conf(self.cfg, run.site, run.E['REMOTE_CONF'])
             run.load()
             run.offsets, run.ev = {}, []
             run.read_events()
@@ -2901,7 +2935,7 @@ class Manager:
             if st == 'rockstar' and f.get('first') is not None:
                 run.submit('rockstar', ['--rs-snaps', '%s-%s' % (f['first'], f['last'])],
                            dict(first=int(f['first']), last=int(f['last']), retry=f.get('job')))
-            elif st in post_of(run.E) and site_cfg(self.cfg, run.site).get('max_pbs_queued') is not None:
+            elif st in post_of(run.E) and site_cfg(self.cfg, run.stage_site(st)).get('max_pbs_queued') is not None:
                 run.submit(st, [], dict(chain=st, sequential=True, retry=f.get('job')))     # the rest follows
             elif st in post_of(run.E):
                 rest = post_of(run.E)
@@ -3306,7 +3340,7 @@ class Manager:
                 trash=run.ms.get('trash'), purged=run.ms.get('purged'), scheduled=run.ms.get('scheduled'),
                 restarts=run.ms.get('restarts', 0), actions=run.ms.get('actions', [])[-30:],
                 budget_msg=getattr(run, 'budget_msg', None) if getattr(run, 'budget_wait', None) else None,
-                maint_msg=getattr(run, 'maint_msg', None), queue_once=run.ms.get('queue_once'),
+                maint_msg=getattr(run, 'maint_msg', None), queue_once=run.ms.get('queue_once'), post_site=run.post_site,
                 stalled=getattr(run, 'stalled', None), archive_msg=getattr(run, 'archive_msg', None),
                 alerts=getattr(run, 'alerts_shown', {}), rs_redo=D.get('rs_redo', []), rewinds=D.get('rewinds', []),
                 keep=dict(full=pl['full_z'] if pl else [], pct=pl['subsample_pct'] if pl else None,
@@ -3690,6 +3724,10 @@ def main():
         if len(sys.argv) != 5:
             sys.exit('usage: manager.py queue <site> <queue> open|drain|closed')
         sys.exit(call(dict(action='set_queue', site=sys.argv[2], queue=sys.argv[3], state=sys.argv[4])))
+    elif cmd == 'reload-conf':
+        if len(sys.argv) != 3:
+            sys.exit('usage: manager.py reload-conf <[site:]stem/rN>')
+        sys.exit(call(dict(action='reload_conf', run=sys.argv[2])))
     elif cmd == 'queue-once':
         if len(sys.argv) not in (3, 4, 5):
             sys.exit('usage: manager.py queue-once <stem/rN> <queue> [project]   |   manager.py queue-once <stem/rN> (clear)')

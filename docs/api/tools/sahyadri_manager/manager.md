@@ -19,6 +19,7 @@ sahyadri_manager: runs the Sahyadri pipeline for many runs from the pawna head n
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
   manager.py unschedule <stem/rN>
   manager.py queue <site> <queue> open|drain|closed   change a queue's state in the queues file (~/.sahyadri_mgr/queues.txt)
+  manager.py reload-conf <[site:]stem/rN>   read the run.conf again (a remote run: fetched from its site first)
   manager.py queue-once <stem/rN> <queue> [project]   the run's next simulation job only on that queue (pegasus: project hpc2502016); no queue: clear
   manager.py maint [<site> <start> <end|-> [note] | <site> clear]   list / add / remove maintenance windows
                                    (~/.sahyadri_mgr/maintenance.txt; YYYY-MM-DDTHH:MM local time; see below)
@@ -711,6 +712,15 @@ Phase of the run for the page, first match wins: purged, waiting to restart / sc
 archived, verified (no archive), post (post-processing), not started, rockstar, simulation. From the manager
 state `ms` and the derived status `D`.
 
+### Run.stage_site
+
+```python
+stage_site(self, stages)
+```
+
+Where `stages` (comma separated) run: `POST_SITE` for halo stages of a run that has one, else the run's
+site (the simulation and the archive pulls always stay with the run's site).
+
 ### Run.submit
 
 ```python
@@ -796,7 +806,7 @@ derive(self, run)
 sites(self)
 ```
 
-Names of the remote sites with at least one run.
+Names of the remote sites with at least one run (as its site or its post-processing site).
 
 ### Manager.refresh_qstat_site
 

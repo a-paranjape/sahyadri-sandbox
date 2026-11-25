@@ -188,7 +188,7 @@ function renderRun(r, idx){
   const acts=(r.actions||[]).slice().reverse().map(a=>`<tr><td class="muted">${when(a[0])}</td><td>${h(a[1])}</td></tr>`).join('');
   const D=(k,title,body)=>`<details data-k="${id+k}" ${openDetails.has(id+k)?'open':''}><summary>${title}</summary>${body}</details>`;
   return `<div class="card">
-    <div class="row"><b style="font-size:15px">${h(r.name)}</b>${r.site&&r.site!==S.local_site?`<span class="badge b-wait" title="${h(r.remote_conf||'')}">${h(r.site)}</span>`:''}${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)} of ≤${hum(r.scratch_estimate)}${r.outstanding?' (+'+hum(r.outstanding)+' to come)':''}</span><span class="sp"></span>${ctl}</div>
+    <div class="row"><b style="font-size:15px">${h(r.name)}</b>${r.site&&r.site!==S.local_site?`<span class="badge b-wait" title="${h(r.remote_conf||'')}">${h(r.site)}</span>`:''}${r.post_site?`<span class="badge b-wait" title="halo stages on ${h(r.post_site)} (POST_SITE, post_site_conf.py)">halos: ${h(r.post_site)}</span>`:''}${phaseBadge(r)}<span class="muted small">${h(r.npart)}³ · Rockstar ${r.rs_batch==='1'?'batches of ≥'+h(r.rs_batch_min):'one job'} · scratch ${hum(r.scratch_bytes)} of ≤${hum(r.scratch_estimate)}${r.outstanding?' (+'+hum(r.outstanding)+' to come)':''}</span><span class="sp"></span>${ctl}</div>
     ${r.err?`<div class="fail">config: ${h(r.err)}</div>`:''}
     ${fail}
     ${r.stalled?`<div class="fail">${h(r.stalled)}: the manager leaves this run alone until its storage answers (its PBS jobs are not touched)</div>`:''}
