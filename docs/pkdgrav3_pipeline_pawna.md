@@ -1243,10 +1243,13 @@ pawna is the manager's host: when pawna is down the manager is down too. After t
 (`tools/sahyadri_manager/start_manager.sh start`) once `/user` and `/storage` answer. It then works through the jobs
 killed by the shutdown.
 
-### 17.1 Shutdown of pawna and swarm, Fri 27 Nov 2026 08:00 IST
+### 17.1 Shutdown of pawna, swarm, leap and pride, Fri 27 Nov 2026 08:00-20:00 IST
 
-The windows were entered with no end time (`-`). After the clusters are back and checked (node1's NFS hang, section 16
-and the 25 Nov admin message), `manager.py maint pawna clear` and `manager.py maint swarm clear` let the manager go on.
+Announced: all four TIFR clusters down at 08:00 with an expected downtime of about 12 h. They were entered as
+`<site> 2026-11-27T08:00 2026-11-27T20:00`. The manager submits again from 20:30 (`maint_settle_min`). pawna's
+manager has to be started again after the reboot. If the work runs late, move the end
+(`manager.py maint <site> clear`, then add the window again with the new end). Before the queues reopen, check node1's
+NFS client (section 16, admin message of 25 Nov). workq stays in `drain` until then.
 
 State on Wed 25 Nov, 12:00 IST (qstat on pawna and swarm; steps from the run logs):
 
@@ -1258,4 +1261,6 @@ State on Wed 25 Nov, 12:00 IST (qstat on pawna and swarm; steps from the run log
 | L200N2048 r4 | pawna | paused (node1 incident) | unchanged |
 | r6, r7 (swarm) | swarm 1786786/1786787 (72 h wall) | stop at iWallRunTime Thu ~08:45 | restarts submitted Thu with the wall time cut to Fri 07:30; STOP Fri 06:00; restart after the window |
 | r7 Rockstar | swarm 1787341 (queued, 72 h) | waits for cores | submitted before the window was set: if killed by the shutdown it is resubmitted afterwards |
-| pegasus, leap, pride | | not affected | jobs keep running; while pawna is down nothing is submitted for them (leap r100 945011 reaches its wall time Fri ~22:40 and restarts when the manager is back) |
+| leap r100 | leap, 945011 (6 nodes, 72 h wall) | step 22 at 12:50 Wed (~35 min/step) | STOP Fri 06:00 (`maint_stop_h` 2 h; checkpoint straight to Lustre); restarts after 20:30 |
+| pride | | no jobs | nothing submitted 08:00-20:30 |
+| pegasus runs | | not affected | jobs keep running; while pawna is down nothing is submitted for them |
