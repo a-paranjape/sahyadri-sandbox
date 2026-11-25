@@ -1342,3 +1342,18 @@ it had run on swarm. The run card shows a "halos: pride" badge. Undo: delete the
 
 **Test (25 Nov 2026):** `swarm:Sahyadri_L200N128/default128/r3` in `/user1/shadab/sahyadri_scratch_posttest` (no
 archive): simulation on swarm (job 1787903, 16 cores), the halo stages on pride. Results below.
+
+Results (25 Nov 2026, from the manager's job list and the job logs):
+
+| Stage | Site | Jobs | Notes |
+|---|---|---|---|
+| sim | swarm | 1787903 | 2126 steps; `qalter` to 12 cores (only compute-1-1/1-2 had free workq cores; compute-1-8 belongs to queue `test`) |
+| rockstar | pride | 764489–764497 | 9 batches while the simulation ran (first: 0–11, 80 s, 12/12 lists) |
+| ctrees, vahc, fits, parquet | pride | 764498–764501 | one at a time (pride `max_pbs_queued`) |
+| verify | pride | 764502, 764503, 764504 | 764504 passed: snapshots, subsample, rockstar, ctrees, vahc, halos, fits, parquet, pk |
+
+Two fixes came out of it. (1) Lustre file times are the writing node's clock, and pride's nodes disagree by up to ~8 min
+(offsets against the login node, measured with parallel `ssh date`: −383 s on compute-2-6 to +85 s on 2-14). verify's
+"catalogues newer than their FITS tables" and archive_run.py's "kept files changed after verify" now allow 900 s
+(`VF_CLOCK_SLACK_S`, `AR_CLOCK_SLACK_S`); the manager's Rockstar redo margin is 15 min. (2) job_verify.pbs no longer
+writes the KEPT_FILES.json checksums when the run has no ARCHIVE. Run phase: "verified (no archive)".
