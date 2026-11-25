@@ -1305,3 +1305,40 @@ First probe of all four nodes (25 Nov, 16:25 IST, `node_check.sh` over ssh from 
 A stuck Writeback alone is a warning, not a reason to avoid the node. On nodes 2 and 4 the rest of the I/O still
 works. On node1 the same symptom came with the memory pressure and I/O hang that stopped every job. Nodes 2 and 4
 need the reboot of 27 Nov.
+
+## 19. Halo stages on another TIFR cluster (POST_SITE; 25 Nov 2026)
+
+swarm, leap and pride share the Lustre file system `/user1`. A run computed on swarm or leap can have its halo
+stages (rockstar, ctrees, vahc, vpot, fits, parquet, verify, xcorr, vprof) on pride instead:
+
+- **Why:** on swarm the per-user limit is 310 running cores (`max_run_res.ncpus`, and 384 running plus queued).
+  Two 2048^3 simulations take 256, so a 64-core Rockstar job cannot start next to them (r7's `rs0_7` waited for
+  this reason). leap has no Rockstar build. pride has no per-user limits and 10 of its 16 nodes were up and idle on
+  25 Nov.
+- **Speed on pride** (23 Nov test with two r3 snapshots, section 16): Rockstar ~57 min per 2048^3 snapshot on 3 nodes
+  × 20 cores (pawna ~23 min), head process 141 GB; consistent-trees 32 min, 43 GB; vahc ~75 min per snapshot.
+  A whole run: Rockstar ~95 h in batches; three runs can use pride at once (3 nodes each).
+
+**Set-up** (on pride, with pride's install):
+
+    /user1/shadab/sahyadri_pride/codes/venv/bin/python \
+        /user1/shadab/sahyadri_pride/sahyadri-sandbox/scripts/pkdgrav3_pipeline/production/post_site_conf.py \
+        <run dir>/run.conf --site pride
+
+It writes `<run dir>/run.post_pride.conf` (the run.conf with pride's SANDBOX/CODES/PKD_IO_ROOT, `SITE=pride`, pride's
+halo-stage resources from `setup_production.py resources_pride`, `RS_LOCAL_OUT=0`) and appends a marked block with
+`POST_SITE=pride` and `POST_CONF=...` to the run.conf. SCRATCH, LOGS and the state directory stay those of the run, so
+the pride jobs read the snapshots where the simulation writes them and write the halo products, logs and events into
+the run's own directories. Then on pawna: `manager.py reload-conf swarm:<stem>/r<R>` (fetches the run.conf again)
+or, for a new run, `manager.py add swarm:<run.conf>`.
+
+**What the manager does with it:** `Run.stage_site` puts those stages on POST_SITE (the simulation and the archive pulls
+stay with the run's site). It submits them with pride's `submit_pipeline.sh` and the post configuration, reads pride's
+qstat with the run's own, and counts Rockstar jobs (`max_rockstar`), queued jobs (`max_pbs_queued`), closed queues and
+maintenance windows on the site where each stage runs. The events of the pride jobs arrive through the run's normal
+mirror (they are in its state directory), so the snapshot deletion and archive checks see Rockstar's results as if
+it had run on swarm. The run card shows a "halos: pride" badge. Undo: delete the marked block from the run.conf and
+`reload-conf`.
+
+**Test (25 Nov 2026):** `swarm:Sahyadri_L200N128/default128/r3` in `/user1/shadab/sahyadri_scratch_posttest` (no
+archive): simulation on swarm (job 1787903, 16 cores), the halo stages on pride. Results below.

@@ -234,6 +234,16 @@ verify, a process on the pawna head node pulls the kept files from the data node
 them against the checksums the verify job wrote (`KEPT_FILES.json`). Trash, undo and purge run on pegasus. Details:
 guide section 13.5.
 
+## Halo stages on another cluster (POST_SITE)
+
+A swarm or leap run can have its halo stages (rockstar ... verify) on pride, which shares `/user1`:
+`post_site_conf.py <run.conf> --site pride` (run on pride) writes `run.post_pride.conf` and marks the run.conf with
+`POST_SITE`/`POST_CONF`; then `manager.py reload-conf swarm:<stem>/r<R>`. The manager submits those stages on pride
+with that file and pride's install; the simulation and the archive stay with the run's site. Because the post
+configuration keeps the run's SCRATCH, the pride jobs write their products, logs and events into the run's own
+directories, and everything downstream (mirror, deletion checks, archive) works unchanged. Limits (`max_rockstar`,
+`max_pbs_queued`), queue states and maintenance windows are those of the site where the stage runs. Guide section 19.
+
 ## What it does
 
 | When | Action |

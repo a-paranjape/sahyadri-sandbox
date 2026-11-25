@@ -34,6 +34,7 @@ Written by `setup_production.py` (directly, or by the manager for a plan-file li
 | File | What it controls |
 |---|---|
 | `<SCRATCH>/sims/<stem>/r<N>/run.conf` | Everything about one run: N, L, cosmology, `PBS_QUEUE`, wall times, cores/nodes, `RS_BATCH` / `RS_BATCH_MIN`, kept redshifts and subsample (`KEEP_*`), P(k) checks (`PP_PK`, `PK_*`), `ARCHIVE`, `SANDBOX` / `CODES` / `PKD_IO_ROOT`, `SIM_KEEPCHK`; for pegasus runs `SITE` and `REMOTE_*`. Takes effect for the run's next submitted job |
+| `<SCRATCH>/sims/<stem>/r<N>/run.post_<site>.conf` | Halo-stage configuration on another /user1 cluster (pride), written by `post_site_conf.py`; the run.conf then has `POST_SITE`/`POST_CONF` | Regenerate with `post_site_conf.py --force`, then `manager.py reload-conf` |
 | `<SCRATCH>/sims/<stem>/r<N>/output_steps.txt`, `snapnames.txt` | The planned outputs; the manager counts progress against them |
 | `<SCRATCH>/state/<stem>/r<N>/manager.json` | The manager's state for the run: scheduled and priority, paused, failed, acknowledged jobs, restarts, trash, purge. Change it through the page or CLI, not by hand |
 | `<SCRATCH>/state/<stem>/r<N>/events/*.jsonl` | Events written by the jobs (started, snapshot ready, done, failed, ...). Every decision of the manager follows from these |
