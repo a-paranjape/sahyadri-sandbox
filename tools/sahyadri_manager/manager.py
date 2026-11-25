@@ -1120,8 +1120,8 @@ class Run:
                 t0 = J.get(e['job'], {}).get('start', e['t'])
                 for i in range(int(e['first']), int(e['last']) + 1):
                     # an output that a restart rewrote counts only if Rockstar ran after its new version was ready
-                    # (10 min for clocks of different nodes)
-                    if tcut.get(i, 0) and not (i in since and t0 >= since[i] - 600):
+                    # (15 min for clocks of different nodes: pride nodes -383 s to +85 s, 25 Nov 2026)
+                    if tcut.get(i, 0) and not (i in since and t0 >= since[i] - 900):
                         D['rs_redo'].append(i)
                         continue
                     cov.add(i)

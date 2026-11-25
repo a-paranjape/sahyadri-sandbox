@@ -141,8 +141,11 @@ def checked_files(E, pl):
     if not V.get('ok'):
         sys.exit('%s: verification failed; not archiving' % vf)
     files = retention.kept_files(E, pl)
-    # verify.json's mtime: set by the same file server as the kept files' (job clocks on the nodes differ)
-    vt = os.path.getmtime(vf)
+    # verify.json's mtime against the kept files'. NFS sets mtimes with the server's clock, Lustre with the writing
+    # node's (pride, 25 Nov 2026: node clocks -383 s to +85 s), so a file counts as changed after verify only beyond
+    # AR_CLOCK_SLACK_S (default 900 s; verify starts minutes after the stage before it ends, a real change is a
+    # later job)
+    vt = os.path.getmtime(vf) + float(os.environ.get('AR_CLOCK_SLACK_S', '900') or 900)
     late = [rel for cat, _s, src, rel in files
             if cat not in ('log', 'events', 'meta') and os.path.getmtime(src) > vt]
     if late:

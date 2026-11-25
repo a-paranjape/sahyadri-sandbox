@@ -34,6 +34,7 @@ Generated from the docstrings of the Python modules and the header comments of t
 
 | Module | Summary |
 |---|---|
+| [`post_site_conf.py`](scripts/pkdgrav3_pipeline/production/post_site_conf.md) | post\_site\_conf.py: run the halo stages of a run on another TIFR cluster that shares its Lustre /user1. |
 | [`setup_production.py`](scripts/pkdgrav3_pipeline/production/setup_production.md) | setup\_production.py: set up Sahyadri production runs (pkdgrav3 -&gt; Rockstar -&gt; consistent-trees -&gt; .vahc -&gt; FITS) on pawna. It only creates directories and writes configuration files and a submit script; nothing is submitted. Check the files, adjust them if needed, then run the submit script it prints. |
 
 ## `scripts/post-process/`

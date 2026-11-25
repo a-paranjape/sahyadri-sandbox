@@ -297,18 +297,22 @@ def main():
         if int(last.get('rc', 1)) != 0 or int(last.get('nfail', 1) or 0) != 0:
             R.fail('fits', 'last fits stage (job %s): rc %s, %s check failures (%s)' % (
                 last['job'], last.get('rc'), last.get('nfail'), last.get('check_log')))
-        # a value-added catalogue newer than its FITS table (same file server's times; a vahc rerun that only added
-        # .pk files changes nothing here)
+        # a value-added catalogue newer than its FITS table (a vahc rerun that only added .pk files changes nothing
+        # here). On Lustre a file's mtime is the writing node's clock, and nodes disagree (pride, 25 Nov 2026: -383 s
+        # to +85 s against the login node), so only a difference beyond VF_CLOCK_SLACK_S (default 900 s) counts: a
+        # real vahc rerun after fits is later by at least the length of a vahc job
+        slack = float(os.environ.get('VF_CLOCK_SLACK_S', '900') or 900)
         comp_ = os.path.join(P['halo'], 'compressed')
         newer = []
         for s in tree_snaps:
             ft = os.path.join(comp_, 'out_%d_vahc.fits.gz' % s)
             for kind in ('vahc', 'tens', 'vpot'):
                 f = os.path.join(P['halo'], 'out_%d.%s' % (s, kind))
-                if os.path.isfile(f) and os.path.isfile(ft) and os.path.getmtime(f) > os.path.getmtime(ft):
+                if os.path.isfile(f) and os.path.isfile(ft) and os.path.getmtime(f) > os.path.getmtime(ft) + slack:
                     newer.append('out_%d.%s' % (s, kind))
         if newer:
-            R.fail('fits', '%d catalogues newer than their FITS tables (vahc ran again after fits?): %s' % (len(newer), ', '.join(newer[:5])))
+            R.fail('fits', '%d catalogues newer than their FITS tables by more than %.0f s (vahc ran again after fits?): %s'
+                   % (len(newer), slack, ', '.join(newer[:5])))
         c['info']['job'] = last['job']
         c['info']['npass'] = last.get('npass')
     comp = os.path.join(P['halo'], 'compressed')
