@@ -434,7 +434,10 @@ class Budgets:
         """Core hours (cores x requested wall) of our jobs waiting in the site's PBS on this budget, or None."""
         user = sc['login'].split('@')[0]
         try:
-            r = ssh(sc['login'], '/opt/pbs/bin/qstat -f -F json -u %s 2>/dev/null' % shlex.quote(user), timeout=60)
+            # qstat -u cannot be combined with -f -F json: our job ids first, then their full records
+            r = ssh(sc['login'], 'ids=$(/opt/pbs/bin/qstat -u %s 2>/dev/null | awk \'$1 ~ /^[0-9]/ {print $1}\'); '
+                    '[ -z "$ids" ] && echo "{}" || /opt/pbs/bin/qstat -f -F json $ids 2>/dev/null' % shlex.quote(user),
+                    timeout=60)
             J = json.loads(r.stdout or '{}', strict=False).get('Jobs', {})
         except Exception:  # noqa: BLE001
             return None
