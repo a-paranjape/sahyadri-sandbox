@@ -885,11 +885,24 @@ is not retried until its line changes.
 
 **Pegasus queues and core hours.** `--queue project` submits with `-q project -P hpc2502016` and is charged to the
 project's half-year budget (96 h jobs). `--queue regular` is charged to the user's budget (48 h jobs; more
-restarts). Before each pegasus submission the manager reads the balance with `amgr checkbalance` (cached 5 min) and
-submits only if cores × requested wall time fits in the balance minus `budget.reserve_coreh` (2000). Otherwise the run
-waits, with the reason shown on its card. PBS reserves that amount at submission and refunds the unused part at the
-end. On 13 Nov 2026: project hpc2502016, 2026.h2: 172,248 core-h; user calam.shadab: 49,110 core-h. A 96 h job
-on 3 nodes reserves 9,216 core-h.
+restarts). The user budget is **monthly**: 50,000 core-h credited on the 1st of each month (period `2026.mNN`),
+nothing carried over (`amgr report user -n calam.shadab -p 2026.m11`: opening balance 0, credit 50,000; October
+used 4). The project budget is per half-year and shared with the project's other users. PBS holds cores × requested
+wall when a job starts and refunds the unused part at the end. On 13 Nov 2026: project hpc2502016, 2026.h2:
+172,248 core-h; user calam.shadab: 49,110. On 25 Nov 19:15: user 8,688 left (32,000 charged, 9,312 held for the
+two running jobs), project 79,492. A 96 h job on 3 nodes reserves 9,216 core-h, a 48 h job on 4 nodes 6,144.
+
+The manager reads the balances every `budget_check_min` minutes (default 30, set on the page; 0 = only when a job is
+submitted or on "read now"). `amgr checkbalance` needs a login token made with `ssh -t calam.shadab@pegasus.iucaa.in
+amgr login` (password, expires after about 3 h; `amgr sshlogin` is refused for this account), so most reads fail. The
+last good reading is kept in `~/.sahyadri_mgr/budgets.json` and turned into an estimate: reading − what the manager
+submitted since (cores × requested wall) − our jobs waiting in PBS on that budget (from `qstat`). Refunds are not
+counted, so the estimate errs low. In a new month without a reading, the user budget is taken as
+`budget.monthly_coreh` (50,000) minus what was submitted that month. A project reading older than
+`budget.project_stale_h` (6 h) is not used (others spend it too). A job is submitted only if its core hours fit in
+the estimate minus `budget.reserve_coreh` (2000); otherwise the run waits (not a failure), and its card says why.
+The page (Summary → Core-hour budgets) shows each budget's estimate, its state (ok, estimate, assumed, unknown), the
+last amgr reading and the login command when the token has expired.
 
 **Page.** Tabs: Summary (runs per site and state, budgets, disk, plan file, the simulation queue and its limits,
 the log), Active, Upcoming (planned and scheduled runs not started yet), Finished (archived runs with the trash and

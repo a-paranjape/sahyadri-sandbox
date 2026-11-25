@@ -11,12 +11,13 @@ pegasus install is `~/sahyadri_pipeline` there.
 
 | File | What it controls | Edit? |
 |---|---|---|
-| `config.json` | Global limits (`max_sim_running`, `max_sim_queued`, `max_sim_restarts`, `max_rockstar`, `scratch_reserve_gb`, `heartbeat_s`, `max_pulls`); paths (`local_python`, `local_codes`, `scratch_root`, `plan_file`, `queues_file`); per-site block `sites.pegasus` (login, data node, scratch, python, sandbox, mirror, `sync_s`, its own limits, `max_pbs_queued`, budget user and `reserve_coreh`); the list of registered runs | Limits: use the page or `manager.py limits`. Anything else by hand, then restart the manager (`start_manager.sh stop; start_manager.sh start`) |
+| `config.json` | Global limits (`max_sim_running`, `max_sim_queued`, `max_sim_restarts`, `max_rockstar`, `scratch_reserve_gb`, `heartbeat_s`, `max_pulls`); paths (`local_python`, `local_codes`, `scratch_root`, `plan_file`, `queues_file`); per-site block `sites.pegasus` (login, data node, scratch, python, sandbox, mirror, `sync_s`, its own limits, `max_pbs_queued`, budget: `user`, `reserve_coreh`, `monthly_coreh`, `projects`, `project_stale_h`); `budget_check_min`; the list of registered runs | Limits: use the page or `manager.py limits`. Anything else by hand, then restart the manager (`start_manager.sh stop; start_manager.sh start`) |
 | `planned_runs.txt` | Runs to set up, register and schedule: site, queue, cosmology, N, L, realisations, priority, options (`hold`, `not_before=`, `keep_full_z=`, `keep_pct=`, `root=`, `archive=`). Reread every `plan_s` seconds (300) | Yes |
 | `queues.txt` | Which PBS queues take jobs: `open`, `drain` (no new runs; restarts and post-processing go on) or `closed` (nothing submitted), with optional per-queue `max_running` and `max_waiting`. Reread before every scheduling pass. A queue not listed is open | Yes, or the Summary tab buttons, or `manager.py queue <site> <queue> open\|drain\|closed` |
 | `queues.txt`, line `pawna archive` | Not a PBS queue: `closed` or `drain` holds all archive copies and pulls into `ARCHIVE` (verified runs wait, nothing fails); `open` archives them again, one after another | Yes |
 | `maintenance.txt` | Planned shutdowns per site (`site start end`, local time, end `-` if not known): jobs that would not end before the start wait, running simulations get a STOP file `maint_stop_h` before it and restart afterwards, jobs killed by the shutdown are resubmitted (README, Maintenance windows). Reread before every scheduling pass | Yes, or `manager.py maint <site> <start> <end> [note]` / `manager.py maint <site> clear` |
 | `config.json` keys `node_probe_min`, `node_bad_h`, `node_retry_max`, `node_probe_paths` | Node health probe interval in minutes (0 = off), hours a node is avoided after a job's failed node check, resubmissions after failed node checks per run and day, directories the probe writes to (default the scratch state directory and `/storage/$USER`) | `node_probe_min`: the Nodes card on the Summary tab, or `manager.py limits node_probe_min=N`; the others by hand |
+| `budgets.json` | Last amgr reading of each core-hour budget (pegasus user, monthly; project, half-year), what was submitted since and our queued core hours; written by the manager | Read only; the page shows it (Summary → Core-hour budgets: "read now", interval `budget_check_min`) |
 | `confs/` | The manager's saved copy of each run.conf, used when the run's own copy has been purged | No |
 | `manager.log`, `screen.log` | What the manager did | Read only |
 | `gui.sock`, `ssh-*` | Socket for the page and CLI; ssh connection sockets | No |
@@ -60,8 +61,10 @@ copy is in `~/sahyadri_pipeline/sahyadri-sandbox`.
 ## 4. Outside state the manager reads
 
 - **PBS:** `qstat` on pawna, and over ssh on the pegasus login node.
-- **Core-hour budgets** on pegasus (`amgr`); a job is submitted only if cores × requested wall time fits in the
-  balance minus `reserve_coreh`.
+- **Core-hour budgets** on pegasus (`amgr`), read every `budget_check_min` minutes (needs a token from
+  `amgr login`; the last reading is kept in `budgets.json` and debited by what was submitted since and by our jobs
+  waiting in PBS); a job is submitted only if cores × requested wall time fits in the estimate minus `reserve_coreh`.
+  User budget monthly (`monthly_coreh` on the 1st), project per half-year.
 - **Free space** on each scratch file system, kept above `scratch_reserve_gb`.
 - **Whether storage answers:** before touching a run's files the manager lists its state directory and writes,
   fsyncs and removes a small `.mgr_probe` file there (at most once a minute); for the archive it lists `ARCHIVE`.

@@ -122,6 +122,9 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    # exit 75) is avoided for node_bad_h hours or until a probe passes: jobs are pinned to a healthy node
                    # with room; a run's job is resubmitted after a failed node check at most node_retry_max times a day
                    node_probe_min=30, node_bad_h=6, node_retry_max=3, node_probe_paths=None,
+                   # core-hour budgets of the sites with one (pegasus amgr; class Budgets) read every
+                   # budget_check_min minutes (0 = only when a job is submitted or on the page's "read now")
+                   budget_check_min=30,
                    scratch_root='/user/shadab/sahyadri_scratch',
                    sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
                                            scratch_root='/data/project/hpc2502016/shadab/sahyadri_scratch',
@@ -130,10 +133,12 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                                            mirror='/user/shadab/sahyadri_mirror/pegasus', sync_s=120,
                                            max_sim_running=2, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
                                            scratch_reserve_gb=2000, max_pbs_queued=6,
-                                           # core-hour budgets (amgr): queue PBS_PROJECT set -> the project's, else
-                                           # the user's; a job is submitted only if cores x requested wall time fits
-                                           # in the balance minus budget_reserve_coreh
-                                           budget=dict(user='calam.shadab', reserve_coreh=2000)),
+                                           # core-hour budgets (amgr, class Budgets): PBS_PROJECT set -> the
+                                           # project's, else the user's (monthly, monthly_coreh on the 1st); a job
+                                           # is submitted only if cores x requested wall fits in the estimate minus
+                                           # reserve_coreh; projects: also shown on the page
+                                           budget=dict(user='calam.shadab', reserve_coreh=2000, monthly_coreh=50000,
+                                                       projects=['hpc2502016'], project_stale_h=6)),
                              # swarm (TIFR): login, data and PBS on the same host; no core-hour budgets
                              swarm=dict(login='shadab@swarm.theory.tifr.res.in', data='shadab@swarm.theory.tifr.res.in',
                                         scratch_root='/user1/shadab/sahyadri_scratch',
@@ -162,8 +167,8 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                                        max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=0,
                                        scratch_reserve_gb=2000, max_pbs_queued=4)))
 LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s',
-              'node_probe_min')
-ZERO_OK = ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb', 'node_probe_min')   # limits that may be 0
+              'node_probe_min', 'budget_check_min')
+ZERO_OK = ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb', 'node_probe_min', 'budget_check_min')   # limits that may be 0
 # max_pbs_queued: our jobs waiting in the site's PBS at most (pegasus queued_jobs_threshold: project 6, debug 2 per
 # user); with it, the post-processing stages are submitted one at a time, each after the previous one finished
 SITE_LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb',
@@ -311,13 +316,48 @@ def job_coreh(E, stage):
 
 
 class Budgets:
-    """amgr balances of the sites' budgets (core hours), cached; debited locally by what was just submitted."""
-    TTL = 300
+    """Core-hour balances of the sites' budgets (pegasus ``amgr``), read every ``budget_check_min`` minutes.
 
-    def __init__(self):
-        """Empty balance cache ``{(site, kind, name, period): [time, core-hours]}`` and its lock."""
-        self.cache = {}           # (site, kind, name, period) -> [t, balance]
+    ``amgr checkbalance`` needs a login token that the user makes with ``amgr login`` (password; it expires after
+    ~3 h, and ``amgr sshlogin`` is not allowed for our account), so most reads fail with "token expired". The last
+    good reading is kept (``HOME/budgets.json``, survives restarts) and turned into an estimate:
+
+        left = last amgr balance - core hours of jobs submitted since that reading (cores x requested wall)
+               - core hours PBS will hold for our jobs still waiting in the queue (held only when a job starts)
+
+    Refunds of unused wall time are not counted, so the estimate is low, never high. A user budget is monthly
+    (``2026.mNN``, ``monthly_coreh`` credited on the 1st, nothing carried over): a reading from an earlier month is
+    replaced by ``monthly_coreh``. A project budget is shared with the project's other users, so an estimate older
+    than ``project_stale_h`` hours is not trusted (submissions to it wait for a fresh reading).
+    """
+    FRESH = 300          # an amgr reading younger than this is used without asking again
+
+    def __init__(self, path=None):
+        """Load the saved readings ``{key: entry}`` (key ``site|kind|name|period``) from ``path``."""
+        self.path = path or os.path.join(HOME, 'budgets.json')
         self.lock = threading.Lock()
+        self.st = {}              # key -> dict(read, t, month, debit, queued, queued_t, err, err_t, ok_t)
+        try:
+            with open(self.path) as f:
+                self.st = json.load(f)
+        except (OSError, ValueError):
+            pass
+
+    def save(self):
+        """Write the readings (best effort)."""
+        try:
+            tmp = self.path + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(self.st, f, indent=1)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    @staticmethod
+    def month(t=None):
+        """amgr's monthly period of time ``t``: ``YYYY.mN``."""
+        lt = time.localtime(t or now())
+        return '%d.m%d' % (lt.tm_year, lt.tm_mon)
 
     @staticmethod
     def which(cfg, run):
@@ -330,55 +370,156 @@ class Budgets:
         if not B:
             return None
         proj = run.E.get('PBS_PROJECT') or ''
-        t = time.localtime()
-        period = '%d.h%d' % (t.tm_year, 1 if t.tm_mon <= 6 else 2)
-        return (run.site, 'project', proj, period) if proj else (run.site, 'user', B['user'], '')
+        return Budgets.project_key(run.site, proj) if proj else (run.site, 'user', B['user'], '')
 
-    def balance(self, cfg, key, fresh=False):
-        """Core-hour balance of budget ``key`` from ``amgr checkbalance`` on the site's login node.
+    @staticmethod
+    def project_key(site, proj):
+        """Key of project ``proj`` on ``site`` in the current half-year."""
+        t = time.localtime(now())
+        return (site, 'project', proj, '%d.h%d' % (t.tm_year, 1 if t.tm_mon <= 6 else 2))
 
-        Cached for ``TTL`` seconds unless ``fresh``; raises RuntimeError if the amgr output has no ``'cost'`` value.
-        """
-        with self.lock:
-            c = self.cache.get(key)
-            if c and not fresh and now() - c[0] < self.TTL:
-                return c[1]
+    @staticmethod
+    def k(key):
+        """String form of a key tuple (the JSON file's keys)."""
+        return '|'.join(key)
+
+    def keys(self, cfg, runs):
+        """The budgets to read: each budget site's user and its ``budget.projects``, and the budgets of the runs."""
+        out = []
+        for site, sc in cfg['sites'].items():
+            B = sc.get('budget')
+            if not B:
+                continue
+            out.append((site, 'user', B['user'], ''))
+            out += [self.project_key(site, p) for p in B.get('projects', [])]
+        for run in runs:
+            if run.site in cfg['sites']:
+                key = self.which(cfg, run)
+                if key and key not in out:
+                    out.append(key)
+        return out
+
+    def read(self, cfg, key):
+        """Ask amgr for the balance of ``key`` (and qstat for our waiting jobs); store it. True if amgr answered."""
         site, kind, name, period = key
-        cmd = 'amgr login >/dev/null 2>&1; amgr checkbalance %s -n %s%s' % (kind, shlex.quote(name),
-                                                                           ' -p %s' % period if period else '')
-        r = ssh(cfg['sites'][site]['login'], cmd, timeout=120)
-        m = re.search(r"'cost':\s*([-0-9.eE+]+)", r.stdout)
-        if not m:
-            raise RuntimeError('amgr balance %s: %s %s' % (key, r.stdout.strip()[-200:], r.stderr.strip()[-200:]))
+        sc = cfg['sites'][site]
+        cmd = 'amgr checkbalance %s -n %s%s < /dev/null 2>&1' % (kind, shlex.quote(name),
+                                                                 ' -p %s' % period if period else '')
+        try:
+            r = ssh(sc['login'], cmd, timeout=120)
+            out = (r.stdout or '') + (r.stderr or '')
+        except Exception as e:  # noqa: BLE001
+            out = 'ssh: %s' % e
+        m = re.search(r"'cost':\s*([-0-9.eE+]+)", out)
+        q = self.queued(sc, kind, name)
         with self.lock:
-            self.cache[key] = [now(), float(m.group(1))]
-        return float(m.group(1))
+            e = self.st.setdefault(self.k(key), {})
+            if q is not None:
+                e['queued'], e['queued_t'] = q, now()
+            if m:
+                e.update(read=float(m.group(1)), t=now(), month=self.month(), debit=0.0, err=None, err_t=None)
+            else:
+                msg = ' '.join(out.split())[-200:] or 'no output'
+                if 'token' in msg.lower() or 'log in' in msg.lower() or 'login' in msg.lower():
+                    msg = 'amgr login needed (%s)' % msg
+                if e.get('err') != msg:
+                    log('budget %s: %s' % (self.k(key), msg))
+                e.update(err=msg, err_t=now())
+        self.save()
+        return bool(m)
+
+    @staticmethod
+    def queued(sc, kind, name):
+        """Core hours (cores x requested wall) of our jobs waiting in the site's PBS on this budget, or None."""
+        user = sc['login'].split('@')[0]
+        try:
+            r = ssh(sc['login'], '/opt/pbs/bin/qstat -f -F json -u %s 2>/dev/null' % shlex.quote(user), timeout=60)
+            J = json.loads(r.stdout or '{}', strict=False).get('Jobs', {})
+        except Exception:  # noqa: BLE001
+            return None
+        tot = 0.0
+        for j in J.values():
+            if j.get('job_state') not in ('Q', 'H', 'W'):
+                continue
+            proj = j.get('project', '_pbs_project_default')
+            mine = (proj == name) if kind == 'project' else proj in ('', '_pbs_project_default')
+            if mine and j.get('job_owner', j.get('Job_Owner', '')).split('@')[0] == user:
+                rl = j.get('Resource_List', {})
+                tot += float(rl.get('ncpus', 0) or 0) * hours(rl.get('walltime', '0'))
+        return tot
+
+    def estimate(self, cfg, key):
+        """``(core hours left, state, note)``; state ``ok`` (fresh), ``estimate`` (from an older reading),
+        ``assumed`` (monthly credit, no reading this month) or ``unknown`` (no usable reading)."""
+        site, kind = key[0], key[1]
+        B = cfg['sites'][site].get('budget') or {}
+        e = self.st.get(self.k(key), {})
+        queued = e.get('queued', 0.0) or 0.0
+        if 'read' not in e:
+            return None, 'unknown', 'never read'
+        if kind == 'user' and e.get('month') != self.month():
+            credit = B.get('monthly_coreh')
+            if not credit:
+                return None, 'unknown', 'last reading is from %s' % e.get('month')
+            return float(credit) - e.get('debit_m', 0.0) - queued, 'assumed', \
+                'monthly credit %.0f (no amgr reading in %s yet)' % (float(credit), self.month())
+        left = e['read'] - e.get('debit', 0.0) - queued
+        age = now() - e['t']
+        if kind == 'project' and age > float(B.get('project_stale_h', 6)) * 3600:
+            return left, 'unknown', 'project reading %.1f h old (shared budget; needs a fresh amgr reading)' % (age / 3600)
+        return left, 'ok' if age < self.FRESH else 'estimate', ''
 
     def check(self, cfg, run, stages):
         """Raise ``BudgetWait`` if the budget of ``run`` cannot pay for ``stages`` (comma separated).
 
-        The need is the sum of :func:`job_coreh` over the stages; the site's ``reserve_coreh`` is kept back. A short
-        balance is re-read fresh before refusing. On success the need is subtracted from the cached balance, so
-        submissions between two amgr reads cannot overspend.
+        The need is the sum of :func:`job_coreh` over the stages; the site's ``reserve_coreh`` is kept back. A
+        reading older than ``FRESH`` s is renewed first (if the token still works). On success the need is debited,
+        so submissions between two amgr readings cannot overspend.
         """
         key = self.which(cfg, run)
         if key is None:
             return
+        e = self.st.get(self.k(key), {})
+        if now() - e.get('t', 0) > self.FRESH:
+            self.read(cfg, key)
         need = sum(job_coreh(run.E, st) for st in stages.split(','))
         reserve = float(cfg['sites'][run.site]['budget'].get('reserve_coreh', 0))
-        left = self.balance(cfg, key)
+        left, state, note = self.estimate(cfg, key)
+        name = '%s%s' % (key[2], ' ' + key[3] if key[3] else '')
+        if left is None or state == 'unknown':
+            raise BudgetWait('%s budget %s: balance not known (%s); run "amgr login" on %s' % (
+                run.site, name, note, cfg['sites'][run.site]['login']))
         if left - reserve < need:
-            left = self.balance(cfg, key, fresh=True)
-        if left - reserve < need:
-            raise BudgetWait('%s budget %s%s: %.0f core-h left, reserve %.0f, this submission (%s) reserves %.0f'
-                             % (run.site, key[2], ' ' + key[3] if key[3] else '', left, reserve, stages, need))
+            raise BudgetWait('%s budget %s: %.0f core-h left (%s%s), reserve %.0f, this submission (%s) needs %.0f'
+                             % (run.site, name, left, state, ', ' + note if note else '', reserve, stages, need))
         with self.lock:
-            self.cache[key][1] -= need
+            e = self.st.setdefault(self.k(key), {})
+            e['debit'] = e.get('debit', 0.0) + need
+            if e.get('month') != self.month():          # debits of this month, for the monthly-credit estimate
+                if e.get('debit_month') != self.month():
+                    e['debit_m'], e['debit_month'] = 0.0, self.month()
+                e['debit_m'] = e.get('debit_m', 0.0) + need
+        self.save()
 
-    def view(self):
-        """The cached balances as a list of dicts (site, kind, name, period, coreh, t) for the page."""
-        with self.lock:
-            return [dict(site=k[0], kind=k[1], name=k[2], period=k[3], coreh=v[1], t=v[0]) for k, v in self.cache.items()]
+    def refresh(self, cfg, runs):
+        """Read every budget (``keys``); called by the manager's budget thread."""
+        for key in self.keys(cfg, runs):
+            self.read(cfg, key)
+
+    def view(self, cfg):
+        """The budgets for the page: site, kind, name, period, coreh (estimate), state, note, amgr reading and
+        its time, our queued core hours, the last error and the login command."""
+        out = []
+        for ks, e in list(self.st.items()):
+            key = tuple(ks.split('|'))
+            if len(key) != 4 or key[0] not in cfg['sites']:
+                continue
+            left, state, note = self.estimate(cfg, key)
+            out.append(dict(site=key[0], kind=key[1], name=key[2], period=key[3] or self.month(), coreh=left,
+                            state=state, note=note, read=e.get('read'), t=e.get('t'), debit=e.get('debit', 0.0),
+                            queued=e.get('queued'), err=e.get('err'), err_t=e.get('err_t'),
+                            login='ssh -t %s amgr login' % cfg['sites'][key[0]]['login']))
+        return out
 
 
 BUDGETS = Budgets()
@@ -1205,6 +1346,8 @@ class Manager:
         self.node_flags = {}       # host -> dict(t, reasons, job, run): a job's node check failed there (exit 75)
         self.pbsn, self.pbsn_t = {}, 0.0     # pbsnodes: host -> dict(state, ncpus_free, mem_free_gb)
         self.probe_ev = threading.Event()
+        self.budget_ev = threading.Event()
+        self.budget_next = 0.0
         self.probe_next = 0.0
         self.deleting = {}         # (host, dir) -> time a deletion of a leftover directory started
         self.q = queue.Queue()
@@ -1732,6 +1875,23 @@ class Manager:
                 continue
             self.probe_ev.wait(timeout=60)
             self.probe_ev.clear()
+
+    def budget_loop(self):
+        """Thread: read the core-hour budgets every ``budget_check_min`` minutes (0: only on request)."""
+        time.sleep(30)
+        while True:
+            iv = float(self.cfg.get('budget_check_min', 30) or 0) * 60
+            if self.budget_next == 0 or (iv > 0 and now() >= self.budget_next):
+                try:
+                    BUDGETS.refresh(self.cfg, list(self.runs.values()))
+                except Exception as e:  # noqa: BLE001
+                    log('budget read: %s\n%s' % (e, traceback.format_exc()))
+                self.budget_next = now() + iv if iv > 0 else -1
+            elif iv > 0 and self.budget_next < 0:
+                self.budget_next = now()
+                continue
+            self.budget_ev.wait(timeout=60)
+            self.budget_ev.clear()
 
     def probe_one(self, host, args):
         """node_check.sh on ``host`` over ssh (script on stdin); its JSON result, or a 'bad' result if no answer."""
@@ -2572,6 +2732,10 @@ class Manager:
             self.next_hb = 0
             return ('%s: maintenance %s - %s' % (site, a['start'], a.get('end') or 'end not known')) if a.get('start') else (
                 '%s: maintenance windows removed' % site)
+        if act == 'read_budgets':
+            self.budget_next = 0
+            self.budget_ev.set()
+            return 'reading the budgets (results in about a minute)'
         if act == 'probe_nodes':
             self.probe_next = 0
             self.probe_ev.set()
@@ -2599,6 +2763,9 @@ class Manager:
                         self.cfg[k] = v
                         changed.append('%s=%d' % (k, v))
             save_cfg(self.cfg)
+            if any(c.startswith('budget_check_min=') for c in changed):
+                self.budget_next = 0
+                self.budget_ev.set()
             if any(c.startswith('node_probe_min=') for c in changed):
                 self.probe_next = 0
                 self.probe_ev.set()      # the probe thread picks up the new interval now
@@ -3135,7 +3302,8 @@ class Manager:
                                        login=self.cfg['sites'][site].get('login'), data=self.cfg['sites'][site].get('data'))
             self.snapshot = dict(t=now(), runs=runs, disk=self.disk, reserve_gb=self.cfg.get('scratch_reserve_gb'),
                                  limits={k: self.cfg.get(k) for k in LIMIT_KEYS}, sims_running=sr, sims_queued=sq,
-                                 sites=site_info, local_site=LOCAL, budgets=BUDGETS.view(), plan=self.plan_view,
+                                 sites=site_info, local_site=LOCAL, budgets=BUDGETS.view(self.cfg), budget_check_min=self.cfg.get('budget_check_min', 30),
+                                 budget_next=self.budget_next, plan=self.plan_view,
                                  plan_file=self.cfg.get('plan_file'), queues_file=self.cfg.get('queues_file'),
                                  queue_errors=self.queue_errors, queues=self.queues_view(derived),
                                  maintenance=self.maint_view(), maintenance_file=self.cfg.get('maintenance_file'),
@@ -3252,6 +3420,7 @@ class Manager:
         threading.Thread(target=self.sync_loop, daemon=True).start()
         threading.Thread(target=self.plan_loop, daemon=True).start()
         threading.Thread(target=self.probe_loop, daemon=True).start()
+        threading.Thread(target=self.budget_loop, daemon=True).start()
         log('manager on %s, page on %s, %d runs' % (socket.gethostname(), SOCK, len(self.runs)))
         signal.signal(signal.SIGTERM, _sigterm)
         derived = {}

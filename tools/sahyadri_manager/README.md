@@ -170,6 +170,19 @@ Restarts take the newest *complete* checkpoint (`job_sim.pbs`): the restart file
 non-empty data files `.chk.<i>` as `.chk.<i>.dec` files. An incomplete one is skipped (event `chk_skipped`) and the
 one before it is used. The `sim_rewind` that follows handles the outputs after it.
 
+## Core-hour budgets (pegasus)
+
+A pegasus job is charged to the user's budget (regular/debug queues; **monthly**, 50,000 core-h on the 1st, nothing
+carried over) or, with `PBS_PROJECT`, to the project's (half-year, shared with the project's other users). The
+manager reads `amgr checkbalance` every `budget_check_min` minutes (default 30; Summary → Core-hour budgets: "read
+every … min", "Read now"). amgr needs a token from `ssh -t calam.shadab@pegasus.iucaa.in amgr login` (password,
+about 3 h; `amgr sshlogin` is refused for this account), so between logins the manager works from its last reading
+(`budgets.json`): reading − what it submitted since − our jobs waiting in PBS on that budget. Refunds are not
+counted, so the estimate errs low. A new month without a reading counts as `budget.monthly_coreh`; a project reading
+older than `budget.project_stale_h` (6 h) is not used. A submission whose cores × requested wall does not fit in the
+estimate minus `budget.reserve_coreh` waits (not a failure), with the reason on the run card. Log in on pegasus and
+press "Read now" when the page says the balance is not known.
+
 ## Watchdog (alerts)
 
 Red **ALERT** lines on a run's card, also written to `manager.log` and the run's actions once when they start and

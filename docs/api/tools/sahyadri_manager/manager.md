@@ -77,7 +77,7 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
 - [`class BudgetWait`](#class-budgetwait) - Not enough core hours left on the site's budget for this submission (wait, not a failure).
 - [`hours`](#hours) - Convert a PBS walltime `HH[:MM[:SS]]` to hours (float).
 - [`job_coreh`](#job_coreh) - Core hours PBS reserves for one job of `stage` (cores x requested wall time), from the run config.
-- [`class Budgets`](#class-budgets) - amgr balances of the sites' budgets (core hours), cached; debited locally by what was just submitted.
+- [`class Budgets`](#class-budgets) - Core-hour balances of the sites' budgets (pegasus `amgr`), read every `budget_check_min` minutes.
 - [`class Probe`](#class-probe) - Is a file system answering? A small test (fn) in a thread, waited for at most `timeout` s; a test that has not returned by then marks the key down until it returns (NFS hard mounts hang instead of failing). Errors count as answering: only a hang is 'not responding'. Results younger than FRESH s are reused.
 - [`storage_test`](#storage_test) - List directory d and write, fsync and remove a small file in it.
 - [`archive_test`](#archive_test) - Stat the archive root (or its nearest existing parent) and list it.
@@ -226,15 +226,45 @@ Core hours PBS reserves for one job of `stage` (cores x requested wall time), fr
 class Budgets
 ```
 
-amgr balances of the sites' budgets (core hours), cached; debited locally by what was just submitted.
+```text
+Core-hour balances of the sites' budgets (pegasus ``amgr``), read every ``budget_check_min`` minutes.
+
+``amgr checkbalance`` needs a login token that the user makes with ``amgr login`` (password; it expires after
+~3 h, and ``amgr sshlogin`` is not allowed for our account), so most reads fail with "token expired". The last
+good reading is kept (``HOME/budgets.json``, survives restarts) and turned into an estimate:
+
+    left = last amgr balance - core hours of jobs submitted since that reading (cores x requested wall)
+           - core hours PBS will hold for our jobs still waiting in the queue (held only when a job starts)
+
+Refunds of unused wall time are not counted, so the estimate is low, never high. A user budget is monthly
+(``2026.mNN``, ``monthly_coreh`` credited on the 1st, nothing carried over): a reading from an earlier month is
+replaced by ``monthly_coreh``. A project budget is shared with the project's other users, so an estimate older
+than ``project_stale_h`` hours is not trusted (submissions to it wait for a fresh reading).
+```
 
 ### Budgets.__init__
 
 ```python
-__init__(self)
+__init__(self, path=None)
 ```
 
-Empty balance cache `{(site, kind, name, period): [time, core-hours]}` and its lock.
+Load the saved readings `{key: entry}` (key `site|kind|name|period`) from `path`.
+
+### Budgets.save
+
+```python
+save(self)
+```
+
+Write the readings (best effort).
+
+### Budgets.month
+
+```python
+month(t=None)
+```
+
+amgr's monthly period of time `t`: `YYYY.mN`.
 
 ### Budgets.which
 
@@ -247,15 +277,54 @@ Budget key of a run, or None when its site has no budget.
 A run with `PBS_PROJECT` is charged to that project in the current half-year period (`YYYY.h1`/`h2`),
 otherwise to the site's `budget.user`. Returns `(site, 'project'|'user', name, period)`.
 
-### Budgets.balance
+### Budgets.project_key
 
 ```python
-balance(self, cfg, key, fresh=False)
+project_key(site, proj)
 ```
 
-Core-hour balance of budget `key` from `amgr checkbalance` on the site's login node.
+Key of project `proj` on `site` in the current half-year.
 
-Cached for `TTL` seconds unless `fresh`; raises RuntimeError if the amgr output has no `'cost'` value.
+### Budgets.k
+
+```python
+k(key)
+```
+
+String form of a key tuple (the JSON file's keys).
+
+### Budgets.keys
+
+```python
+keys(self, cfg, runs)
+```
+
+The budgets to read: each budget site's user and its `budget.projects`, and the budgets of the runs.
+
+### Budgets.read
+
+```python
+read(self, cfg, key)
+```
+
+Ask amgr for the balance of `key` (and qstat for our waiting jobs); store it. True if amgr answered.
+
+### Budgets.queued
+
+```python
+queued(sc, kind, name)
+```
+
+Core hours (cores x requested wall) of our jobs waiting in the site's PBS on this budget, or None.
+
+### Budgets.estimate
+
+```python
+estimate(self, cfg, key)
+```
+
+`(core hours left, state, note)`; state `ok` (fresh), `estimate` (from an older reading),
+`assumed` (monthly credit, no reading this month) or `unknown` (no usable reading).
 
 ### Budgets.check
 
@@ -265,17 +334,26 @@ check(self, cfg, run, stages)
 
 Raise `BudgetWait` if the budget of `run` cannot pay for `stages` (comma separated).
 
-The need is the sum of `job_coreh` over the stages; the site's `reserve_coreh` is kept back. A short
-balance is re-read fresh before refusing. On success the need is subtracted from the cached balance, so
-submissions between two amgr reads cannot overspend.
+The need is the sum of `job_coreh` over the stages; the site's `reserve_coreh` is kept back. A
+reading older than `FRESH` s is renewed first (if the token still works). On success the need is debited,
+so submissions between two amgr readings cannot overspend.
+
+### Budgets.refresh
+
+```python
+refresh(self, cfg, runs)
+```
+
+Read every budget (`keys`); called by the manager's budget thread.
 
 ### Budgets.view
 
 ```python
-view(self)
+view(self, cfg)
 ```
 
-The cached balances as a list of dicts (site, kind, name, period, coreh, t) for the page.
+The budgets for the page: site, kind, name, period, coreh (estimate), state, note, amgr reading and
+its time, our queued core hours, the last error and the login command.
 
 ## class Probe
 
@@ -849,6 +927,14 @@ probe_loop(self)
 ```
 
 Thread: probe the nodes every `node_probe_min` minutes (0: only on request, the page's "probe now").
+
+### Manager.budget_loop
+
+```python
+budget_loop(self)
+```
+
+Thread: read the core-hour budgets every `budget_check_min` minutes (0: only on request).
 
 ### Manager.probe_one
 
