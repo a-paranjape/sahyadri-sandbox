@@ -559,6 +559,9 @@ usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits,par
   --wall    wall time of every stage at most HH:MM:SS (the run manager before a maintenance window; a simulation
             is stopped before it with a STOP file, its iWallRunTime in the parameter file stays as it is)
   --host    run every (single-node) stage on node NODE (the run manager, to avoid a node that failed its check)
+  --queue Q [--project P]  this submission only: PBS queue Q and qsub -P P instead of PBS_QUEUE/PBS_PROJECT of the
+            run.conf (the run manager's "next simulation job on another queue", e.g. pegasus project when the
+            user budget is short); --project '' drops -P
   --dry-run print the qsub commands only
 Prints the job ids; the chain is also written to $LOGS/chain.<run>.<date>.txt.
 ```

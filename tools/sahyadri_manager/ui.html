@@ -195,6 +195,7 @@ function renderRun(r, idx){
     ${Object.entries(r.alerts||{}).map(([k,a])=>`<div class="fail" title="${h(k)}"><b>ALERT</b> since ${when(a.t)}: ${h(a.msg)} <button onclick="act({run:'${h(r.name)}',action:'dismiss_alert',key:'${h(k)}'})" title="hide this alert until it changes">Dismiss</button></div>`).join('')}
     ${r.archive_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">archive waiting: ${h(r.archive_msg)}</div>`:''}
     ${r.budget_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">waiting for core hours: ${h(r.budget_msg)}</div>`:''}
+    ${r.queue_once?`<div class="small" style="margin-top:4px">next simulation job only: queue <b>${h(r.queue_once.queue)}</b>${r.queue_once.project?' -P '+h(r.queue_once.project):''} <button onclick="act({action:'queue_once', run:'${h(r.name)}', queue:''})">cancel</button></div>`:''}
     ${r.maint_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">${h(r.maint_msg)}</div>`:''}
     ${simline}
     <div class="snaps">${snaps}</div>

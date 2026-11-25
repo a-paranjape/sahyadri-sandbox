@@ -18,12 +18,15 @@
 #   --wall    wall time of every stage at most HH:MM:SS (the run manager before a maintenance window; a simulation
 #             is stopped before it with a STOP file, its iWallRunTime in the parameter file stays as it is)
 #   --host    run every (single-node) stage on node NODE (the run manager, to avoid a node that failed its check)
+#   --queue Q [--project P]  this submission only: PBS queue Q and qsub -P P instead of PBS_QUEUE/PBS_PROJECT of the
+#             run.conf (the run manager's "next simulation job on another queue", e.g. pegasus project when the
+#             user budget is short); --project '' drops -P
 #   --dry-run print the qsub commands only
 # Prints the job ids; the chain is also written to $LOGS/chain.<run>.<date>.txt.
 set -eu
 [ $# -ge 1 ] || { sed -n '2,12p' "$0"; exit 1; }
 CONF=$(readlink -f "$1"); shift
-STAGES=sim,rockstar,ctrees,vahc,fits,parquet; AFTER=; HOLD=; DRY=; RESTART=; RSSNAPS=; WALLCAP=; HOSTPIN=
+STAGES=sim,rockstar,ctrees,vahc,fits,parquet; AFTER=; HOLD=; DRY=; RESTART=; RSSNAPS=; WALLCAP=; HOSTPIN=; QOVR=; POVR=-
 while [ $# -gt 0 ]; do
   case $1 in
     --stages) STAGES=$2; shift 2 ;;
@@ -34,11 +37,15 @@ while [ $# -gt 0 ]; do
     --rs-snaps) RSSNAPS=$2; shift 2 ;;
     --wall) WALLCAP=$2; shift 2 ;;
     --host) HOSTPIN=$2; shift 2 ;;
+    --queue) QOVR=$2; shift 2 ;;
+    --project) POVR=$2; shift 2 ;;
     *) echo "unknown option $1"; exit 1 ;;
   esac
 done
 HERE=$(dirname "$(readlink -f "$0")")
 set -a; source "$CONF"; set +a
+if [ -n "$QOVR" ]; then PBS_QUEUE=$QOVR; fi
+if [ "$POVR" != - ]; then PBS_PROJECT=$POVR; fi
 [ "$NPART" -le 512 ] || echo "WARNING: NPART=$NPART > 512: runs above 512^3 need approval before submission"
 mkdir -p "$LOGS"
 QSUB=$(command -v qsub || echo /opt/pbs/bin/qsub)

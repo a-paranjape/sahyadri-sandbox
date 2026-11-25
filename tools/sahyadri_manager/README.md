@@ -183,6 +183,11 @@ older than `budget.project_stale_h` (6 h) is not used. A submission whose cores 
 estimate minus `budget.reserve_coreh` waits (not a failure), with the reason on the run card. Log in on pegasus and
 press "Read now" when the page says the balance is not known.
 
+**One job on another queue.** `manager.py queue-once <stem/rN> project hpc2502016` sends the run's next simulation
+job (restart) to the pegasus project queue, charged to the project budget; the setting clears itself after that
+one submission, and later jobs use the run.conf's queue again (`manager.py queue-once <stem/rN>` cancels; the run
+card shows it with a cancel button). submit_pipeline.sh takes `--queue Q --project P` for this.
+
 ## Watchdog (alerts)
 
 Red **ALERT** lines on a run's card, also written to `manager.log` and the run's actions once when they start and

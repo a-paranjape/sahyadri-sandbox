@@ -902,7 +902,9 @@ counted, so the estimate errs low. In a new month without a reading, the user bu
 `budget.project_stale_h` (6 h) is not used (others spend it too). A job is submitted only if its core hours fit in
 the estimate minus `budget.reserve_coreh` (2000); otherwise the run waits (not a failure), and its card says why.
 The page (Summary → Core-hour budgets) shows each budget's estimate, its state (ok, estimate, assumed, unknown), the
-last amgr reading and the login command when the token has expired.
+last amgr reading and the login command when the token has expired. `manager.py queue-once <stem/rN> project hpc2502016` puts only the
+run's next simulation job on the project queue (charged to the project); later jobs go back to the run.conf's queue.
+Used 25 Nov for one restart each of L200N2048 r2 and L200N1600 r2 (user budget short until 1 Dec).
 
 **Page.** Tabs: Summary (runs per site and state, budgets, disk, plan file, the simulation queue and its limits,
 the log), Active, Upcoming (planned and scheduled runs not started yet), Finished (archived runs with the trash and

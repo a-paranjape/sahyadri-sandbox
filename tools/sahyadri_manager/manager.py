@@ -13,6 +13,7 @@
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
   manager.py unschedule <stem/rN>
   manager.py queue <site> <queue> open|drain|closed   change a queue's state in the queues file (~/.sahyadri_mgr/queues.txt)
+  manager.py queue-once <stem/rN> <queue> [project]   the run's next simulation job only on that queue (pegasus: project hpc2502016); no queue: clear
   manager.py maint [<site> <start> <end|-> [note] | <site> clear]   list / add / remove maintenance windows
                                    (~/.sahyadri_mgr/maintenance.txt; YYYY-MM-DDTHH:MM local time; see below)
   manager.py limits [max_sim_running=3] [max_sim_queued=1] [max_sim_restarts=5] [max_rockstar=1] [scratch_reserve_gb=2000]
@@ -360,7 +361,7 @@ class Budgets:
         return '%d.m%d' % (lt.tm_year, lt.tm_mon)
 
     @staticmethod
-    def which(cfg, run):
+    def which(cfg, run, project=None):
         """Budget key of a run, or None when its site has no budget.
 
         A run with ``PBS_PROJECT`` is charged to that project in the current half-year period (``YYYY.h1``/``h2``),
@@ -369,7 +370,7 @@ class Budgets:
         B = cfg['sites'][run.site].get('budget')
         if not B:
             return None
-        proj = run.E.get('PBS_PROJECT') or ''
+        proj = (run.E.get('PBS_PROJECT') or '') if project is None else project
         return Budgets.project_key(run.site, proj) if proj else (run.site, 'user', B['user'], '')
 
     @staticmethod
@@ -469,14 +470,14 @@ class Budgets:
             return left, 'unknown', 'project reading %.1f h old (shared budget; needs a fresh amgr reading)' % (age / 3600)
         return left, 'ok' if age < self.FRESH else 'estimate', ''
 
-    def check(self, cfg, run, stages):
+    def check(self, cfg, run, stages, project=None):
         """Raise ``BudgetWait`` if the budget of ``run`` cannot pay for ``stages`` (comma separated).
 
         The need is the sum of :func:`job_coreh` over the stages; the site's ``reserve_coreh`` is kept back. A
         reading older than ``FRESH`` s is renewed first (if the token still works). On success the need is debited,
         so submissions between two amgr readings cannot overspend.
         """
-        key = self.which(cfg, run)
+        key = self.which(cfg, run, project)     # project: this submission's -P (None: the run.conf's)
         if key is None:
             return
         e = self.st.get(self.k(key), {})
@@ -1265,8 +1266,12 @@ class Run:
                 what = dict(what or {}, host=host)
         if stages in ('archive', 'archb') and (self.remote or (Run.CFG or {}).get('archive_on_head', True)):
             return self.start_pull(what, stage=stages)
+        once = self.ms.get('queue_once') if 'sim' in stages.split(',') else None
+        if once:            # the next simulation job only: another queue/project (Manager.action 'queue_once')
+            extra = list(extra) + ['--queue', once['queue'], '--project', once.get('project') or '']
+            what = dict(what or {}, queue=once['queue'], project=once.get('project') or '')
         if self.remote:     # qsub on the site's login node, with the run's own run.conf there
-            BUDGETS.check(cfg or Run.CFG, self, stages)
+            BUDGETS.check(cfg or Run.CFG, self, stages, project=(once.get('project') or '') if once else None)
             sub = os.path.join(self.E['REMOTE_SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'submit_pipeline.sh')
             line = ' '.join(shlex.quote(x) for x in ['bash', sub, self.E['REMOTE_CONF'], '--stages', stages] + list(extra))
             r = ssh((cfg or Run.CFG)['sites'][self.site]['login'], 'PATH=/opt/pbs/bin:$PATH ' + line)
@@ -1291,8 +1296,13 @@ class Run:
             if what:
                 rec.update(what)
             self.ms['submitted'].append(rec)
+        if once:
+            self.ms['queue_once'] = None
         self.save()
         self.note('submitted %s' % ', '.join('%s %s' % x for x in ids) + (' (%s)' % what if what else ''))
+        if once:
+            self.note('one-time queue %s%s used; later simulation jobs go to %s again'
+                      % (once['queue'], ' -P %s' % once['project'] if once.get('project') else '', run_queue(self)))
         return ids
 
     def start_pull(self, what=None, stage='archive'):
@@ -2732,6 +2742,21 @@ class Manager:
             self.next_hb = 0
             return ('%s: maintenance %s - %s' % (site, a['start'], a.get('end') or 'end not known')) if a.get('start') else (
                 '%s: maintenance windows removed' % site)
+        if act == 'queue_once':
+            run = next((r for r in self.runs.values() if r.name == a.get('run') or r.conf == a.get('run')), None)
+            if run is None:
+                raise ValueError('no run %s' % a.get('run'))
+            q = (a.get('queue') or '').strip()
+            if not q:
+                run.ms['queue_once'] = None
+                run.note('one-time queue cleared')
+                return 'cleared'
+            if not re.match(r'^[\w.-]+$', q) or not re.match(r'^[\w.-]*$', a.get('project') or ''):
+                raise ValueError('bad queue or project name')
+            run.ms['queue_once'] = dict(queue=q, project=a.get('project') or '', t=now())
+            run.note('next simulation job only: queue %s%s (then %s again)'
+                     % (q, ' -P %s' % a['project'] if a.get('project') else '', run_queue(run)))
+            return 'next simulation job of %s goes to %s' % (run.name, q)
         if act == 'read_budgets':
             self.budget_next = 0
             self.budget_ev.set()
@@ -3278,7 +3303,7 @@ class Manager:
                 trash=run.ms.get('trash'), purged=run.ms.get('purged'), scheduled=run.ms.get('scheduled'),
                 restarts=run.ms.get('restarts', 0), actions=run.ms.get('actions', [])[-30:],
                 budget_msg=getattr(run, 'budget_msg', None) if getattr(run, 'budget_wait', None) else None,
-                maint_msg=getattr(run, 'maint_msg', None),
+                maint_msg=getattr(run, 'maint_msg', None), queue_once=run.ms.get('queue_once'),
                 stalled=getattr(run, 'stalled', None), archive_msg=getattr(run, 'archive_msg', None),
                 alerts=getattr(run, 'alerts_shown', {}), rs_redo=D.get('rs_redo', []), rewinds=D.get('rewinds', []),
                 keep=dict(full=pl['full_z'] if pl else [], pct=pl['subsample_pct'] if pl else None,
@@ -3662,6 +3687,11 @@ def main():
         if len(sys.argv) != 5:
             sys.exit('usage: manager.py queue <site> <queue> open|drain|closed')
         sys.exit(call(dict(action='set_queue', site=sys.argv[2], queue=sys.argv[3], state=sys.argv[4])))
+    elif cmd == 'queue-once':
+        if len(sys.argv) not in (3, 4, 5):
+            sys.exit('usage: manager.py queue-once <stem/rN> <queue> [project]   |   manager.py queue-once <stem/rN> (clear)')
+        sys.exit(call(dict(action='queue_once', run=sys.argv[2], queue=sys.argv[3] if len(sys.argv) > 3 else '',
+                           project=sys.argv[4] if len(sys.argv) > 4 else '')))
     elif cmd == 'maint':
         if len(sys.argv) == 2:
             w, errs = read_maint(load_cfg().get('maintenance_file'))

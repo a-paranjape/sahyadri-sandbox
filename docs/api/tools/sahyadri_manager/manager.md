@@ -19,6 +19,7 @@ sahyadri_manager: runs the Sahyadri pipeline for many runs from the pawna head n
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
   manager.py unschedule <stem/rN>
   manager.py queue <site> <queue> open|drain|closed   change a queue's state in the queues file (~/.sahyadri_mgr/queues.txt)
+  manager.py queue-once <stem/rN> <queue> [project]   the run's next simulation job only on that queue (pegasus: project hpc2502016); no queue: clear
   manager.py maint [<site> <start> <end|-> [note] | <site> clear]   list / add / remove maintenance windows
                                    (~/.sahyadri_mgr/maintenance.txt; YYYY-MM-DDTHH:MM local time; see below)
   manager.py limits [max_sim_running=3] [max_sim_queued=1] [max_sim_restarts=5] [max_rockstar=1] [scratch_reserve_gb=2000]
@@ -269,7 +270,7 @@ amgr's monthly period of time `t`: `YYYY.mN`.
 ### Budgets.which
 
 ```python
-which(cfg, run)
+which(cfg, run, project=None)
 ```
 
 Budget key of a run, or None when its site has no budget.
@@ -329,7 +330,7 @@ estimate(self, cfg, key)
 ### Budgets.check
 
 ```python
-check(self, cfg, run, stages)
+check(self, cfg, run, stages, project=None)
 ```
 
 Raise `BudgetWait` if the budget of `run` cannot pay for `stages` (comma separated).
