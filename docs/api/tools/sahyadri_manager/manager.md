@@ -19,6 +19,8 @@ sahyadri_manager: runs the Sahyadri pipeline for many runs from the pawna head n
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
   manager.py unschedule <stem/rN>
   manager.py queue <site> <queue> open|drain|closed   change a queue's state in the queues file (~/.sahyadri_mgr/queues.txt)
+  manager.py maint [<site> <start> <end|-> [note] | <site> clear]   list / add / remove maintenance windows
+                                   (~/.sahyadri_mgr/maintenance.txt; YYYY-MM-DDTHH:MM local time; see below)
   manager.py limits [max_sim_running=3] [max_sim_queued=1] [max_sim_restarts=5] [max_rockstar=1] [scratch_reserve_gb=2000]
   On the Mac: open_gui.sh  (ssh tunnel to the socket, opens http://localhost:8765)
 
@@ -40,6 +42,12 @@ manager.json written here; nothing is lost when the manager stops, it catches up
     all earlier outputs are written, their kept particle files (the bulk of a run) are copied (pulled from another
     site) and checked; the final archive skips them. A failed batch only stops further batches of that run
   * a failed job stops the run's automation (shown in red; retry from the page)
+  * maintenance windows (maintenance.txt: site start end): before one, jobs go in only if they are expected to end
+    maint_guard_min before it (earlier jobs of the stage, else the wall time; a simulation's wall time is cut to the
+    start and it needs maint_min_sim_h to compute); maint_stop_h before the start each running simulation of the site
+    gets a STOP file (checkpoint, clean exit) and waiting simulation jobs are taken out (qdel); after the window
+    (+ maint_settle_min) the simulations restart (not counted in max_sim_restarts) and jobs killed by the shutdown
+    are resubmitted instead of stopping the automation
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to
     <SCRATCH>/.trash/ (instant, can be undone), then purge; both re-check the archive manifest first
 
@@ -78,6 +86,11 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
 - [`read_plan`](#read_plan) - planned\_runs.txt -&gt; [dict(site, queue, cosmo, N, L, real, priority, opts, line, lineno, name)]; malformed lines come back with 'error'.
 - [`read_queues`](#read_queues) - queues.txt -&gt; ({(site, queue): dict(state, max\_running, max\_waiting, lineno)}, [errors]). Columns: site queue state [max\_running|-] [max\_waiting|-] [# comment]. A queue not listed is open, without limits of its own.
 - [`set_queue_state`](#set_queue_state) - Rewrite the state column of site/queue in queues.txt (appends a line when the queue is not listed).
+- [`class MaintWait`](#class-maintwait) - A submission refused because of a maintenance window of the site (the message says which and why).
+- [`parse_when`](#parse_when) - `YYYY-MM-DDTHH:MM` (or with a space or `_` instead of `T`; local time) -&gt; epoch seconds.
+- [`read_maint`](#read_maint) - maintenance.txt -&gt; ({site: [dict(start, end, note, lineno)] sorted by start}, [errors]).
+- [`set_maint`](#set_maint) - Add a window `site start end` to maintenance.txt, or (`start` None) remove all lines of `site`.
+- [`hms`](#hms) - Seconds -&gt; a PBS walltime `HH:MM:SS` (rounded down to whole minutes).
 - [`run_queue`](#run_queue) - The PBS queue of a run: `PBS_QUEUE` from its run.conf, else the site's default queue.
 - [`site_cfg`](#site_cfg) - Limits of a site: the top-level ones for this host (pawna), sites.&lt;name&gt; for the others.
 - [`mirror_conf`](#mirror_conf) - Fetch a remote run.conf and write its mirror config here; returns the mirror config's path.
@@ -88,7 +101,7 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
 - [`jtime`](#jtime) - When a job was submitted (the manager's clock), else started: orders PBS jobs and head-node processes (L&lt;epoch&gt;) alike, which job numbers cannot.
 - [`jobnum`](#jobnum) - PBS job number; local processes (archive pulls) are 'L&lt;epoch&gt;'.
 - [`short`](#short) - PBS job id without the server suffix: `'2539127.pawna'` -&gt; `'2539127'`.
-- [`class Run`](#class-run) - One simulation realisation known to the manager, described by its run.conf.
+- [`class Run`](#class-run) - 
 - [`class Manager`](#class-manager) - The run manager: one process that watches all runs, submits their pipeline stages and serves the page.
 - [`_sigterm`](#_sigterm) - SIGTERM handler: turn the signal into KeyboardInterrupt so `serve` shuts down cleanly.
 - [`class UnixHTTPServer`](#class-unixhttpserver) - Threaded HTTP server on a unix socket (the page is reached through an ssh-forwarded socket).
@@ -362,6 +375,50 @@ set_queue_state(path, site, q, state)
 
 Rewrite the state column of site/queue in queues.txt (appends a line when the queue is not listed).
 
+## class MaintWait
+
+```python
+class MaintWait(Exception)
+```
+
+A submission refused because of a maintenance window of the site (the message says which and why).
+
+## parse_when
+
+```python
+parse_when(text)
+```
+
+`YYYY-MM-DDTHH:MM` (or with a space or `_` instead of `T`; local time) -&gt; epoch seconds.
+
+## read_maint
+
+```python
+read_maint(path)
+```
+
+maintenance.txt -&gt; ({site: [dict(start, end, note, lineno)] sorted by start}, [errors]).
+
+Columns: `site start end [# note]`, times `YYYY-MM-DDTHH:MM` in local time (IST on pawna); `end` `-`
+when not known: the window then lasts until the line is removed or given an end. Lines stay after a window
+has passed (they are ignored then, except that jobs killed during it are recognised as such).
+
+## set_maint
+
+```python
+set_maint(path, site, start=None, end=None, note='')
+```
+
+Add a window `site start end` to maintenance.txt, or (`start` None) remove all lines of `site`.
+
+## hms
+
+```python
+hms(sec)
+```
+
+Seconds -&gt; a PBS walltime `HH:MM:SS` (rounded down to whole minutes).
+
 ## run_queue
 
 ```python
@@ -451,13 +508,7 @@ PBS job id without the server suffix: `'2539127.pawna'` -&gt; `'2539127'`.
 class Run
 ```
 
-One simulation realisation known to the manager, described by its run.conf.
-
-Holds the configuration (`E`), the derived paths (`P`, from `retention.paths`), the manager's own state
-file `ms` (paused, scheduled, failed, trash, acknowledged jobs, action history), the events written by the
-pipeline jobs (`state/events/*.jsonl`) and caches of the simulation progress. `derive` turns events and the
-PBS queue into the run's current status; `submit` starts pipeline stages. Remote runs (another site) keep a
-local mirror of their state directory and are submitted over ssh.
+_No docstring._
 
 ### Run.__init__
 
@@ -759,6 +810,150 @@ A job is stalled when its own log `run.<job>.log` has not changed for `max(sim_s
 sim_stall_steps / rate)` (catches a hang before the first step), and alerts on swap activity or low memory
 from the job's `node_mem` events (`swap_alert`).
 
+### Manager.load_maint
+
+```python
+load_maint(self)
+```
+
+Re-read maintenance.txt (windows per site) if it changed; log it.
+
+### Manager.maint_label
+
+```python
+maint_label(site, w)
+```
+
+`maintenance of <site> <start> - <end>` for messages.
+
+### Manager.maint_next
+
+```python
+maint_next(self, site)
+```
+
+The window of `site` that matters now: the first not yet over (end + maint\_settle\_min), or None.
+
+### Manager.maint_now
+
+```python
+maint_now(self, site)
+```
+
+The window of `site` in progress (started, not over including the settle time), or None.
+
+### Manager.maint_stop_h
+
+```python
+maint_stop_h(self, site)
+```
+
+Hours before a window's start at which running simulations of `site` get their STOP file.
+
+### Manager.stage_wall_s
+
+```python
+stage_wall_s(self, run, stage)
+```
+
+Requested wall time of `stage` (run.conf, else submit\_pipeline.sh's default) in seconds.
+
+### Manager.expected_s
+
+```python
+expected_s(self, run, stage, what=None)
+```
+
+Expected run time (s) of one job of `stage`: 1.25 x the longest done job of that stage in this run,
+else in the runs of the same site and particle number (Rockstar: per snapshot x the batch size); at most
+the requested wall time, which is also the answer without such jobs.
+
+### Manager.maint_gate
+
+```python
+maint_gate(self, run, stages, what=None)
+```
+
+Called for every submission (Run.GATE): raise MaintWait if a maintenance window of the run's site (for
+archive copies and pulls also of this host) is in progress or the job would not end
+`maint_guard_min` before its start; return a shorter wall time (`HH:MM:SS`) when the requested one
+would run past the start, else None. A simulation needs `maint_min_sim_h` of computing before its STOP
+(`maint_stop_h` before the start); it stops cleanly there and restarts after the window.
+
+### Manager.maint_stopped
+
+```python
+maint_stopped(self, run)
+```
+
+Simulation jobs of `run` that got a maintenance STOP file.
+
+### Manager.sim_dir_cmd
+
+```python
+sim_dir_cmd(self, run)
+```
+
+(host or None, simulation directory) of a run: on the site for a remote run, here otherwise.
+
+### Manager.maint_actions
+
+```python
+maint_actions(self, derived)
+```
+
+Before a window (from `maint_stop_h` before its start): write a STOP file in the run directory of every
+running simulation of the site (pkdgrav3 checkpoints, exits cleanly and removes the file; the restart is
+scheduled for after the window), and take simulation jobs still waiting in PBS out (qdel) and schedule
+them again for after the window (they could start with too little time, or after it with a cut wall
+time). Each job once per window (`maint_done` in manager.json).
+
+### Manager.has_checkpoint
+
+```python
+has_checkpoint(self, run, D)
+```
+
+Does the run have a checkpoint to restart from? Here: checkpoints/\*.chk; a remote run (checkpoints
+not mirrored): an earlier simulation job stopped cleanly or itself restarted from one.
+
+### Manager.maint_killed
+
+```python
+maint_killed(self, run, j)
+```
+
+Did job `j` (failed or vanished) end because of a maintenance window: started (or submitted) before a
+window of its site (archive copies and pulls: also of this host) began, and ended no earlier than an hour
+before it (or has no end event)? Windows that ended more than 7 days ago are not considered.
+
+### Manager.maint_lost
+
+```python
+maint_lost(self, run, j, D)
+```
+
+A job killed by a maintenance shutdown: a simulation is scheduled to restart after the window; any other
+stage is marked failed with `maint` set and resubmitted automatically once the window is over
+(`maint_retry`). Returns True if the run's automation now waits for that.
+
+### Manager.maint_retry
+
+```python
+maint_retry(self, run)
+```
+
+Resubmit a job killed by a maintenance shutdown (the retry action) once its window is over; on a refusal
+(e.g. another window) the failure stays marked for the next pass.
+
+### Manager.maint_view
+
+```python
+maint_view(self)
+```
+
+Windows for the page: site, start, end, note, state (upcoming / stopping / in progress / over).
+
 ### Manager.load_queues
 
 ```python
@@ -872,7 +1067,7 @@ action(self, a)
 
 Carry out an action from the page or the CLI (dict `a` with `action` and its arguments).
 
-Actions: add\_run, unretire, refresh, set\_queue, set\_limits, delete\_preview, delete\_run, remove\_run,
+Actions: add\_run, unretire, refresh, set\_queue, set\_maint, set\_limits, delete\_preview, delete\_run, remove\_run,
 dismiss\_alert, pause, resume, reload\_conf, schedule, set\_priority, unschedule, submit\_sim (`restart`),
 retry, postprocess, ack, check\_trash, approve\_trash, undo\_trash, approve\_purge. Returns a message; raises
 ValueError for a refused action. Slow actions run in a worker thread (`slow_action`).

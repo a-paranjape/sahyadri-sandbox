@@ -4,7 +4,7 @@ Every file that decides what the Sahyadri run manager does, grouped by where it 
 production setup: the manager runs on the pawna head node from `/user/shadab/sahyadri_prod/sahyadri-sandbox`, and the
 pegasus install is `~/sahyadri_pipeline` there.
 
-**In practice you edit only `planned_runs.txt` and `queues.txt`, and change limits on the page or with
+**In practice you edit only `planned_runs.txt`, `queues.txt` and (before a shutdown) `maintenance.txt`, and change limits on the page or with
 `manager.py limits`.** Edit a run's `run.conf` only for something special to that one run.
 
 ## 1. Manager settings: `~/.sahyadri_mgr/` on pawna
@@ -15,6 +15,7 @@ pegasus install is `~/sahyadri_pipeline` there.
 | `planned_runs.txt` | Runs to set up, register and schedule: site, queue, cosmology, N, L, realisations, priority, options (`hold`, `not_before=`, `keep_full_z=`, `keep_pct=`, `root=`, `archive=`). Reread every `plan_s` seconds (300) | Yes |
 | `queues.txt` | Which PBS queues take jobs: `open`, `drain` (no new runs; restarts and post-processing go on) or `closed` (nothing submitted), with optional per-queue `max_running` and `max_waiting`. Reread before every scheduling pass. A queue not listed is open | Yes, or the Summary tab buttons, or `manager.py queue <site> <queue> open\|drain\|closed` |
 | `queues.txt`, line `pawna archive` | Not a PBS queue: `closed` or `drain` holds all archive copies and pulls into `ARCHIVE` (verified runs wait, nothing fails); `open` archives them again, one after another | Yes |
+| `maintenance.txt` | Planned shutdowns per site (`site start end`, local time, end `-` if not known): jobs that would not end before the start wait, running simulations get a STOP file `maint_stop_h` before it and restart afterwards, jobs killed by the shutdown are resubmitted (README, Maintenance windows). Reread before every scheduling pass | Yes, or `manager.py maint <site> <start> <end> [note]` / `manager.py maint <site> clear` |
 | `confs/` | The manager's saved copy of each run.conf, used when the run's own copy has been purged | No |
 | `manager.log`, `screen.log` | What the manager did | Read only |
 | `gui.sock`, `ssh-*` | Socket for the page and CLI; ssh connection sockets | No |

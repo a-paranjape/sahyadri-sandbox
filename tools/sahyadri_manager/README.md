@@ -97,6 +97,40 @@ Each registered run's `run.conf` is copied to `~/.sahyadri_mgr/confs/` when it i
   stops watching its directories, so the other runs (e.g. on pegasus) go on. An `ARCHIVE` that does not answer
   holds that run's archive the same way. All resumes by itself once the test returns.
 
+## Maintenance windows
+
+A planned shutdown of a site goes in `~/.sahyadri_mgr/maintenance.txt`, one line per window:
+`site start end [# note]`, times `YYYY-MM-DDTHH:MM` in local time (IST), `end` `-` when not known. Use the CLI
+(the file is reread before every scheduling pass; the Summary tab lists the windows):
+
+    manager.py maint pawna 2026-11-27T08:00 2026-11-27T20:00 cluster maintenance
+    manager.py maint swarm 2026-11-27T08:00 -
+    manager.py maint                     # list
+    manager.py maint swarm clear         # remove the site's windows (e.g. to give an end time: clear, add again)
+
+What the manager does for the run's site (for archive copies and pulls also when the window is pawna's, the head
+node running them):
+
+* **Before the start:** a job goes in only if it is expected to end `maint_guard_min` (30) before the start. The
+  expected time is 1.25 x the longest earlier job of that stage in the run (else in runs of the same site and N;
+  Rockstar per snapshot x the batch size), at most the requested wall time, which is also the estimate without
+  earlier jobs. A job that fits but whose requested wall time runs past the start is submitted with its wall time
+  cut to the start (`submit_pipeline.sh --wall`). Everything else waits, with the reason on the run's card.
+* **Simulations:** a new one or a restart is submitted only with at least `maint_min_sim_h` (4) h of computing
+  before the STOP time; its wall time is cut to the start. At `maint_stop_h` before the start (pawna 6 h: the
+  2048^3 checkpoint must still drain to NFS; other sites 2 h, `sites.<name>.maint_stop_h`) every running
+  simulation of the site gets a `STOP` file in its run directory: pkdgrav3 finishes the step, writes a checkpoint
+  and exits cleanly (it deletes the file). Simulation jobs still waiting in PBS then are deleted (qdel) and
+  scheduled again. All of them restart after the window, not counted in `max_sim_restarts`.
+* **During the window** (until `maint_settle_min` (30) after its end; without an end until the line is changed):
+  nothing is submitted to the site.
+* **After it:** jobs that were running or waiting when the window started and failed or vanished are not
+  failures: a simulation is scheduled to restart from its newest checkpoint, other stages are resubmitted
+  automatically (the "retry"), archive batches are simply done again by the next batch.
+
+When pawna itself is down the manager stops with it; start it again after the reboot
+(`start_manager.sh start`), it then catches up as described.
+
 ## Watchdog (alerts)
 
 Red **ALERT** lines on a run's card, also written to `manager.log` and the run's actions once when they start and

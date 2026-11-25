@@ -194,6 +194,7 @@ function renderRun(r, idx){
     ${Object.entries(r.alerts||{}).map(([k,a])=>`<div class="fail" title="${h(k)}"><b>ALERT</b> since ${when(a.t)}: ${h(a.msg)} <button onclick="act({run:'${h(r.name)}',action:'dismiss_alert',key:'${h(k)}'})" title="hide this alert until it changes">Dismiss</button></div>`).join('')}
     ${r.archive_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">archive waiting: ${h(r.archive_msg)}</div>`:''}
     ${r.budget_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">waiting for core hours: ${h(r.budget_msg)}</div>`:''}
+    ${r.maint_msg?`<div class="fail" style="border-color:var(--wait);background:var(--waitbg)">${h(r.maint_msg)}</div>`:''}
     ${simline}
     <div class="snaps">${snaps}</div>
     <div class="legend small muted">snapshots:<span style="background:var(--off)"></span>planned<span style="background:var(--ready)"></span>written<span style="background:var(--done)"></span>halos found<span style="outline:2px solid var(--full)"></span>kept in full</div>
@@ -378,6 +379,11 @@ function renderTabs(){
         `<td class="num">${x.sims_running}</td><td class="num">${x.sims_waiting}</td><td class="num">${x.scheduled||''}</td><td class="num">${x.runs}</td>`}
         <td class="small">${x.max_running!=null?'running ≤ '+x.max_running:''}${x.max_waiting!=null?' waiting ≤ '+x.max_waiting:''}${x.note?' <span class="muted">'+h(x.note)+'</span>':''}</td>
         <td>${['open','drain','closed'].filter(st=>st!==x.state).map(st=>`<button onclick="setQueue('${h(x.site)}','${h(x.queue)}','${st}')">${st}</button>`).join('')}</td></tr>`).join('')}</table></div>
+    <div style="margin-top:12px"><b>Maintenance windows</b> <span class="muted small">${h(S.maintenance_file||'')} · manager.py maint SITE START END [note] · simulations get a STOP file before the start, restart after the end</span>
+    ${(S.maintenance_errors||[]).map(e=>`<div class="small" style="color:var(--bad)">${h(e)}</div>`).join('')}
+    ${(S.maintenance||[]).length?`<table style="margin-top:4px"><tr><th>site</th><th>start</th><th>end</th><th>STOP files</th><th>state</th><th></th></tr>${
+      S.maintenance.map(m=>`<tr><td><b>${h(m.site)}</b></td><td>${new Date(m.start*1000).toLocaleString()}</td><td>${m.end?new Date(m.end*1000).toLocaleString():'not known'}</td>
+        <td class="small">${new Date(m.stop_at*1000).toLocaleString()}</td><td><span class="badge ${m.state==='over'?'b-ok':m.state==='upcoming'?'b-wait':'b-bad'}">${h(m.state)}</span></td><td class="small muted">${h(m.note||'')}</td></tr>`).join('')}</table>`:'<div class="muted small">none</div>'}</div>
     <div style="margin-top:12px"><b>Plan file</b> <span class="muted small">${h(S.plan_file||'—')}</span>: ${pl.length} planned runs, ${pl.filter(p=>p.state==='registered').length} set up${pl.some(p=>p.state==='retired')?', '+pl.filter(p=>p.state==='retired').length+' retired (removed or deleted; not set up again)':''}${plErr?`, <b style="color:var(--bad)">${plErr} with errors</b> (Upcoming)`:''}</div>`;
   // plan card (upcoming)
   const prow=pl.filter(p=>!['registered','retired'].includes(p.state)).map(p=>`<tr><td>${p.lineno}</td><td>${h(p.name||p.line)}</td><td>${h(p.queue||'')}</td><td>${h(p.priority??'')}</td><td>${p.state==='error'?'<b style="color:var(--bad)">error</b>':h(p.state)}${p.hold?' · hold':''}</td><td class="small">${h(p.msg||'')}</td></tr>`).join('');

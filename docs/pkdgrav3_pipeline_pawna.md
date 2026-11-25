@@ -1224,3 +1224,38 @@ The fixed functions above are not used by the pkdgrav3 production stages. The ex
 `run_addvalue.py` and `pk_measure.py` call it, but only with positions already wrapped into [0, L). The halo positions
 go through `% Lbox` in `readers.HaloReader`, and the particle positions are decoded into [0, L). So the new check does
 not change their results.
+
+## 17. Maintenance windows (manager option, 25 Nov 2026)
+
+The manager plans around announced shutdowns of a site. Windows are kept in `~/.sahyadri_mgr/maintenance.txt`
+(`manager.py maint <site> <start> <end|-> [note]`, `manager.py maint <site> clear`, `manager.py maint` lists; local
+time `YYYY-MM-DDTHH:MM`). The full behaviour is in `tools/sahyadri_manager/README.md` (Maintenance windows). In short:
+
+| When | What the manager does |
+|---|---|
+| any time before the start | submits a job only if it is expected to end 30 min (`maint_guard_min`) before the start: 1.25 x the longest earlier job of that stage (same run, else same site and N; Rockstar per snapshot), else the requested wall time. A wall time that would run past the start is cut (`submit_pipeline.sh --wall HH:MM:SS`) |
+| simulations before the start | started or restarted only with >= 4 h (`maint_min_sim_h`) of computing before the STOP time |
+| `maint_stop_h` before the start (pawna 6 h, other sites 2 h) | `touch <run dir>/STOP` for every running simulation of the site: pkdgrav3 finishes the step, writes a checkpoint, exits cleanly and deletes the file (`MSR::CheckForStop` in `master.cxx`); waiting simulation jobs are deleted (qdel) and scheduled again |
+| during the window (until 30 min after the end; with end `-` until the line is changed) | nothing submitted to the site |
+| after it | simulations restart from their checkpoint (not counted in `max_sim_restarts`); jobs killed by the shutdown (started before the window, ended at most 1 h before its start or vanished) are resubmitted instead of stopping the automation |
+
+pawna is the manager's host: when pawna is down the manager is down too. After the reboot start it again
+(`tools/sahyadri_manager/start_manager.sh start`) once `/user` and `/storage` answer. It then works through the jobs
+killed by the shutdown.
+
+### 17.1 Shutdown of pawna and swarm, Fri 27 Nov 2026 08:00 IST
+
+The windows were entered with no end time (`-`). After the clusters are back and checked (node1's NFS hang, section 16
+and the 25 Nov admin message), `manager.py maint pawna clear` and `manager.py maint swarm clear` let the manager go on.
+
+State on Wed 25 Nov, 12:00 IST (qstat on pawna and swarm; steps from the run logs):
+
+| Run | Site / job | State | Plan |
+|---|---|---|---|
+| L200N2048 r3 | pawna node4, 2539100 | step ~2085 of 2126 | finishes Wed afternoon; Rockstar and post-processing go in only when they fit before Fri 07:30 |
+| L200N2048 r5 | pawna node2, 2539063 (168 h wall) | step ~928 | STOP Fri 02:00 IST, checkpoint drained to NFS before 08:00; restarts after the window |
+| L1000N2048 r1 | pawna, 2539156 (queued, node4, 168 h wall) | waits for r3 | starts on node4 when r3 ends, ~34 h of computing, STOP Fri 02:00; deleted and rescheduled if still waiting at 02:00 |
+| L200N2048 r4 | pawna | paused (node1 incident) | unchanged |
+| r6, r7 (swarm) | swarm 1786786/1786787 (72 h wall) | stop at iWallRunTime Thu ~08:45 | restarts submitted Thu with the wall time cut to Fri 07:30; STOP Fri 06:00; restart after the window |
+| r7 Rockstar | swarm 1787341 (queued, 72 h) | waits for cores | submitted before the window was set: if killed by the shutdown it is resubmitted afterwards |
+| pegasus, leap, pride | | not affected | jobs keep running; while pawna is down nothing is submitted for them (leap r100 945011 reaches its wall time Fri ~22:40 and restarts when the manager is back) |

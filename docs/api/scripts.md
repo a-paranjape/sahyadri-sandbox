@@ -524,11 +524,13 @@ Submit the Sahyadri pkdgrav3 pipeline for one run as a chain of PBS jobs:
   (tools/sahyadri_manager submits them itself)
 Rockstar batch: --stages rockstar --rs-snaps A-B (snapshots A..B, see job_rockstar.pbs)
 
-usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits,parquet] [--after JOBID] [--hold] [--restart CHK] [--dry-run]
+usage: submit_pipeline.sh <run.conf> [--stages sim,rockstar,ctrees,vahc,fits,parquet] [--after JOBID] [--hold] [--restart CHK] [--wall HH:MM:SS] [--dry-run]
   --stages  any subset, in pipeline order (e.g. "ctrees,vahc,fits" to redo the later stages)
   --after   make the first stage wait for an existing job (afterok), e.g. a running simulation
   --hold    submit the first job held (qrls <id> to start the chain)
   --restart CHK  the sim stage continues from checkpoint CHK (latest = newest $SIM_DIR/checkpoints/*.chk)
+  --wall    wall time of every stage at most HH:MM:SS (the run manager before a maintenance window; a simulation
+            is stopped before it with a STOP file, its iWallRunTime in the parameter file stays as it is)
   --dry-run print the qsub commands only
 Prints the job ids; the chain is also written to $LOGS/chain.<run>.<date>.txt.
 ```

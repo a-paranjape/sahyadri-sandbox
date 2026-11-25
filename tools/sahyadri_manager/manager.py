@@ -13,6 +13,8 @@
   manager.py schedule <stem/rN> [--priority N] [--at "YYYY-MM-DD HH:MM"]   queue the simulation (lower priority first)
   manager.py unschedule <stem/rN>
   manager.py queue <site> <queue> open|drain|closed   change a queue's state in the queues file (~/.sahyadri_mgr/queues.txt)
+  manager.py maint [<site> <start> <end|-> [note] | <site> clear]   list / add / remove maintenance windows
+                                   (~/.sahyadri_mgr/maintenance.txt; YYYY-MM-DDTHH:MM local time; see below)
   manager.py limits [max_sim_running=3] [max_sim_queued=1] [max_sim_restarts=5] [max_rockstar=1] [scratch_reserve_gb=2000]
   On the Mac: open_gui.sh  (ssh tunnel to the socket, opens http://localhost:8765)
 
@@ -34,6 +36,12 @@ manager.json written here; nothing is lost when the manager stops, it catches up
     all earlier outputs are written, their kept particle files (the bulk of a run) are copied (pulled from another
     site) and checked; the final archive skips them. A failed batch only stops further batches of that run
   * a failed job stops the run's automation (shown in red; retry from the page)
+  * maintenance windows (maintenance.txt: site start end): before one, jobs go in only if they are expected to end
+    maint_guard_min before it (earlier jobs of the stage, else the wall time; a simulation's wall time is cut to the
+    start and it needs maint_min_sim_h to compute); maint_stop_h before the start each running simulation of the site
+    gets a STOP file (checkpoint, clean exit) and waiting simulation jobs are taken out (qdel); after the window
+    (+ maint_settle_min) the simulations restart (not counted in max_sim_restarts) and jobs killed by the shutdown
+    are resubmitted instead of stopping the automation
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to
     <SCRATCH>/.trash/ (instant, can be undone), then purge; both re-check the archive manifest first
 
@@ -101,6 +109,14 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    # outside the git checkout), first copied from the templates in production/
                    plan_file=os.path.join(HOME, 'planned_runs.txt'), queues_file=os.path.join(HOME, 'queues.txt'),
                    plan_s=300, local_python='/user/shadab/sahyadri_prod/codes/venv/bin/python',
+                   # maintenance windows of the sites (maintenance.txt in the manager's directory; see read_maint):
+                   # before a window a job is submitted only if it is expected to end maint_guard_min before the
+                   # start (simulations: with at least maint_min_sim_h to compute, their wall time cut to the start);
+                   # a running simulation gets a STOP file maint_stop_h (per site) before the start (checkpoint and
+                   # clean exit) and restarts after the window, maint_settle_min after its end; jobs killed by the
+                   # shutdown are resubmitted then instead of stopping the run's automation
+                   maintenance_file=os.path.join(HOME, 'maintenance.txt'), maint_guard_min=30, maint_min_sim_h=4,
+                   maint_stop_h=6, maint_settle_min=30,
                    scratch_root='/user/shadab/sahyadri_scratch',
                    sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
                                            scratch_root='/data/project/hpc2502016/shadab/sahyadri_scratch',
@@ -145,6 +161,13 @@ LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rock
 # user); with it, the post-processing stages are submitted one at a time, each after the previous one finished
 SITE_LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb',
                    'max_pbs_queued')
+# requested wall time of a stage in run.conf (and submit_pipeline.sh's default when the key is not set)
+STAGE_WALL = dict(sim=('SIM_WALL', '24:00:00'), rockstar=('RS_WALL', '12:00:00'), ctrees=('CT_WALL', '08:00:00'),
+                  vahc=('PP_WALL', '24:00:00'), vpot=('PP_WALL', '24:00:00'), fits=('FITS_WALL', '06:00:00'),
+                  parquet=('PQ_WALL', '02:00:00'), xcorr=('XC_WALL', '24:00:00'), ximult=('XM_WALL', '06:00:00'),
+                  vprof=('VPROF_WALL', '48:00:00'), verify=('VF_WALL', '12:00:00'), archive=('AR_WALL', '72:00:00'),
+                  archb=('AR_WALL', '72:00:00'))
+MAINT_STOP_H_REMOTE = 2    # sites without node staging: the checkpoint goes straight to Lustre (minutes)
 POST = ['ctrees', 'vahc', 'fits', 'verify']
 
 
@@ -538,6 +561,74 @@ def set_queue_state(path, site, q, state):
     os.replace(tmp, path)
 
 
+class MaintWait(Exception):
+    """A submission refused because of a maintenance window of the site (the message says which and why)."""
+
+
+def parse_when(text):
+    """``YYYY-MM-DDTHH:MM`` (or with a space or ``_`` instead of ``T``; local time) -> epoch seconds."""
+    return time.mktime(time.strptime(re.sub(r'[ _]', 'T', text.strip())[:16], '%Y-%m-%dT%H:%M'))
+
+
+def read_maint(path):
+    """maintenance.txt -> ({site: [dict(start, end, note, lineno)] sorted by start}, [errors]).
+
+    Columns: ``site start end [# note]``, times ``YYYY-MM-DDTHH:MM`` in local time (IST on pawna); ``end`` ``-``
+    when not known: the window then lasts until the line is removed or given an end. Lines stay after a window
+    has passed (they are ignored then, except that jobs killed during it are recognised as such)."""
+    out, errs = {}, []
+    if not path or not os.path.isfile(path):
+        return out, errs
+    for i, raw in enumerate(open(path), 1):
+        line = raw.split('#', 1)[0].strip()
+        if not line:
+            continue
+        f = line.split()
+        try:
+            if len(f) != 3:
+                raise ValueError('needs: site start end (YYYY-MM-DDTHH:MM, end - if not known)')
+            t0 = parse_when(f[1])
+            t1 = None if f[2] == '-' else parse_when(f[2])
+            if t1 is not None and t1 <= t0:
+                raise ValueError('end before start')
+            out.setdefault(f[0], []).append(dict(start=t0, end=t1, note=raw.split('#', 1)[1].strip() if '#' in raw else '',
+                                                 lineno=i))
+        except ValueError as e:
+            errs.append('line %d: %s (%s)' % (i, e, line))
+    for v in out.values():
+        v.sort(key=lambda w: w['start'])
+    return out, errs
+
+
+def set_maint(path, site, start=None, end=None, note=''):
+    """Add a window ``site start end`` to maintenance.txt, or (``start`` None) remove all lines of ``site``."""
+    lines = open(path).read().splitlines(True) if os.path.isfile(path) else [
+        '# Maintenance windows of the sites, read by the run manager before every scheduling pass\n',
+        '# (manager.py maint SITE START END [note] | manager.py maint SITE clear). Local time, YYYY-MM-DDTHH:MM;\n',
+        '# end - if not known (the window lasts until the line is removed or given an end).\n',
+        '#\n', '# site     start              end                # note\n']
+    if start is None:
+        lines = [l for l in lines if l.split('#', 1)[0].split()[:1] != [site]]
+    else:
+        t0 = parse_when(start)
+        if end not in (None, '-'):
+            if parse_when(end) <= t0:
+                raise ValueError('end before start')
+        lines.append('%-8s  %-17s  %-17s%s\n' % (site, re.sub(r'[ _]', 'T', start.strip())[:16],
+                                                 '-' if end in (None, '-') else re.sub(r'[ _]', 'T', end.strip())[:16],
+                                                 ('  # ' + note) if note else ''))
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as fh:
+        fh.writelines(lines)
+    os.replace(tmp, path)
+
+
+def hms(sec):
+    """Seconds -> a PBS walltime ``HH:MM:SS`` (rounded down to whole minutes)."""
+    m = max(0, int(sec) // 60)
+    return '%02d:%02d:00' % (m // 60, m % 60)
+
+
 def run_queue(run):
     """The PBS queue of a run: ``PBS_QUEUE`` from its run.conf, else the site's default queue."""
     return run.E.get('PBS_QUEUE') or DEFAULT_QUEUE.get(run.site, 'workq')
@@ -653,6 +744,7 @@ def short(job):
 
 # ====================================================================================================== one run
 class Run:
+    GATE = None      # Manager.maint_gate, set by the manager: every submission passes it
     """One simulation realisation known to the manager, described by its run.conf.
 
     Holds the configuration (``E``), the derived paths (``P``, from ``retention.paths``), the manager's own state
@@ -991,6 +1083,11 @@ class Run:
         ``submit_pipeline.sh`` here. ``extra`` are extra arguments of submit_pipeline.sh, ``what`` a description
         for the history.
         """
+        if Run.GATE:      # maintenance windows: refused (MaintWait) or the wall time cut to the window's start
+            cap = Run.GATE(self, stages, what)
+            if cap:
+                extra = list(extra) + ['--wall', cap]
+                what = dict(what or {}, wall_cap=cap)
         if stages in ('archive', 'archb') and (self.remote or (Run.CFG or {}).get('archive_on_head', True)):
             return self.start_pull(what, stage=stages)
         if self.remote:     # qsub on the site's login node, with the run's own run.conf there
@@ -1069,6 +1166,7 @@ class Manager:
                 shutil.copy(os.path.join(TEMPLATES, t), p)
                 log('%s: copied the template %s' % (p, t))
         self.queues, self.queue_errors, self.queues_mtime = {}, [], None
+        self.maint_windows, self.maint_errors, self.maint_mtime = {}, [], None
         self.q = queue.Queue()
         self.runs = {}
         self.qjobs, self.qtime, self.qok = {}, 0.0, None
@@ -1095,6 +1193,7 @@ class Manager:
         """
         self.cfg = load_cfg()
         Run.CFG = self.cfg
+        Run.GATE = self.maint_gate
         want = {r['conf']: r for r in self.cfg['runs']}
         for conf in list(self.runs):
             if conf not in want:
@@ -1401,6 +1500,7 @@ class Manager:
         derived = {}
         self.waiting = {}          # per site: our jobs submitted but not started (PBS queue limits)
         self.load_queues()
+        self.load_maint()
         for run in self.runs.values():
             D = self.derive(run)
             derived[run.conf] = D
@@ -1411,6 +1511,10 @@ class Manager:
             active_rs[run.site] = active_rs.get(run.site, 0) + sum(1 for j in D['active'] if j['stage'] == 'rockstar')
             self.waiting[run.site] = self.waiting.get(run.site, 0) + sum(
                 1 for j in D['active'] if j['status'] in ('submitted', 'queued', 'held') and not j['job'].startswith('L'))
+        try:
+            self.maint_actions(derived)
+        except Exception as e:  # noqa: BLE001  (never stops the manager)
+            log('maintenance actions: %s\n%s' % (e, traceback.format_exc()))
         self.schedule_sims(derived)
         # Rockstar turn order over the runs: the one whose next snapshot has waited longest goes first
         def waiting(run):
@@ -1425,6 +1529,12 @@ class Manager:
             try:
                 active_rs[run.site] = active_rs.get(run.site, 0) + self.policy(run, D, active_rs.get(run.site, 0))
                 run.budget_wait = None
+                run.maint_msg = None
+            except MaintWait as e:
+                if getattr(run, 'maint_msg', None) != str(e):
+                    log('%s: %s' % (run.name, e))
+                run.maint_msg = str(e)
+                continue
             except BudgetWait as e:
                 if getattr(run, 'budget_wait', None) != str(e).split(':')[0]:
                     run.note('waiting for core hours: %s' % e)
@@ -1543,6 +1653,254 @@ class Manager:
                 out['swap'] = 'job %s on %s: %s' % (sim['job'], mem[-1].get('host'), msg)
         return out
 
+    # ------------------------------------------------------------------ maintenance windows
+    def load_maint(self):
+        """Re-read maintenance.txt (windows per site) if it changed; log it."""
+        p = self.cfg.get('maintenance_file')
+        try:
+            m = os.path.getmtime(p) if p else None
+        except OSError:
+            m = None
+        if m != self.maint_mtime:
+            self.maint_windows, self.maint_errors = read_maint(p)
+            self.maint_mtime = m
+            log('maintenance: %s%s' % ('; '.join(self.maint_label(st, w) for st, ws in sorted(self.maint_windows.items())
+                                                 for w in ws) or 'no windows',
+                                       ('; ERRORS: ' + '; '.join(self.maint_errors)) if self.maint_errors else ''))
+
+    @staticmethod
+    def maint_label(site, w):
+        """``maintenance of <site> <start> - <end>`` for messages."""
+        return 'maintenance of %s %s - %s' % (site, time.strftime('%a %d %b %H:%M', time.localtime(w['start'])),
+                                              time.strftime('%a %d %b %H:%M', time.localtime(w['end'])) if w['end'] else 'end not known')
+
+    def maint_next(self, site):
+        """The window of ``site`` that matters now: the first not yet over (end + maint_settle_min), or None."""
+        settle = float(self.cfg.get('maint_settle_min', 30)) * 60
+        for w in self.maint_windows.get(site, []):
+            if w['end'] is None or now() < w['end'] + settle:
+                return w
+        return None
+
+    def maint_now(self, site):
+        """The window of ``site`` in progress (started, not over including the settle time), or None."""
+        w = self.maint_next(site)
+        return w if w and now() >= w['start'] else None
+
+    def maint_stop_h(self, site):
+        """Hours before a window's start at which running simulations of ``site`` get their STOP file."""
+        if site == LOCAL:
+            return float(self.cfg.get('maint_stop_h', 6))
+        return float(self.cfg['sites'][site].get('maint_stop_h', MAINT_STOP_H_REMOTE))
+
+    def stage_wall_s(self, run, stage):
+        """Requested wall time of ``stage`` (run.conf, else submit_pipeline.sh's default) in seconds."""
+        key, dflt = STAGE_WALL.get(stage, (None, '24:00:00'))
+        return hours((run.E.get(key) if key else None) or dflt) * 3600
+
+    def expected_s(self, run, stage, what=None):
+        """Expected run time (s) of one job of ``stage``: 1.25 x the longest done job of that stage in this run,
+        else in the runs of the same site and particle number (Rockstar: per snapshot x the batch size); at most
+        the requested wall time, which is also the answer without such jobs."""
+        req = self.stage_wall_s(run, stage)
+        k = 1
+        if stage == 'rockstar':
+            w = what or {}
+            k = (int(w['last']) - int(w['first']) + 1) if w.get('first') is not None and w.get('last') is not None else len(run.outs)
+        for group in ([run], [r for r in self.runs.values() if r is not run and r.site == run.site
+                              and r.E.get('NPART') == run.E.get('NPART')]):
+            d = []
+            for r in group:
+                for j in self.derive(r)['jobs']:
+                    if j['stage'] == stage and j['status'] == 'done' and j.get('start') and j.get('end'):
+                        n = 1
+                        if stage == 'rockstar' and j.get('first') is not None and j.get('last') is not None:
+                            n = int(j['last']) - int(j['first']) + 1
+                        d.append((j['end'] - j['start']) / max(1, n))
+            if d:
+                return min(req, 1.25 * max(d) * k)
+        return req
+
+    def maint_gate(self, run, stages, what=None):
+        """Called for every submission (Run.GATE): raise MaintWait if a maintenance window of the run's site (for
+        archive copies and pulls also of this host) is in progress or the job would not end
+        ``maint_guard_min`` before its start; return a shorter wall time (``HH:MM:SS``) when the requested one
+        would run past the start, else None. A simulation needs ``maint_min_sim_h`` of computing before its STOP
+        (``maint_stop_h`` before the start); it stops cleanly there and restarts after the window."""
+        sites = [run.site] + ([LOCAL] if stages in ('archive', 'archb') and run.site != LOCAL else [])
+        cap = None
+        t = now()
+        for site in sites:
+            w = self.maint_next(site)
+            if not w:
+                continue
+            lab = self.maint_label(site, w)
+            if t >= w['start']:
+                raise MaintWait('%s in progress: nothing is submitted until %s' % (
+                    lab, '%d min after its end' % self.cfg.get('maint_settle_min', 30) if w['end'] else 'the window is given an end or removed'))
+            left = w['start'] - float(self.cfg.get('maint_guard_min', 30)) * 60 - t
+            st = stages.split(',')
+            if st == ['sim']:
+                room = w['start'] - self.maint_stop_h(site) * 3600 - t
+                if room < float(self.cfg.get('maint_min_sim_h', 4)) * 3600:
+                    raise MaintWait('%s: only %.1f h of computing before the STOP at %s (maint_min_sim_h %s): the '
+                                    'simulation waits until after the window' % (
+                                        lab, max(0, room) / 3600., time.strftime('%a %H:%M', time.localtime(t + max(0, room))),
+                                        self.cfg.get('maint_min_sim_h', 4)))
+            else:
+                need = sum(self.expected_s(run, x, what) for x in st)
+                if need > left:
+                    raise MaintWait('%s: %s needs ~%.1f h (earlier jobs, else its wall time), %.1f h left before the '
+                                    'start (maint_guard_min %s): waits until after the window' % (
+                                        lab, stages, need / 3600., max(0, left) / 3600., self.cfg.get('maint_guard_min', 30)))
+            if site == run.site and stages not in ('archive', 'archb') and left < max(self.stage_wall_s(run, x) for x in st):
+                cap = hms(left)
+        return cap
+
+    def maint_stopped(self, run):
+        """Simulation jobs of ``run`` that got a maintenance STOP file."""
+        return {k.split('@')[0] for k in run.ms.get('maint_done', []) if k.endswith('@stop')}
+
+    def sim_dir_cmd(self, run):
+        """(host or None, simulation directory) of a run: on the site for a remote run, here otherwise."""
+        if run.remote:
+            return (self.cfg['sites'][run.site]['login'],
+                    '%s/sims/%s/r%s' % (run.E['REMOTE_SCRATCH'].rstrip('/'), run.E['STEM'], run.E['REAL']))
+        return None, run.P['sim']
+
+    def maint_actions(self, derived):
+        """Before a window (from ``maint_stop_h`` before its start): write a STOP file in the run directory of every
+        running simulation of the site (pkdgrav3 checkpoints, exits cleanly and removes the file; the restart is
+        scheduled for after the window), and take simulation jobs still waiting in PBS out (qdel) and schedule
+        them again for after the window (they could start with too little time, or after it with a cut wall
+        time). Each job once per window (``maint_done`` in manager.json)."""
+        t = now()
+        for run in self.runs.values():
+            w = self.maint_next(run.site)
+            if not w or t >= w['start'] or getattr(run, 'stalled', None) or run.err:
+                continue
+            tstop = w['start'] - self.maint_stop_h(run.site) * 3600
+            if t < tstop:
+                self.recheck_at = min(self.recheck_at or 1e30, tstop + 1)
+                continue
+            D = derived.get(run.conf) or self.derive(run)
+            done = run.ms.setdefault('maint_done', [])
+            for j in D['active']:
+                if j['stage'] != 'sim' or any(k.startswith(j['job'] + '@') for k in done):
+                    continue
+                host, sdir = self.sim_dir_cmd(run)
+                lab = self.maint_label(run.site, w)
+                if j['status'] in ('running', 'exiting'):
+                    stop = os.path.join(sdir, 'STOP')
+                    if host:
+                        r = ssh(host, 'touch %s' % shlex.quote(stop), timeout=120)
+                    else:
+                        r = subprocess.run(['timeout', '120', 'touch', stop], capture_output=True, text=True)
+                    if r.returncode != 0:
+                        run.note('%s: STOP file for simulation job %s not written (rc %d %s); trying again at the next '
+                                 'pass' % (lab, j['job'], r.returncode, (r.stderr or '')[-200:]))
+                        continue
+                    done.append(j['job'] + '@stop')
+                    run.note('%s: STOP file written for simulation job %s (%s): pkdgrav3 writes a checkpoint at the end '
+                             'of its current step and exits; restart scheduled after the window' % (lab, j['job'], stop))
+                else:
+                    q = 'PATH=/opt/pbs/bin:$PATH qdel %s' % j['job']
+                    r = ssh(host, q, timeout=120) if host else subprocess.run(
+                        ['bash', '-c', q], capture_output=True, text=True, timeout=120)
+                    if r.returncode != 0:
+                        run.note('%s: qdel of the waiting simulation job %s failed (rc %d %s)' % (
+                            lab, j['job'], r.returncode, (r.stderr or '')[-200:]))
+                        continue
+                    done.append(j['job'] + '@qdel')
+                    run.ms.setdefault('acked', []).append(j['job'])
+                    restart = self.has_checkpoint(run, D)
+                    run.ms['scheduled'] = dict(t=now(), priority=-1, restart=restart, maint=True)
+                    run.note('%s: simulation job %s was still waiting in PBS at the STOP time; deleted (qdel) and '
+                             'scheduled again for after the window%s' % (lab, j['job'], ' (restart from checkpoint)' if restart else ''))
+            run.save()
+
+    def has_checkpoint(self, run, D):
+        """Does the run have a checkpoint to restart from? Here: checkpoints/*.chk; a remote run (checkpoints
+        not mirrored): an earlier simulation job stopped cleanly or itself restarted from one."""
+        if run.remote:
+            return bool(D['sim_clean_stop']) or any(e['ev'] == 'sim_info' and e.get('restart') for e in run.ev)
+        return bool(glob.glob(os.path.join(run.P['sim'], 'checkpoints', '*.chk')))
+
+    def maint_killed(self, run, j):
+        """Did job ``j`` (failed or vanished) end because of a maintenance window: started (or submitted) before a
+        window of its site (archive copies and pulls: also of this host) began, and ended no earlier than an hour
+        before it (or has no end event)? Windows that ended more than 7 days ago are not considered."""
+        sites = {run.site} | ({LOCAL} if j['stage'] in ('archive', 'archb') else set())
+        t = now()
+        on, off = j.get('start') or j.get('submitted') or 0, j.get('end') or t
+        for site in sites:
+            for w in self.maint_windows.get(site, []):
+                if t < w['start'] or (w['end'] and t - w['end'] > 7 * 86400):
+                    continue
+                if on < w['start'] and off >= w['start'] - 3600:
+                    return site, w
+        return None
+
+    def maint_lost(self, run, j, D):
+        """A job killed by a maintenance shutdown: a simulation is scheduled to restart after the window; any other
+        stage is marked failed with ``maint`` set and resubmitted automatically once the window is over
+        (:meth:`maint_retry`). Returns True if the run's automation now waits for that."""
+        lab = self.maint_label(*self.maint_killed(run, j))
+        run.ms.setdefault('acked', []).append(j['job'])
+        if j['stage'] == 'sim':
+            restart = self.has_checkpoint(run, D)
+            run.ms['scheduled'] = dict(t=now(), priority=-1, restart=restart, maint=True, after=j['job'])
+            run.note('simulation job %s %s during the %s; scheduled to %s after the window' % (
+                j['job'], 'vanished' if j['status'] == 'gone' else 'ended (rc %s)' % j.get('rc'), lab,
+                'restart from the newest checkpoint' if restart else 'start again from the ICs (no checkpoint)'))
+            run.save()
+            return False
+        if j['stage'] == 'archb':
+            run.note('archive batch %s %s during the %s; the next batch (or the final archive) copies it again'
+                     % (j['job'], j['status'], lab))
+            run.save()
+            return False
+        run.ms['failed'] = dict(stage=j['stage'], job=j['job'], rc=j.get('rc'), log=j.get('log'), t=now(), maint=True,
+                                first=j.get('first'), last=j.get('last'),
+                                msg='killed by the %s; resubmitted automatically after the window' % lab)
+        run.note('%s job %s %s during the %s; resubmitted automatically after the window' % (
+            j['stage'], j['job'], 'vanished' if j['status'] == 'gone' else 'ended (rc %s)' % j.get('rc'), lab))
+        run.save()
+        return True
+
+    def maint_retry(self, run):
+        """Resubmit a job killed by a maintenance shutdown (the retry action) once its window is over; on a refusal
+        (e.g. another window) the failure stays marked for the next pass."""
+        f = dict(run.ms['failed'])
+        try:
+            msg = self.action(dict(action='retry', run=run.name))
+            run.note('after the maintenance: %s' % msg)
+        except MaintWait as e:
+            run.ms['failed'] = f
+            run.maint_msg = str(e)
+        except Exception as e:  # noqa: BLE001
+            run.ms['failed'] = dict(f, maint=False, msg='automatic resubmission after the maintenance failed: %s' % e)
+            run.note('automatic resubmission after the maintenance failed: %s' % e)
+        run.save()
+
+    def maint_view(self):
+        """Windows for the page: site, start, end, note, state (upcoming / stopping / in progress / over)."""
+        out, t = [], now()
+        for site, ws in sorted(self.maint_windows.items()):
+            for w in ws:
+                cur = self.maint_next(site)
+                if w['end'] and t >= w['end'] + float(self.cfg.get('maint_settle_min', 30)) * 60:
+                    state = 'over'
+                elif t >= w['start']:
+                    state = 'in progress'
+                elif cur is w and t >= w['start'] - self.maint_stop_h(site) * 3600:
+                    state = 'stopping simulations'
+                else:
+                    state = 'upcoming'
+                out.append(dict(site=site, start=w['start'], end=w['end'], note=w['note'], state=state,
+                                stop_at=w['start'] - self.maint_stop_h(site) * 3600))
+        return out
+
     def load_queues(self):
         """Re-read the queues file (open/drain/closed and limits per site and queue) if it changed; log it."""
         p = self.cfg.get('queues_file')
@@ -1597,6 +1955,11 @@ class Manager:
         """Submit what is due for this run; returns the number of Rockstar jobs submitted."""
         if getattr(run, 'stalled', None):
             return 0
+        f = run.ms.get('failed')
+        if (f and f.get('maint') and not (run.busy or run.err or run.ms.get('paused'))
+                and not self.maint_now(run.site) and not (f.get('stage') in ('archive', 'archb') and self.maint_now(LOCAL))):
+            self.maint_retry(run)
+            return 0
         if run.busy or run.err or run.ms.get('paused') or run.ms.get('failed') or run.ms.get('trash') or run.ms.get('purged'):
             return 0
         E = run.E
@@ -1609,6 +1972,11 @@ class Manager:
                     and not self.acked(run, j)):
                 n = int(run.ms.get('restarts', 0))
                 run.ms.setdefault('acked', []).append(j['job'])
+                if j['job'] in self.maint_stopped(run):
+                    run.ms['scheduled'] = dict(t=now(), priority=-1, restart=True, after=j['job'], maint=True)
+                    run.note('simulation job %s stopped cleanly on the maintenance STOP file; scheduled to restart from '
+                             'its checkpoint after the window (not counted in max_sim_restarts)' % j['job'])
+                    continue
                 if n >= int(SC.get('max_sim_restarts', 5)):
                     run.ms['failed'] = dict(stage='sim', job=j['job'], rc=j.get('rc'), log=j.get('log'), t=now(),
                                             msg='stopped at its wall time again after %d restarts (max_sim_restarts)' % n)
@@ -1617,6 +1985,15 @@ class Manager:
                 run.ms['scheduled'] = dict(t=now(), priority=-1, restart=True, after=j['job'])
                 run.note('simulation job %s stopped cleanly before the last output (wall time); scheduled to restart '
                          'from the newest checkpoint (restart %d of at most %d)' % (j['job'], n + 1, SC.get('max_sim_restarts', 5)))
+                continue
+            if j['status'] in ('failed', 'gone') and not self.acked(run, j) and self.maint_killed(run, j):
+                if j['status'] == 'gone':     # the usual grace: it may be an end event still on its way
+                    g = run.ms.setdefault('gone', {})
+                    if now() - g.setdefault(j['job'], now()) <= self.cfg['lost_grace_s']:
+                        waiting_gone = True
+                        continue
+                if self.maint_lost(run, j, D):
+                    return 0
                 continue
             if j['stage'] == 'archb' and j['status'] in ('failed', 'gone') and not self.acked(run, j):
                 if j['status'] == 'gone':
@@ -1648,7 +2025,10 @@ class Manager:
                 self.recheck_at = min(self.recheck_at or 1e30, first_seen + self.cfg['lost_grace_s'] + 5)
         if waiting_gone:     # e.g. a remote job ended and its end event is not in the mirror yet
             return 0
-        self.archive_batch(run, D)
+        try:
+            self.archive_batch(run, D)
+        except MaintWait as e:      # the batch waits; Rockstar and the rest may still go in
+            run.maint_msg = str(e)
         if D['active'] and any(j['stage'] in ('ctrees', 'vahc', 'vpot', 'fits', 'parquet', 'xcorr', 'vprof', 'verify', 'archive')
                                for j in D['active']):
             return 0
@@ -1853,12 +2233,14 @@ class Manager:
                     extra = ['--restart', 'latest'] if sc.get('restart') else []
                     run.submit('sim', extra, dict(restart=bool(sc.get('restart')), scheduled=True))
                     self.took(site)
-                    if sc.get('restart'):
+                    if sc.get('restart') and not sc.get('maint'):     # a maintenance stop is not counted
                         run.ms['restarts'] = int(run.ms.get('restarts', 0)) + 1
                     run.ms['scheduled'] = None
                     run.save()
                     queued += 1
                     continue
+                except MaintWait as e:
+                    wait = str(e)
                 except BudgetWait as e:
                     wait = 'core hours: %s' % e
                 except Exception as e:  # noqa: BLE001
@@ -1876,7 +2258,7 @@ class Manager:
     def action(self, a):
         """Carry out an action from the page or the CLI (dict ``a`` with ``action`` and its arguments).
 
-        Actions: add_run, unretire, refresh, set_queue, set_limits, delete_preview, delete_run, remove_run,
+        Actions: add_run, unretire, refresh, set_queue, set_maint, set_limits, delete_preview, delete_run, remove_run,
         dismiss_alert, pause, resume, reload_conf, schedule, set_priority, unschedule, submit_sim (``restart``),
         retry, postprocess, ack, check_trash, approve_trash, undo_trash, approve_purge. Returns a message; raises
         ValueError for a refused action. Slow actions run in a worker thread (:meth:`slow_action`).
@@ -1897,6 +2279,15 @@ class Manager:
             self.load_queues()
             self.next_hb = 0
             return '%s:%s %s' % (a['site'], a['queue'], a['state'])
+        if act == 'set_maint':      # add a window (start given) or remove all windows of the site (no start)
+            site = a.get('site')
+            if site not in [LOCAL] + list(self.cfg['sites']):
+                raise ValueError('unknown site %s' % site)
+            set_maint(self.cfg['maintenance_file'], site, a.get('start') or None, a.get('end') or None, a.get('note') or '')
+            self.load_maint()
+            self.next_hb = 0
+            return ('%s: maintenance %s - %s' % (site, a['start'], a.get('end') or 'end not known')) if a.get('start') else (
+                '%s: maintenance windows removed' % site)
         if act == 'set_limits':
             changed = []
             for site, S in self.cfg['sites'].items():
@@ -2427,6 +2818,7 @@ class Manager:
                 trash=run.ms.get('trash'), purged=run.ms.get('purged'), scheduled=run.ms.get('scheduled'),
                 restarts=run.ms.get('restarts', 0), actions=run.ms.get('actions', [])[-30:],
                 budget_msg=getattr(run, 'budget_msg', None) if getattr(run, 'budget_wait', None) else None,
+                maint_msg=getattr(run, 'maint_msg', None),
                 stalled=getattr(run, 'stalled', None), archive_msg=getattr(run, 'archive_msg', None),
                 alerts=getattr(run, 'alerts_shown', {}), rs_redo=D.get('rs_redo', []), rewinds=D.get('rewinds', []),
                 keep=dict(full=pl['full_z'] if pl else [], pct=pl['subsample_pct'] if pl else None,
@@ -2453,6 +2845,8 @@ class Manager:
                                  sites=site_info, local_site=LOCAL, budgets=BUDGETS.view(), plan=self.plan_view,
                                  plan_file=self.cfg.get('plan_file'), queues_file=self.cfg.get('queues_file'),
                                  queue_errors=self.queue_errors, queues=self.queues_view(derived),
+                                 maintenance=self.maint_view(), maintenance_file=self.cfg.get('maintenance_file'),
+                                 maintenance_errors=self.maint_errors,
                                  queue=getattr(self, 'queue_view', []), qtime=self.qtime, qok=self.qok,
                                  next_heartbeat=self.next_hb, heartbeat_s=self.cfg['heartbeat_s'],
                                  max_rockstar=self.cfg['max_rockstar'], host=socket.gethostname(), log=self.tail_log())
@@ -2804,6 +3198,20 @@ def main():
         if len(sys.argv) != 5:
             sys.exit('usage: manager.py queue <site> <queue> open|drain|closed')
         sys.exit(call(dict(action='set_queue', site=sys.argv[2], queue=sys.argv[3], state=sys.argv[4])))
+    elif cmd == 'maint':
+        if len(sys.argv) == 2:
+            w, errs = read_maint(load_cfg().get('maintenance_file'))
+            for site, ws in sorted(w.items()):
+                for x in ws:
+                    print(Manager.maint_label(site, x) + ('  # ' + x['note'] if x['note'] else ''))
+            for e in errs:
+                print('ERROR', e)
+            sys.exit(0)
+        if len(sys.argv) == 4 and sys.argv[3] == 'clear':
+            sys.exit(call(dict(action='set_maint', site=sys.argv[2])))
+        if len(sys.argv) < 5:
+            sys.exit('usage: manager.py maint [<site> <start> <end|-> [note] | <site> clear]   (YYYY-MM-DDTHH:MM, local time)')
+        sys.exit(call(dict(action='set_maint', site=sys.argv[2], start=sys.argv[3], end=sys.argv[4], note=' '.join(sys.argv[5:]))))
     elif cmd == 'limits':
         a = dict(action='set_limits')
         a.update(kv.split('=', 1) for kv in sys.argv[2:])
