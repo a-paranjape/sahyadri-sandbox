@@ -157,7 +157,10 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                                         sandbox='/user1/shadab/sahyadri_pride/sahyadri-sandbox',
                                         mirror='/user/shadab/sahyadri_mirror/pride', sync_s=120,
                                         max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=1,
-                                        scratch_reserve_gb=2000, max_pbs_queued=4),
+                                        scratch_reserve_gb=2000, max_pbs_queued=4,
+                                        # Rockstar s per snapshot until the manager has done jobs (expected_s): 2048^3
+                                        # on 3 nodes x 20 cores, 6863 s for 2 snapshots (23 Nov 2026 timing test)
+                                        rs_snap_s={'2048': 3432}),
                              # leap (TIFR theory): same Lustre /user1 (own scratch); simulation only so far (pkdgrav3
                              # from leap/build_c7.sh, pride's venv for the Python steps; the halo stages need builds
                              # for glibc 2.17); compute nodes cannot qsub
@@ -2184,7 +2187,8 @@ class Manager:
         if stage == 'rockstar':
             w = what or {}
             k = (int(w['last']) - int(w['first']) + 1) if w.get('first') is not None and w.get('last') is not None else len(run.outs)
-        for group in ([run], [r for r in self.runs.values() if r is not run and r.site == run.site
+        home = run.stage_site(stage)
+        for group in ([run], [r for r in self.runs.values() if r is not run and r.stage_site(stage) == home
                               and r.E.get('NPART') == run.E.get('NPART')]):
             d = []
             for r in group:
@@ -2196,6 +2200,10 @@ class Manager:
                         d.append((j['end'] - j['start']) / max(1, n))
             if d:
                 return min(req, 1.25 * max(d) * k)
+        # no such job yet: a measured time per snapshot of the site (sites.<name>.rs_snap_s, {NPART: s})
+        snap = (site_cfg(self.cfg, home).get('rs_snap_s') or {}).get(str(run.E.get('NPART')))
+        if stage == 'rockstar' and snap:
+            return min(req, 1.25 * float(snap) * k)
         return req
 
     def maint_gate(self, run, stages, what=None):
