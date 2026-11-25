@@ -46,14 +46,37 @@ for s in sys.argv[3:]:
 sys.exit(1 if bad else 0)
 PYEOF
   FIRST0=$FIRST
-  if [ "$FIRST" -gt 0 ] && ! ls "$HALO_DIR"/halos_"$(sname $((FIRST - 1)))".*.bin > /dev/null 2>&1; then
-    # a rerun of a batch that stopped part way: its finished snapshots are kept, continue after the newest one
-    m=$(binsnaps "$HALO_DIR" | tail -1 | cut -d' ' -f1)
+  # A rerun of a batch that stopped part way continues after its newest finished snapshot m (whose halos_<m>.*.bin
+  # sync_out kept in $HALO_DIR). Rockstar writes out_<m>.list only after snapshot m+1 (the descendants), and a
+  # restart at m+1 from halos_<m> writes it again (out_58.list of r4 was rewritten by the batch starting at 59), so
+  # out_<FIRST>..out_<m-1>.list are needed, not out_<m>.list. The halos_<m> set must be whole: NUM_WRITERS files
+  # (rockstar.cfg of the earlier attempt), none empty. (pawna r3 batch 85 and r4 batch 59, 25 Nov: the old check
+  # asked for out_<m>.list, so the reruns stopped with "no halos_<FIRST-1>" although they could continue.)
+  m=; mfirst=$FIRST
+  if [ "$FIRST" -gt 0 ]; then
+    # m: the newest set below restart.cfg's RESTART_SNAP (Rockstar had finished it; with RS_LOCAL_OUT=0 a newer set
+    # in $HALO_DIR may be half written)
+    r_=$(awk -F= '$1 ~ /^ *RESTART_SNAP *$/ {print $2+0}' restart.cfg 2>/dev/null)
+    m=$(binsnaps "$HALO_DIR" | awk -v r="${r_:-0}" '$1 != "" && $1 < r {n=$1} END {print n}')
     okm=0; [ -n "$m" ] && [ "$m" -ge "$FIRST" ] && [ "$m" -le "$LAST" ] && okm=1
-    [ $okm = 1 ] && for s_ in $(seq "$FIRST" "$m"); do [ -s out_$s_.list ] || okm=0; done
-    [ $okm = 1 ] || { stamp "batch $FIRST-$LAST: no halos_$(sname $((FIRST - 1))).*.bin (snapshot $((FIRST - 1))) from the previous batch in $HALO_DIR"; exit 1; }
-    stamp "batch $FIRST-$LAST: snapshots $FIRST-$m done by an earlier attempt, continuing at $((m + 1))"
-    FIRST=$((m + 1))
+    [ $okm = 1 ] && for s_ in $(seq "$FIRST" $((m - 1))); do [ -s out_$s_.list ] || okm=0; done
+    if [ $okm = 1 ]; then
+      mn=$(sname "$m"); nw_=$(awk -F= '$1 ~ /^ *NUM_WRITERS *$/ {print $2+0}' rockstar.cfg 2>/dev/null)
+      nf_=$(ls | grep -c "^halos_$mn\.[0-9]*\.bin$"); ne_=$(find . -maxdepth 1 -name "halos_$mn.*.bin" -size 0 | wc -l)
+      [ -n "$nw_" ] && [ "$nf_" = "$nw_" ] && [ "$ne_" = 0 ] || {
+        stamp "batch $FIRST-$LAST: halos_$mn.*.bin (snapshot $m) incomplete: $nf_ files of ${nw_:-?} writers, $ne_ empty"; okm=0; }
+    fi
+    if [ $okm = 1 ] && [ "$m" -eq "$LAST" ] && [ ! -s out_$LAST.list ]; then
+      okm=0   # the last snapshot finished but its catalogue was not written: redo it from halos_<LAST-1> if kept
+    fi
+    [ $okm = 1 ] && mfirst=$((m + 1))
+  fi
+  if [ "$mfirst" -gt "$FIRST" ]; then
+    stamp "batch $FIRST-$LAST: snapshots $FIRST-$m done by an earlier attempt (halos_$(sname "$m"), out_<snap>.list to $((m - 1))), continuing at $mfirst"
+    FIRST=$mfirst
+  elif [ "$FIRST" -gt 0 ] && ! ls "$HALO_DIR"/halos_"$(sname $((FIRST - 1)))".*.bin > /dev/null 2>&1; then
+    stamp "batch $FIRST-$LAST: no halos_$(sname $((FIRST - 1))).*.bin (snapshot $((FIRST - 1))) from the previous batch in $HALO_DIR, and no finished snapshot of this batch to continue from"
+    exit 1
   fi
   stamp "batch: snapshots $FIRST-$LAST of $NS (steps $(sed -n "$((FIRST + 1))p" "$NAMES")-$(sed -n "$((LAST + 1))p" "$NAMES"))"
   RS_RESTART=0
@@ -149,6 +172,18 @@ fi
 NB=$(awk -F= '$1 ~ /^ *NUM_BLOCKS *$/ {print $2+0}' "$RUNCFG")
 stamp "Rockstar: snapshots $FIRST-$LAST of $NS, ${NB:-?} readers, $NW writers, FORCE_RES $FORCE_RES, config $RUNCFG"
 
+copy_bins() {  # halos_<name>.*.bin from the local disk to $HALO_DIR, then delete the older sets there; each file is
+  # copied to .<file>.part and renamed, so a job killed during the copy leaves no truncated file under the real name
+  local f_ b_ ok_=1
+  for f_ in "$OUT"/halos_"$1".*.bin; do
+    b_=$(basename "$f_")
+    [ "$(stat -c '%s %Y' "$f_")" = "$(stat -c '%s %Y' "$HALO_DIR/$b_" 2>/dev/null)" ] && continue   # copied before
+    cp -p "$f_" "$HALO_DIR/.$b_.part" && mv -f "$HALO_DIR/.$b_.part" "$HALO_DIR/$b_" || { ok_=0; break; }
+  done
+  [ $ok_ = 1 ] && ls "$HALO_DIR" | grep '^halos_.*\.bin$' | grep -v "^halos_$1\." | sed "s|^|$HALO_DIR/|" | xargs -r rm -f
+  [ $ok_ = 1 ]
+}
+
 sync_out() {  # finished catalogs and what a restart needs, from the local disk to $HALO_DIR
   [ "$OUT" = "$HALO_DIR" ] && return 0
   cp -p "$OUT"/out_*.list "$HALO_DIR"/ 2>/dev/null
@@ -158,8 +193,7 @@ sync_out() {  # finished catalogs and what a restart needs, from the local disk 
     local r=$(awk -F= '$1 ~ /^ *RESTART_SNAP *$/ {print $2+0}' "$OUT/restart.cfg") last
     last=$(binsnaps "$OUT" | awk -v r="$r" '$1 != "" && $1 < r {n=$2} END {print n}')   # name of the newest finished
     if [ -n "$last" ]; then  # keep only the newest complete snapshot's binaries on /storage
-      cp -p "$OUT"/halos_"$last".*.bin "$HALO_DIR"/ && ls "$HALO_DIR" | grep '^halos_.*\.bin$' | grep -v "^halos_$last\." |
-        sed "s|^|$HALO_DIR/|" | xargs -r rm -f
+      copy_bins "$last"
     fi
     sed "s|^ *OUTBASE *=.*|OUTBASE = \"$HALO_DIR\"|" "$OUT/restart.cfg" > "$HALO_DIR/restart.cfg"
   fi
@@ -192,8 +226,7 @@ ts=$(date +%s); sync_out
 # the next batch's merger links need them
 LASTN=$(sname "$LAST")
 if [ $rc -eq 0 ] && [ "$OUT" != "$HALO_DIR" ] && ls "$OUT"/halos_"$LASTN".*.bin > /dev/null 2>&1; then
-  cp -p "$OUT"/halos_"$LASTN".*.bin "$HALO_DIR"/ && ls "$HALO_DIR" | grep '^halos_.*\.bin$' | grep -v "^halos_$LASTN\." |
-    sed "s|^|$HALO_DIR/|" | xargs -r rm -f
+  copy_bins "$LASTN"
 fi
 [ "$OUT" != "$HALO_DIR" ] && stamp "copied $(ls "$OUT"/out_*.list 2>/dev/null | wc -l) out_<snap>.list from $OUT in $(( $(date +%s) - ts )) s"
 cd "$HALO_DIR"

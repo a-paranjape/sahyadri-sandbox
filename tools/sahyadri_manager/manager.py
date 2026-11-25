@@ -127,6 +127,7 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    # core-hour budgets of the sites with one (pegasus amgr; class Budgets) read every
                    # budget_check_min minutes (0 = only when a job is submitted or on the page's "read now")
                    budget_check_min=30,
+                   rs_auto_retry=1,     # a failed Rockstar batch is resubmitted this many times by itself (see ZERO_OK)
                    scratch_root='/user/shadab/sahyadri_scratch',
                    sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
                                            scratch_root='/data/project/hpc2502016/shadab/sahyadri_scratch',
@@ -172,8 +173,12 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                                        max_sim_running=1, max_sim_queued=1, max_sim_restarts=10, max_rockstar=0,
                                        scratch_reserve_gb=2000, max_pbs_queued=4)))
 LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb', 'heartbeat_s',
-              'node_probe_min', 'budget_check_min')
-ZERO_OK = ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb', 'node_probe_min', 'budget_check_min')   # limits that may be 0
+              'node_probe_min', 'budget_check_min', 'rs_auto_retry')
+ZERO_OK = ('max_sim_queued', 'max_sim_restarts', 'scratch_reserve_gb', 'node_probe_min', 'budget_check_min',
+           'rs_auto_retry')   # limits that may be 0
+# rs_auto_retry (default 1): a failed Rockstar batch is resubmitted automatically this many times (counted per batch
+# start); job_rockstar.pbs continues after the batch's newest finished snapshot, so a batch killed part way (node
+# hang, wall time) loses only the snapshot in progress. A further failure of the same batch stops the automation.
 # max_pbs_queued: our jobs waiting in the site's PBS at most (pegasus queued_jobs_threshold: project 6, debug 2 per
 # user); with it, the post-processing stages are submitted one at a time, each after the previous one finished
 SITE_LIMIT_KEYS = ('max_sim_running', 'max_sim_queued', 'max_sim_restarts', 'max_rockstar', 'scratch_reserve_gb',
@@ -2360,13 +2365,13 @@ class Manager:
         f = dict(run.ms['failed'])
         try:
             msg = self.action(dict(action='retry', run=run.name))
-            run.note('after the maintenance: %s' % msg)
+            run.note('%s: %s' % ('automatic retry' if f.get('auto_retry') else 'after the maintenance', msg))
         except MaintWait as e:      # (also NodeWait: no healthy node with room yet)
             run.ms['failed'] = f
             run.maint_msg = str(e)
         except Exception as e:  # noqa: BLE001
-            run.ms['failed'] = dict(f, maint=False, msg='automatic resubmission after the maintenance failed: %s' % e)
-            run.note('automatic resubmission after the maintenance failed: %s' % e)
+            run.ms['failed'] = dict(f, maint=False, auto_retry=False, msg='automatic resubmission failed: %s' % e)
+            run.note('automatic resubmission failed: %s' % e)
         run.save()
 
     def maint_view(self):
@@ -2504,6 +2509,17 @@ class Manager:
             if j['status'] == 'failed' and not self.acked(run, j):
                 run.ms['failed'] = dict(stage=j['stage'], job=j['job'], rc=j.get('rc'), log=j.get('log'), t=now(),
                                         first=j.get('first'), last=j.get('last'))
+                key = 'rockstar:%s' % j.get('first')
+                tried = run.ms.setdefault('auto_retried', [])
+                if j['stage'] == 'rockstar' and tried.count(key) < int(self.cfg.get('rs_auto_retry', 1)):
+                    tried.append(key)
+                    run.ms['failed'].update(auto_retry=True, msg='Rockstar batch from snapshot %s failed; resubmitted '
+                                            'automatically (%d of rs_auto_retry %d), continuing after its newest '
+                                            'finished snapshot' % (j.get('first'), tried.count(key),
+                                                                  int(self.cfg.get('rs_auto_retry', 1))))
+                    run.note('rockstar job %s failed (rc %s); resubmitting automatically (rs_auto_retry)' % (j['job'], j.get('rc')))
+                    run.save()
+                    return 0
                 run.note('%s job %s failed (rc %s); automation stopped' % (j['stage'], j['job'], j.get('rc')))
                 return 0
             if j['status'] == 'gone' and not self.acked(run, j):

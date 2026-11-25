@@ -219,6 +219,18 @@ successful run every copied `out_<snap>.list` is compared with the local one bef
 after a failure it is left on the node. `RS_RESTART=1` copies the saved `.bin` files back to the local disk.
 `RS_LOCAL_OUT=0` writes to the halo directory as before.
 
+**A batch that stopped part way continues** (rerun of `--rs-snaps A-B`, e.g. the manager's retry). Its newest finished
+snapshot m is the newest `halos_<m>.*.bin` set below `RESTART_SNAP` of the halo directory's `restart.cfg`. Rockstar
+writes `out_<m>.list` only after snapshot m+1 (the descendant links), and a restart at m+1 from `halos_<m>` writes
+it again (r4: `out_58.list` was rewritten at 02:07 on 25 Nov by the batch that started at 59). The rerun therefore needs
+`out_A.list` .. `out_<m-1>.list` and a whole `halos_<m>` set (`NUM_WRITERS` files of `rockstar.cfg`, none empty), and
+starts at m+1. Before 26 Nov the check also asked for `out_<m>.list`, so the reruns of r3 batch 85 and r4 batch 59
+(node1 hang, 25 Nov) stopped with "no halos_<A-1>" (the previous batch's set, already replaced by `halos_<m>`), and
+the halo files of snapshot A-1 had to be copied back from node1's `/var/tmp` by hand. Tested read-only on r4's halo
+directory: batch 59-69 continues at 68 (m = 67, 64 of 64 files). The `.bin` files are copied to `.<name>.part` and
+renamed, so a job killed during the copy leaves no truncated file; older sets are deleted only after the whole newest
+set is in place. The run manager resubmits a failed Rockstar batch by itself `rs_auto_retry` times (default 1).
+
 **Writers.** One writer per core of the job (`PBS_NCPUS`, else `NCPUS`, else `RS_NCPU`); the job writes the
 configuration it runs to `rs_job.cfg` (`NUM_WRITERS`, `FORK_PROCESSORS_PER_MACHINE`, `OUTBASE` set, the rest from
 `RS_CFG` or the generated `rs_input.cfg`). `RS_WRITERS_FIXED=1` uses `RS_WRITERS` instead.

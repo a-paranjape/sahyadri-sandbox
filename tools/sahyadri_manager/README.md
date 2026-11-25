@@ -254,7 +254,7 @@ directories, and everything downstream (mirror, deletion checks, archive) works 
 | Rockstar covers every snapshot | `ctrees → vahc → fits → verify` (one afterok chain) |
 | verify passed | `archive` |
 | archive passed | waits: *Move scratch data to the trash* (button) |
-| a job fails or vanishes | automation of that run stops (red); *Retry* resubmits that stage (a Rockstar batch continues after its newest finished snapshot), *Acknowledge* clears it without resubmitting |
+| a job fails or vanishes | automation of that run stops (red); *Retry* resubmits that stage (a Rockstar batch continues after its newest finished snapshot), *Acknowledge* clears it without resubmitting. A failed Rockstar batch is first resubmitted by itself `rs_auto_retry` times (1; counted per batch start, page: Simulation queue); only a further failure stops the run |
 
 ## What is kept
 

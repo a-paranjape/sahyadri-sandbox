@@ -344,7 +344,7 @@ function render(){
   const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#limits');
   if(!editing) document.getElementById('queuecard').innerHTML = `<div id="limits"><div class="row"><b>Simulation queue</b> <b>${h(S.local_site||'')}</b>
      <span class="muted small">running ${S.sims_running} · waiting in PBS ${S.sims_queued}</span><span class="sp"></span>
-     ${lim('max_sim_running','max running')}${lim('max_sim_queued','max waiting in PBS')}${lim('max_sim_restarts','restarts')}${lim('max_rockstar','Rockstar at once')}${lim('scratch_reserve_gb','reserve GB',70)}
+     ${lim('max_sim_running','max running')}${lim('max_sim_queued','max waiting in PBS')}${lim('max_sim_restarts','restarts')}${lim('max_rockstar','Rockstar at once')}${lim('rs_auto_retry','Rockstar auto-retries',40)}${lim('scratch_reserve_gb','reserve GB',70)}
      <button onclick="setLimits()">Save limits</button></div>${siteRows}</div>
      ${q?`<table style="margin-top:8px"><tr><th>#</th><th>site</th><th>queue</th><th>run</th><th></th><th>priority</th><th>scheduled</th><th>waiting for</th></tr>${q}</table>`:'<div class="muted small" style="margin-top:6px">no simulations scheduled</div>'}`;
   nodesCard();
