@@ -261,6 +261,7 @@ function postproc(name,what){ if(confirm('Submit post-processing "'+what+'" for 
 function setBudgetMin(){ const v=document.getElementById('budgetmin').value.trim(); if(v!=='') act({action:'set_limits', budget_check_min:v}); }
 function setProbe(){ const v=document.getElementById('probemin').value.trim(); if(v!=='') act({action:'set_limits', node_probe_min:v}); }
 function delLeftover(host,dir){ const b=dir.split('/').pop(); const t=prompt('Delete '+host+':'+dir+' ?\nThis cannot be undone. Type the directory name to confirm:\n'+b, ''); if(t!==null) act({action:'delete_leftover', host:host, dir:dir, confirm:t.trim()}); }
+function rescueNode(host){ const t=prompt('Rescue the leftovers of ended jobs on '+host+'?\nRockstar output: the finished snapshots are copied to the halo directory (never over newer files) and the directory is removed. A stage: removed only if every file in it is already on NFS. Anything else is kept.\nType the node name to confirm:', ''); if(t!==null) act({action:'rescue_leftovers', host:host, confirm:t.trim()}); }
 function nodesCard(){
   const N=S.nodes||[];
   const badge=st=>`<span class="badge ${st==='ok'?'b-ok':st==='warn'||st==='not probed'?'b-wait':'b-bad'}">${h(st)}</span>`;
@@ -284,7 +285,10 @@ function nodesCard(){
     <button onclick="setProbe()">Save</button><button onclick="act({action:'probe_nodes'})">Probe now</button></div>
     ${rows?`<table style="margin-top:6px"><tr><th>node</th><th>health</th><th>PBS</th><th class="num">mem pressure</th><th class="num">writeback</th><th class="num">mem available</th><th class="num">/var/tmp free</th><th class="num">D &gt;10 min</th><th>I/O probe</th><th>checked</th></tr>${rows}</table>`:'<div class="muted small" style="margin-top:6px">not probed yet</div>'}
     <div style="margin-top:10px"><b>Our directories in /var/tmp</b> <span class="muted small">staging and Rockstar output; leftovers of ended jobs can be deleted (type the name to confirm)</span>
-    ${drows?`<table style="margin-top:4px"><tr><th>node</th><th>directory</th><th class="num">size</th><th>changed</th><th>kind</th><th></th><th></th></tr>${drows}</table>`:'<div class="muted small">none</div>'}</div>`;
+    ${drows?`<table style="margin-top:4px"><tr><th>node</th><th>directory</th><th class="num">size</th><th>changed</th><th>kind</th><th></th><th></th></tr>${drows}</table>`:'<div class="muted small">none</div>'}
+    ${N.filter(n=>(n.dirs||[]).some(d=>!d.in_use)||n.rescue).map(n=>`<div style="margin-top:6px"><b>${h(n.host)}</b>
+      ${n.rescue&&n.rescue.done===false?'<span class="muted small">rescuing…</span>':`<button onclick="rescueNode('${h(n.host)}')" title="copy what a rerun needs from the leftovers of ended jobs, then remove them">rescue leftovers</button>`}
+      ${n.rescue?`<div class="small muted">${n.rescue.lines.map(x=>h(x)).join('<br>')}</div>`:''}</div>`).join('')}</div>`;
 }
 function setQueue(site,q,st){ if(confirm('Set queue '+site+':'+q+' to '+st+'?')) act({action:'set_queue', site:site, queue:q, state:st}); }
 function purge(name){

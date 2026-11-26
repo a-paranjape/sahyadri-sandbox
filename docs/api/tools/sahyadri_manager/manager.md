@@ -1082,6 +1082,28 @@ nodes_view(self)
 
 Nodes for the page: probe result, PBS state, avoided or not (and why), our directories in /var/tmp.
 
+### Manager.leftover_plan
+
+```python
+leftover_plan(self, host, d)
+```
+
+What rescue\_leftovers does with one directory of ours in a node's /var/tmp (main loop): dict(do=
+'salvage' | 'stage' | 'keep', why, ...). Rockstar output of a run's batch: rs\_salvage.py --delete (it
+copies what a rerun can continue from, never over newer files of a later job, and deletes the directory
+once every catalogue in it is in the halo directory). A run's stage: deleted only if every file in it is
+on NFS with the same size; else kept and listed (it may hold the only copy of outputs or checkpoint
+pieces). Anything in use, of an unknown run or job, or with a Rockstar batch of the run in PBS: kept.
+
+### Manager.rescue_leftovers
+
+```python
+rescue_leftovers(self, host, confirm)
+```
+
+Page button of a node: rescue and remove its leftovers of the manager's ended jobs (leftover\_plan),
+then probe the node again. In a thread; progress and results on the page (Nodes) and in the log.
+
 ### Manager.delete_leftover
 
 ```python

@@ -41,12 +41,13 @@ SSH = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=30', '-o', 'ServerAli
 LIST = r'''
 import json, os, re, sys
 d = sys.argv[1]
-out = dict(exists=os.path.isdir(d), files={}, restart_snap=None, num_writers=None, restart_cfg=None, rockstar_cfg=None)
+out = dict(exists=os.path.isdir(d), files={}, mtimes={}, restart_snap=None, num_writers=None, restart_cfg=None, rockstar_cfg=None)
 if out["exists"]:
     for n in os.listdir(d):
         p = os.path.join(d, n)
         if os.path.isfile(p) and (n.endswith(".list") or n.endswith(".bin") or n.endswith(".cfg")):
             out["files"][n] = os.path.getsize(p)
+            out["mtimes"][n] = os.path.getmtime(p)
     for n, k in (("restart.cfg", "restart_cfg"), ("rockstar.cfg", "rockstar_cfg")):
         p = os.path.join(d, n)
         if os.path.isfile(p):
@@ -132,6 +133,15 @@ def main():
             raise RuntimeError('%s does not exist on %s' % (src, a.node))
         say('%s:%s: %d files, RESTART_SNAP %s, NUM_WRITERS %s' % (a.node, src, len(L['files']), L['restart_snap'], L['num_writers']))
         m, why = choose(L, a.first, a.last, names)
+        # a later Rockstar job of the run wrote the halo directory after this one: its files are newer, never
+        # replaced by older ones (a leftover rescued after the batch was redone)
+        # (its restart.cfg there names a later RESTART_SNAP; the job's own copies, sync_out, have the same or an
+        # earlier one, and keep the files' times: cp -p)
+        hr = os.path.join(halo, 'restart.cfg')
+        hm = re.search(r'^\s*RESTART_SNAP\s*=\s*(\d+)', open(hr, errors='replace').read(), re.M) if os.path.isfile(hr) else None
+        if m is not None and hm and int(hm.group(1)) > L['restart_snap']:
+            m, why = None, 'the halo directory is further on (RESTART_SNAP %s there, %s on the node): a later job wrote it' % (
+                hm.group(1), L['restart_snap'])
         res.update(m=m, continue_at=(m + 1) if m is not None else a.first)
         todo = []
         if m is not None:
@@ -149,12 +159,13 @@ def main():
         if not a.dry_run:
             for n in todo:
                 d = os.path.join(halo, n)
-                if os.path.isfile(d) and os.path.getsize(d) == L['files'][n]:
-                    continue
+                if os.path.isfile(d) and (os.path.getsize(d) == L['files'][n] or os.path.getmtime(d) > L['mtimes'][n] + 60):
+                    continue          # already there, or a newer copy from a later job
                 nbytes += fetch(a.node, os.path.join(src, n), d, L['files'][n])
                 nfiles += 1
             bad = [n for n in todo if not (os.path.isfile(os.path.join(halo, n))
-                                            and os.path.getsize(os.path.join(halo, n)) == L['files'][n])]
+                                            and (os.path.getsize(os.path.join(halo, n)) == L['files'][n]
+                                                 or os.path.getmtime(os.path.join(halo, n)) > L['mtimes'][n] + 60))]
             if bad:
                 raise RuntimeError('after the copy %d file(s) differ in size: %s' % (len(bad), ' '.join(bad[:5])))
             if m is not None:
@@ -170,7 +181,7 @@ def main():
         res.update(ok=True, files=nfiles, bytes=nbytes, todo=len(todo), dry_run=a.dry_run)
         if a.delete and not a.dry_run:
             lost = [n for n in L['files'] if re.match(r'^out_\d+\.list$', n)
-                    and not os.path.isfile(os.path.join(halo, n))]
+                    and not (os.path.isfile(os.path.join(halo, n)) and os.path.getsize(os.path.join(halo, n)) > 0)]
             if lost and m is None:
                 say('not deleting %s: %d catalogue(s) there are not in %s' % (src, len(lost), halo))
                 res['deleted'] = False

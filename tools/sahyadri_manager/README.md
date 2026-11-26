@@ -187,7 +187,7 @@ It is used in three places:
 
 The Nodes card also lists our directories in each node's `/var/tmp` (staging, Rockstar output) with size, age and
 whether a job still uses them: Rockstar output of a job still in PBS, or the stage of a run whose simulation runs
-there. A leftover can be deleted with its button. You type the directory name to confirm, the manager checks it is
+there. **Rescue leftovers** (a button per node, the node name typed as confirmation) goes through that node's directories that no job uses. A Rockstar output of a run's batch gets `rs_salvage.py --delete`: its finished snapshots are copied to the halo directory, so a rerun continues after them, and never over newer files of a later job. The directory is removed once every catalogue in it is in the halo directory. A run's stage is removed only if every file in it is already on NFS with the same size; otherwise it is kept and the missing files are listed. Anything in use, of an unknown job or run, or of a run with a Rockstar batch in PBS is kept. The results show under the node, and the node is probed again after. A leftover can also be deleted with its button. You type the directory name to confirm, the manager checks it is
 not in use and runs `rm -rf` on the node. A stage set aside after a killed job (`*.left.<job>`) may hold outputs
 that were never drained; look before deleting it.
 

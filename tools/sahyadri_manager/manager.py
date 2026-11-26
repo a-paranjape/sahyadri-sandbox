@@ -1412,6 +1412,7 @@ class Manager:
         self.budget_next = 0.0
         self.probe_next = 0.0
         self.deleting = {}         # (host, dir) -> time a deletion of a leftover directory started
+        self.rescuing = {}         # host -> dict(t, lines, done): rescue of the node's leftovers (rescue_leftovers)
         self.q = queue.Queue()
         self.runs = {}
         self.qjobs, self.qtime, self.qok = {}, 0.0, None
@@ -2269,8 +2270,153 @@ class Manager:
                 kind, used, note = self.classify_dir(h, d)
                 dirs.append(dict(d, kind=kind, in_use=used, note=note, deleting=(h, d['dir']) in self.deleting))
             r['dirs'] = dirs
+            r['rescue'] = self.rescuing.get(h)
             out.append(r)
         return out
+
+    def leftover_plan(self, host, d):
+        """What rescue_leftovers does with one directory of ours in a node's /var/tmp (main loop): dict(do=
+        'salvage' | 'stage' | 'keep', why, ...). Rockstar output of a run's batch: rs_salvage.py --delete (it
+        copies what a rerun can continue from, never over newer files of a later job, and deletes the directory
+        once every catalogue in it is in the halo directory). A run's stage: deleted only if every file in it is
+        on NFS with the same size; else kept and listed (it may hold the only copy of outputs or checkpoint
+        pieces). Anything in use, of an unknown run or job, or with a Rockstar batch of the run in PBS: kept."""
+        kind, used, note = self.classify_dir(host, d)
+        if used:
+            return dict(do='keep', why='in use (%s)' % note)
+        base = os.path.basename(d['dir'])
+        m = re.match(r'^[\w.-]+?_rockstar_(\d+)$', base)
+        if m:
+            job = m.group(1)
+            for run in self.runs.values():
+                if run.stage_site('rockstar') != LOCAL:
+                    continue
+                D = self.derive(run)
+                j = next((x for x in D['jobs'] if x['job'] == job and x['stage'] == 'rockstar'), None)
+                if j:
+                    break
+            else:
+                return dict(do='keep', why='Rockstar job %s is not a job of any run here' % job)
+            if j.get('first') is None:
+                return dict(do='keep', why='job %s of %s was not a batch (no snapshot range)' % (job, run.name))
+            act = [x['job'] for x in D['active'] if x['stage'] == 'rockstar']
+            if act:
+                return dict(do='keep', why='Rockstar job(s) %s of %s are in PBS: rescue after them' % (', '.join(act), run.name))
+            sv = run.ms.get('rs_salvage') or {}
+            if sv.get('job') == job and sv.get('state') == 'running':
+                return dict(do='keep', why='already being rescued by the retry of %s (log %s)' % (run.name, sv.get('log')))
+            return dict(do='salvage', run=run.name, conf=run.conf, job=job, first=int(j['first']), last=int(j['last']),
+                        sandbox=run.E['SANDBOX'], why='Rockstar batch %s-%s of %s' % (j['first'], j['last'], run.name))
+        m = re.match(r'^[\w.-]+?_stage_(.+?)(\.left\.(\d+))?$', base)
+        if m:
+            for run in self.runs.values():
+                if run.site == LOCAL and '%s_r%s' % (run.E.get('STEM', '').replace('/', '_'), run.E.get('REAL')) == m.group(1):
+                    P = retention.paths(run.E)
+                    return dict(do='stage', run=run.name, snap_dest=P['pkc'], chk_dest=os.path.join(P['sim'], 'checkpoints'),
+                                why='stage of %s' % run.name)
+            return dict(do='keep', why='stage of an unknown run')
+        return dict(do='keep', why='not a directory the manager made')
+
+    def rescue_leftovers(self, host, confirm):
+        """Page button of a node: rescue and remove its leftovers of the manager's ended jobs (leftover_plan),
+        then probe the node again. In a thread; progress and results on the page (Nodes) and in the log."""
+        if confirm != host:
+            raise ValueError('not started: type the node name (%s) to confirm' % host)
+        if (self.rescuing.get(host) or {}).get('done') is False:
+            raise ValueError('a rescue of %s is running' % host)
+        r = self.nodes.get(host) or {}
+        plans = [(x['dir'], x.get('gb', -1), self.leftover_plan(host, x)) for x in r.get('dirs', [])]
+        if not plans:
+            raise ValueError('no directories of ours on %s in its newest probe; probe again' % host)
+        st = self.rescuing[host] = dict(t=now(), lines=[], done=False)
+
+        def say(msg):
+            """A line for the page and the log."""
+            st['lines'].append('%s %s' % (time.strftime('%H:%M'), msg))
+            log('rescue %s: %s' % (host, msg))
+
+        def node_py(code, *args, timeout=600):
+            """python3 -c code on the node; stdout."""
+            return subprocess.run(['ssh'] + SSH_OPTS + [host, 'python3 -c %s %s' % (
+                shlex.quote(code), ' '.join(shlex.quote(str(x)) for x in args))], capture_output=True, text=True, timeout=timeout)
+
+        def work():
+            """Each directory in turn, then probe."""
+            freed = 0.0
+            for d, gb, pl in plans:
+                try:
+                    if pl['do'] == 'keep':
+                        say('%s kept: %s' % (d, pl['why']))
+                        continue
+                    if pl['do'] == 'salvage':
+                        lg = os.path.join(HOME, 'salvage', '%s_%s.log' % (re.sub(r'[^A-Za-z0-9]+', '_', pl['run']), pl['job']))
+                        os.makedirs(os.path.dirname(lg), exist_ok=True)
+                        cmd = [self.cfg.get('local_python') or sys.executable,
+                               os.path.join(pl['sandbox'], 'scripts', 'pkdgrav3_pipeline', 'rs_salvage.py'), pl['conf'],
+                               '--job', pl['job'], '--node', host, '--first', str(pl['first']), '--last', str(pl['last']), '--delete']
+                        with open(lg, 'a') as out:
+                            subprocess.run(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                           timeout=float(self.cfg.get('rs_salvage_max_h', 6)) * 3600)
+                        res = {}
+                        for line in reversed(open(lg, errors='replace').read().splitlines()):
+                            if line.startswith('{'):
+                                res = json.loads(line)
+                                break
+                        if res.get('ok') and res.get('m') is not None:
+                            say('%s: %s; rescued %d file(s), %.1f GB; snapshots %s-%s finished, a rerun continues at %s%s' % (
+                                d, pl['why'], res.get('files', 0), res.get('bytes', 0) / 1e9, pl['first'], res['m'],
+                                res['continue_at'], '; removed' if res.get('deleted') else '; NOT removed'))
+                        elif res.get('ok'):
+                            say('%s: %s; nothing to rescue (%s)%s' % (d, pl['why'], res.get('why', ''),
+                                '; removed' if res.get('deleted') else '; kept: it holds catalogues missing from the halo directory'))
+                        else:
+                            say('%s: %s; rescue failed (%s); kept (log %s)' % (d, pl['why'], res.get('error') or 'no result', lg))
+                        if res.get('deleted'):
+                            freed += max(gb, 0)
+                        try:      # the retry of this failed batch need not rescue it again
+                            self.ask(dict(action='salvage_record', run=pl['run'], job=pl['job'], node=host, log=lg,
+                                          first=pl['first'], last=pl['last'], result=res))
+                        except Exception as e:  # noqa: BLE001
+                            log('rescue %s: recording on %s failed: %s' % (host, pl['run'], e))
+                        continue
+                    # a stage: every file on NFS with the same size?
+                    code = ('import json,os,sys\nd=sys.argv[1];o={}\nfor k in ("local","local_chk"):\n p=os.path.join(d,k)\n'
+                            ' if os.path.isdir(p):\n  for n in os.listdir(p):\n   f=os.path.join(p,n)\n'
+                            '   if os.path.isfile(f) and not n.endswith(".done") and ".part" not in n: o[k+"/"+n]=os.path.getsize(f)\n'
+                            'print(json.dumps(o))')
+                    rr = node_py(code, d, timeout=300)
+                    files = json.loads(rr.stdout.strip().splitlines()[-1])
+                    miss = []
+                    for k, size in files.items():
+                        sub, n = k.split('/', 1)
+                        dst = os.path.join(pl['snap_dest'] if sub == 'local' else pl['chk_dest'], n)
+                        if not (os.path.isfile(dst) and os.path.getsize(dst) == size):
+                            miss.append((n, size))
+                    if miss:
+                        groups = {}
+                        for n, size in miss:
+                            g = n.split('.chk')[0] + '.chk' if '.chk' in n else n.split('.s')[0]   # checkpoint / snapshot
+                            groups.setdefault(g, [0, 0])
+                            groups[g][0] += 1
+                            groups[g][1] += size
+                        say('%s: %s; kept: %d file(s), %.1f GB not on NFS (%s): look before deleting' % (
+                            d, pl['why'], len(miss), sum(x[1] for x in miss) / 1e9,
+                            ', '.join('%s %d files' % (g, v[0]) for g, v in sorted(groups.items())[:6])))
+                        continue
+                    rm = node_py('import shutil,sys; shutil.rmtree(sys.argv[1])', d, timeout=1800)
+                    if rm.returncode == 0:
+                        freed += max(gb, 0)
+                        say('%s: %s; all %d file(s) are on NFS; removed' % (d, pl['why'], len(files)))
+                    else:
+                        say('%s: removing failed: %s' % (d, rm.stderr[-200:]))
+                except Exception as e:  # noqa: BLE001
+                    say('%s: %s' % (d, e))
+            say('done: %.0f GB freed; probing %s again' % (freed, host))
+            st['done'] = True
+            self.probe_next = 0
+            self.probe_ev.set()
+        threading.Thread(target=work, daemon=True).start()
+        return 'rescuing the leftovers on %s (%d directories); progress under Nodes' % (host, len(plans))
 
     def delete_leftover(self, host, d, confirm):
         """Delete a leftover directory of ours in a node's /var/tmp (page button, the name typed as confirmation):
@@ -3189,6 +3335,8 @@ class Manager:
             return 'probing the nodes (results in about a minute)'
         if act == 'delete_leftover':
             return self.delete_leftover(a.get('host'), a.get('dir'), a.get('confirm'))
+        if act == 'rescue_leftovers':
+            return self.rescue_leftovers(a.get('host'), a.get('confirm'))
         if act == 'set_limits':
             changed = []
             for site, S in self.cfg['sites'].items():
@@ -3231,6 +3379,20 @@ class Manager:
             return self.delete_run(run)
         if act == 'plan_forget':
             return self.plan_forget(run)
+        if act == 'salvage_record':      # rescue_leftovers rescued a failed batch's output: the retry need not
+            sv = run.ms.get('rs_salvage') or {}
+            if sv.get('job') == a.get('job') and sv.get('state') == 'running':
+                return 'the retry\'s own rescue is running; not recorded'
+            res = a.get('result') or {}
+            run.ms['rs_salvage'] = dict(job=a.get('job'), pid=None, t=now(), t_end=now(), log=a.get('log'), node=a.get('node'),
+                                        site=LOCAL, first=a.get('first'), last=a.get('last'), result=res,
+                                        state='done' if res.get('ok') else 'failed', via='rescue_leftovers')
+            run.note('Rockstar job %s: its output on %s was rescued from the Nodes card (%s)' % (
+                a.get('job'), a.get('node'), 'continue at %s' % res['continue_at'] if res.get('m') is not None else
+                (res.get('why') or res.get('error') or 'nothing to rescue')))
+            run.save()
+            return 'recorded'
+
         if act == 'remove_run':
             self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
             self.retire(run.name, 'removed from the manager')
