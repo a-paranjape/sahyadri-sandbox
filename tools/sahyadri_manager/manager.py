@@ -1773,8 +1773,9 @@ class Manager:
         self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
         save_cfg(self.cfg)
         self.load_runs()
-        return 'forgot %s: set up from the plan file, never started (its set-up files stay: %s)' % (
-            run.name, os.path.dirname(run.conf))
+        where = ('%s:%s' % (run.site, os.path.dirname(run.E['REMOTE_CONF']))) if run.remote and run.E.get('REMOTE_CONF') \
+            else os.path.dirname(run.conf)
+        return 'forgot %s: set up from the plan file, never started (its set-up files stay: %s)' % (run.name, where)
 
     def remote_ops(self, run, *args, timeout=3600):
         """scratch_ops.py on the run's site -> its JSON answer."""
