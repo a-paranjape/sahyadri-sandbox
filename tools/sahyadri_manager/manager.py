@@ -1395,6 +1395,7 @@ class Manager:
         self.site_disk = {}        # other sites: SCRATCH -> dict(total, used, free, ...)
         self.waiting = {}
         self.plan_view = []        # planned runs and their state (page)
+        self.plan_slots = {}       # site -> (free simulation slots, of them not taken by registered runs) (schedule_site)
         self.plan_errors = {}      # (lineno, line, real) -> message of the last failed set-up (not retried until the line changes)
         self.next_hb = 0.0
         self.recheck_at = None
@@ -1610,12 +1611,49 @@ class Manager:
                                % (ps, r.returncode, (r.stdout + r.stderr).strip()[-400:]))
         return 'halo stages on %s%s' % (ps, ' (already set)' if 'MARKED' in r.stdout.split() else '')
 
+    def plan_next(self, entries):
+        """Plan lines to set up now -> ({key}, {key: (site position, n waiting on the site)}). A line is set up only when
+        it would start: its site has a simulation slot that no registered run is waiting for (``plan_slots``, from
+        :meth:`schedule_site`), and it is among the first that many lines of that site waiting in the plan, by priority
+        then line number. ``hold`` lines are set up at once (registered paused); lines before their ``not_before`` or
+        on a closed queue wait."""
+        by_site = {}
+        for P in entries:
+            if 'error' in P or P['opts'].get('hold'):
+                continue
+            key = (P['lineno'], P['line'], P['real'])
+            if key in self.plan_errors or any(r.name == P['name'] for r in self.runs.values()) \
+                    or (self.cfg.get('plan_retired') or {}).get(P['name']):
+                continue
+            by_site.setdefault(P['site'], []).append(P)
+        go, pos = set(), {}
+        for site, L in by_site.items():
+            L.sort(key=lambda P: (P['priority'], P['lineno'], P['real']))
+            slots = (self.plan_slots.get(site) or (0, 0))[1]
+            for i, P in enumerate(L):
+                key = (P['lineno'], P['line'], P['real'])
+                pos[key] = (i + 1, len(L))
+                nb = P['opts'].get('not_before')
+                try:        # same format as the schedule action: YYYY-MM-DDTHH:MM (local time) or epoch seconds
+                    later = bool(nb) and now() < (float(nb) if re.match(r'^[0-9.]+$', str(nb)) else time.mktime(
+                        time.strptime(str(nb).replace('T', ' ')[:16], '%Y-%m-%d %H:%M')))
+                except ValueError:
+                    later = False
+                closed = (self.queues.get((site, P['queue'])) or {}).get('state') in ('closed', 'drain')
+                if slots > 0 and not later and not closed:
+                    go.add(key)
+                    slots -= 1
+        return go, pos
+
     def plan_sync(self):
-        """Set up, register and schedule what the plan file lists and the manager does not know yet."""
+        """Set up, register and schedule plan lines when they are next to start (:meth:`plan_next`); show the others
+        as planned. Forget runs that the plan set up and that never started when their line is gone, or when their
+        site has no free slot (they are set up again when it is their turn: :meth:`plan_forget_removed`)."""
         path = self.cfg.get('plan_file')
         entries = read_plan(path) if path else []
         view = []
         self.plan_forget_removed(path, entries, view)    # first, so lines refused because of a forgotten run go now
+        go, pos = self.plan_next(entries)
         for P in entries:
             if 'error' in P:
                 view.append(dict(line=P['line'], lineno=P['lineno'], state='error', msg=P['error']))
@@ -1634,6 +1672,12 @@ class Manager:
             elif run is None:
                 if P['site'] != LOCAL and P['site'] not in self.cfg['sites']:
                     v.update(state='error', msg='unknown site %s' % P['site'])
+                    view.append(v)
+                    continue
+                if not P['opts'].get('hold') and key not in go:
+                    k, n = pos.get(key, (0, 0))
+                    v.update(state='planned', position=k, msg='#%d of %d planned on %s: set up when it is next to start '
+                             '(a simulation slot is free)' % (k, n, P['site']))
                     view.append(v)
                     continue
                 try:
@@ -1689,23 +1733,30 @@ class Manager:
         if not path or not os.path.isfile(path) or not any('error' not in P for P in entries):
             return
         want = {P['name'] for P in entries if 'error' not in P}
+        hold = {P['name'] for P in entries if 'error' not in P and P['opts'].get('hold')}
         gone = []
         for conf in self.plan_marked():
             run = self.runs.get(conf)
-            if run is None or run.name in want:
+            if run is None or run.name in hold:
                 continue
+            if run.name in want:
+                # set up early (before 26 Nov, or its slot went): back to planned while its site has no free slot
+                sc = run.ms.get('scheduled')
+                if not sc or sc.get('restart') or run.ms.get('paused') or (self.plan_slots.get(run.site) or (1, 1))[0] > 0:
+                    continue
             try:
                 msg = self.ask(dict(action='plan_forget', run=run.name))
                 gone.append(run.name)
                 log('plan: %s' % msg)
             except Exception as e:  # noqa: BLE001
-                v = dict(name=run.name, site=run.site, state='kept', line='', lineno=0,
-                         msg='not in the plan file any more; kept: %s' % e)
-                view.append(v)
+                if run.name not in want:
+                    view.append(dict(name=run.name, site=run.site, state='kept', line='', lineno=0,
+                                     msg='not in the plan file any more; kept: %s' % e))
         if gone:
             self.plan_errors.clear()    # lines refused because of a forgotten run are tried again
             self.plan_forgot = dict(name='', line='', lineno=0, state='forgotten',
-                                    msg='%s: %d runs not started and no longer in the plan file were forgotten: %s'
+                                    msg='%s: %d runs set up by the plan but not started were forgotten (line gone, or '
+                                        'back to planned until their turn): %s'
                                         % (iso(), len(gone), ', '.join(gone)))
         if getattr(self, 'plan_forgot', None):
             view.append(self.plan_forgot)    # the last forgetting, shown until the manager restarts
@@ -1722,7 +1773,7 @@ class Manager:
         self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
         save_cfg(self.cfg)
         self.load_runs()
-        return 'forgot %s: set up from the plan file, never started, no longer in it (its set-up files stay: %s)' % (
+        return 'forgot %s: set up from the plan file, never started (its set-up files stay: %s)' % (
             run.name, os.path.dirname(run.conf))
 
     def remote_ops(self, run, *args, timeout=3600):
@@ -2868,6 +2919,10 @@ class Manager:
                     run.note('scheduled submission failed: %s' % e)
             self.queue_view.append(dict(run=run.name, site=site, queue=qn, priority=sc.get('priority', 0), t=sc.get('t'), restart=sc.get('restart'),
                                         not_before=sc.get('not_before'), wait=wait))
+        # simulation slots for plan lines not set up yet (plan_sync sets a line up only when it would start)
+        free = max(0, min(mr - running - queued, mq - queued)) if self.pbs_room(site) else 0
+        waiting = sum(1 for r in cand if r.ms.get('scheduled') and not r.ms['scheduled'].get('restart'))
+        self.plan_slots[site] = (free, max(0, free - waiting))
 
     def acked(self, run, j):
         """True if job ``j`` of ``run`` was acknowledged on the page (its failure no longer alerts)."""

@@ -867,13 +867,27 @@ Plan option `post_site=<site>`: run post\_site\_conf.py with that site's install
 halo stages run there (POST\_SITE/POST\_CONF) from the start. Done before the run is registered; re-running it is
 harmless (it rewrites the same post configuration, and refuses a different one without --force).
 
+### Manager.plan_next
+
+```python
+plan_next(self, entries)
+```
+
+Plan lines to set up now -&gt; ({key}, {key: (site position, n waiting on the site)}). A line is set up only when
+it would start: its site has a simulation slot that no registered run is waiting for (`plan_slots`, from
+`schedule_site`), and it is among the first that many lines of that site waiting in the plan, by priority
+then line number. `hold` lines are set up at once (registered paused); lines before their `not_before` or
+on a closed queue wait.
+
 ### Manager.plan_sync
 
 ```python
 plan_sync(self)
 ```
 
-Set up, register and schedule what the plan file lists and the manager does not know yet.
+Set up, register and schedule plan lines when they are next to start (`plan_next`); show the others
+as planned. Forget runs that the plan set up and that never started when their line is gone, or when their
+site has no free slot (they are set up again when it is their turn: `plan_forget_removed`).
 
 ### Manager.plan_marked
 

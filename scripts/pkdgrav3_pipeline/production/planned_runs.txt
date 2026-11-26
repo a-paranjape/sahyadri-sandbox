@@ -1,12 +1,13 @@
 # Planned Sahyadri runs, read by the run manager (tools/sahyadri_manager) every few minutes. Template: the manager's
 # copy is ~/.sahyadri_mgr/planned_runs.txt (made from this file on first start); edit that one. Which queues take jobs,
 # and their own limits: ~/.sahyadri_mgr/queues.txt (template queues.txt here).
-# For each line not yet set up, the manager runs setup_production.py on the site (pawna locally, pegasus over ssh),
-# registers the run and puts its simulation in the queue with this priority (lower first). Runs then start as the
-# limits, scratch space and (pegasus) core-hour budget allow. Editing a line's priority re-prioritises a run that is
-# still waiting. Removing a line (or moving it to another site) makes the manager forget the run that line set up,
-# if it never started (no job, no event): it leaves the manager, its set-up files stay. A run that started is kept
-# (unschedule or remove it in the page).
+# A line stays *planned* (listed on the page, Upcoming, with its place on its site) until it is next to start: its
+# site has a free simulation slot and it comes first by priority (lower first), then line number. Only then does the
+# manager run setup_production.py on the site, register the run and queue its simulation, which then starts as the
+# limits, scratch space and (pegasus) core-hour budget allow. So moving a line to another site, or editing it, leaves
+# no unused set-up behind. A run the plan set up that has not started is forgotten again when its line is removed or
+# moved, or when its site has no free slot (set up again on its turn; the set-up files are reused). A run that
+# started is kept (unschedule or remove it in the page). hold lines are set up at once (registered paused).
 #
 # columns:  site     queue    cosmology  N     L      realisations  priority  [options]
 #   site      pawna | pegasus | swarm | leap

@@ -80,9 +80,14 @@ The start order is on the page: the *Upcoming* tab begins with a **Start order**
 priority, when scheduled, what it waits for), its run cards are sorted in that order, and every scheduled run's card
 carries a badge `#k of n to start on <site>`. Order in the plan file does not matter, only the priority column.
 
-The plan file's current lines decide what is waiting: when a line is removed or changed to another site, the run it
-had set up is forgotten at the next plan check if it never started (no job and no event of it; phase scheduled or not
-started). It leaves the manager without being retired, so a line for it can come back later; its set-up files
+The plan file's current lines decide what is waiting. A line is set up (setup_production.py, then registered and
+queued) only when it is next to start: its site has a simulation slot that no registered run is waiting for
+(`max_sim_running`/`max_sim_queued` and the site PBS limit, computed by the scheduler), it is first among that site's
+planned lines by priority then line number, its `not_before` has passed and its queue is open. Until then the plan
+card lists it as *planned*, with its place on the site. `hold` lines are set up at once (registered paused). A run the
+plan set up is forgotten at the next plan check if it never started (no job and no event of it; phase scheduled or not
+started) and its line was removed or changed to another site, or its site has no free slot (it is set up again on
+its turn; the set-up files are reused). It leaves the manager without being retired, so a line for it can come back later; its set-up files
 (run.conf, parameter files) stay on its site. A run that started is never forgotten; the plan card lists it as
 *kept*. Runs registered before 26 Nov 2026 count as set up by the plan when the manager log has their
 "plan line N: <name> set up" line.
