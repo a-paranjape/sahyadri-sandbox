@@ -4,7 +4,9 @@
 # For each line not yet set up, the manager runs setup_production.py on the site (pawna locally, pegasus over ssh),
 # registers the run and puts its simulation in the queue with this priority (lower first). Runs then start as the
 # limits, scratch space and (pegasus) core-hour budget allow. Editing a line's priority re-prioritises a run that is
-# still waiting; removing a line does not touch a run that was set up (unschedule or remove it in the page).
+# still waiting. Removing a line (or moving it to another site) makes the manager forget the run that line set up,
+# if it never started (no job, no event): it leaves the manager, its set-up files stay. A run that started is kept
+# (unschedule or remove it in the page).
 #
 # columns:  site     queue    cosmology  N     L      realisations  priority  [options]
 #   site      pawna | pegasus | swarm | leap

@@ -875,6 +875,34 @@ plan_sync(self)
 
 Set up, register and schedule what the plan file lists and the manager does not know yet.
 
+### Manager.plan_marked
+
+```python
+plan_marked(self)
+```
+
+conf paths of the registered runs that the plan file set up: the `plan` flag of their `runs` entry, and,
+for runs registered before the flag existed, the manager log's "plan line N: &lt;name&gt; set up|exists" lines.
+
+### Manager.plan_forget_removed
+
+```python
+plan_forget_removed(self, path, entries, view)
+```
+
+Forget runs that the plan file set up, whose line is gone and whose simulation never started (no job and no
+event): they leave the manager (not retired, no file touched), so the plan's current lines decide. Nothing is
+forgotten while the plan file is missing or has no valid line.
+
+### Manager.plan_forget
+
+```python
+plan_forget(self, run)
+```
+
+Take a run out of the manager that the plan file set up and that never started (see
+`plan_forget_removed`); raises ValueError if it has jobs or events. Its set-up files stay where they are.
+
 ### Manager.remote_ops
 
 ```python
@@ -1323,7 +1351,7 @@ space_check(self, run)
 ### Manager.add_run
 
 ```python
-add_run(self, conf, paused=True)
+add_run(self, conf, paused=True, plan=False)
 ```
 
 Register a run from `conf` (a local path, or `site:/path` for a run on another site).

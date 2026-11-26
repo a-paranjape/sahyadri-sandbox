@@ -80,6 +80,13 @@ The start order is on the page: the *Upcoming* tab begins with a **Start order**
 priority, when scheduled, what it waits for), its run cards are sorted in that order, and every scheduled run's card
 carries a badge `#k of n to start on <site>`. Order in the plan file does not matter, only the priority column.
 
+The plan file's current lines decide what is waiting: when a line is removed or changed to another site, the run it
+had set up is forgotten at the next plan check if it never started (no job and no event of it; phase scheduled or not
+started). It leaves the manager without being retired, so a line for it can come back later; its set-up files
+(run.conf, parameter files) stay on its site. A run that started is never forgotten; the plan card lists it as
+*kept*. Runs registered before 26 Nov 2026 count as set up by the plan when the manager log has their
+"plan line N: <name> set up" line.
+
 A simulation that stops cleanly at its wall time (checkpoint written, outputs missing) is queued again with
 priority −1 and restarts from its newest checkpoint, at most `max_sim_restarts` (5) times. A simulation that
 fails stops the run as usual.

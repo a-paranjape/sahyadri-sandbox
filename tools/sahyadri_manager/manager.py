@@ -1634,7 +1634,7 @@ class Manager:
                     conf, how = self.plan_setup(P)
                     log('plan line %d: %s %s (%s)' % (P['lineno'], P['name'], how, conf))
                     self.ask(dict(action='add_run', conf=('%s:%s' % (P['site'], conf)) if P['site'] != LOCAL else conf,
-                                  paused=bool(P['opts'].get('hold'))))
+                                  paused=bool(P['opts'].get('hold')), plan=True))
                     if not P['opts'].get('hold'):
                         self.ask(dict(action='schedule', run=P['name'], priority=P['priority'],
                                       not_before=P['opts'].get('not_before') or ''))
@@ -1656,7 +1656,69 @@ class Manager:
                     except Exception as e:  # noqa: BLE001
                         log('plan: priority of %s: %s' % (run.name, e))
             view.append(v)
+        self.plan_forget_removed(path, entries, view)
         self.plan_view = view
+
+    def plan_marked(self):
+        """conf paths of the registered runs that the plan file set up: the ``plan`` flag of their ``runs`` entry, and,
+        for runs registered before the flag existed, the manager log's "plan line N: <name> set up|exists" lines."""
+        names = set()
+        try:
+            for line in open(LOGF, errors='replace'):
+                m = re.search(r'plan line \d+: (\S+) (?:set up|exists)', line)
+                if m:
+                    names.add(m.group(1))
+        except OSError:
+            pass
+        out = set()
+        for r in self.cfg.get('runs', []):
+            run = self.runs.get(r['conf'])
+            if r.get('plan') or (run is not None and run.name in names):
+                out.add(r['conf'])
+        return out
+
+    def plan_forget_removed(self, path, entries, view):
+        """Forget runs that the plan file set up, whose line is gone and whose simulation never started (no job and no
+        event): they leave the manager (not retired, no file touched), so the plan's current lines decide. Nothing is
+        forgotten while the plan file is missing or has no valid line."""
+        if not path or not os.path.isfile(path) or not any('error' not in P for P in entries):
+            return
+        want = {P['name'] for P in entries if 'error' not in P}
+        gone = []
+        for conf in self.plan_marked():
+            run = self.runs.get(conf)
+            if run is None or run.name in want:
+                continue
+            try:
+                msg = self.ask(dict(action='plan_forget', run=run.name))
+                gone.append(run.name)
+                log('plan: %s' % msg)
+            except Exception as e:  # noqa: BLE001
+                v = dict(name=run.name, site=run.site, state='kept', line='', lineno=0,
+                         msg='not in the plan file any more; kept: %s' % e)
+                view.append(v)
+        if gone:
+            self.plan_errors.clear()    # lines refused because of a forgotten run are tried again
+            self.plan_forgot = dict(name='', line='', lineno=0, state='forgotten',
+                                    msg='%s: %d runs not started and no longer in the plan file were forgotten: %s'
+                                        % (iso(), len(gone), ', '.join(gone)))
+        if getattr(self, 'plan_forgot', None):
+            view.append(self.plan_forgot)    # the last forgetting, shown until the manager restarts
+
+    def plan_forget(self, run):
+        """Take a run out of the manager that the plan file set up and that never started (see
+        :meth:`plan_forget_removed`); raises ValueError if it has jobs or events. Its set-up files stay where they are."""
+        D = self.derive(run)
+        evf = [f for f in glob.glob(os.path.join(run.P['state'], 'events', '*.jsonl')) if os.path.getsize(f) > 0]
+        if D['active'] or D['jobs'] or run.ev or evf:
+            raise ValueError('it has jobs or events (started)')
+        if run.phase(D) not in ('scheduled', 'not started'):
+            raise ValueError('phase %s' % run.phase(D))
+        self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
+        save_cfg(self.cfg)
+        self.load_runs()
+        return 'forgot %s: set up from the plan file, never started, no longer in it (its set-up files stay: %s)' % (
+            run.name, os.path.dirname(run.conf))
 
     def remote_ops(self, run, *args, timeout=3600):
         """scratch_ops.py on the run's site -> its JSON answer."""
@@ -2817,7 +2879,9 @@ class Manager:
         """
         name, act = a.get('run'), a.get('action')
         if act == 'add_run':
-            return self.add_run(a['conf'], a.get('paused', True))
+            return self.add_run(a['conf'], a.get('paused', True), plan=a.get('plan', False))
+        if act == 'plan_forget':
+            return self.plan_forget(run)
         if act == 'unretire':
             if not (self.cfg.get('plan_retired') or {}).pop(a.get('name'), None):
                 raise ValueError('%s is not retired' % a.get('name'))
@@ -3080,7 +3144,7 @@ class Manager:
                   retention.human(abs(left)), 'left' if left >= 0 else 'SHORT'))
         return left >= 0, msg
 
-    def add_run(self, conf, paused=True):
+    def add_run(self, conf, paused=True, plan=False):
         """Register a run from ``conf`` (a local path, or ``site:/path`` for a run on another site).
 
         A remote run.conf is mirrored first. Refuses a missing file and a second run with the same name (names
@@ -3108,7 +3172,7 @@ class Manager:
                              'realisation number or ARCHIVE' % (new.name, clash[0].name, new.E['ARCHIVE'],
                                                                  new.E['STEM'], new.E['REAL']))
         if not any(r['conf'] == conf for r in self.cfg['runs']):
-            self.cfg['runs'].append(dict(conf=conf, paused=paused, added=iso()))
+            self.cfg['runs'].append(dict(conf=conf, paused=paused, added=iso(), **({'plan': True} if plan else {})))
             save_cfg(self.cfg)
         self.load_runs()
         return 'added %s' % conf
