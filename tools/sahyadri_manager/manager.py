@@ -129,6 +129,10 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    # budget_check_min minutes (0 = only when a job is submitted or on the page's "read now")
                    budget_check_min=30,
                    rs_auto_retry=1,     # a failed Rockstar batch is resubmitted this many times by itself (see ZERO_OK)
+                   # before a failed Rockstar batch is resubmitted, its finished snapshots are copied from the
+                   # node's local disk to the halo directory (rs_salvage.py on the site's head/login node, not on
+                   # the node: its NFS client may be what hung), so the rerun continues; 0 = off
+                   rs_salvage=1, rs_salvage_max_h=6,
                    scratch_root='/user/shadab/sahyadri_scratch',
                    sites=dict(pegasus=dict(login='calam.shadab@pegasus.iucaa.in', data='calam.shadab@data.iucaa.in',
                                            scratch_root='/data/project/hpc2502016/shadab/sahyadri_scratch',
@@ -744,6 +748,10 @@ class MaintWait(Exception):
     """A submission refused because of a maintenance window of the site (the message says which and why)."""
 
 
+class SalvageWait(MaintWait):
+    """A Rockstar retry waits for the rescue of the failed batch's finished snapshots (Manager.rs_salvage)."""
+
+
 class NodeWait(MaintWait):
     """A submission held back: bad nodes are usable in PBS and no healthy node has room for the job now."""
 
@@ -815,6 +823,20 @@ def hms(sec):
 def run_queue(run):
     """The PBS queue of a run: ``PBS_QUEUE`` from its run.conf, else the site's default queue."""
     return run.E.get('PBS_QUEUE') or DEFAULT_QUEUE.get(run.site, 'workq')
+
+
+def pid_alive(pid, word=None):
+    """Is process ``pid`` running (and, with ``word``, is it in its command line: a reused pid is not)?"""
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, ValueError, TypeError):
+        return False
+    if word:
+        try:
+            return word in open('/proc/%d/cmdline' % int(pid), 'rb').read().decode(errors='replace')
+        except OSError:
+            return True        # no /proc (macOS tests): trust the pid
+    return True
 
 
 def site_cfg(cfg, site):
@@ -2600,12 +2622,103 @@ class Manager:
         run.save()
         return True
 
+    # ------------------------------------------------------------------ Rockstar rescue
+    def rs_salvage(self, run, f):
+        """Before a failed Rockstar batch is resubmitted: copy its finished snapshots from the node's local disk to
+        the halo directory, so the rerun continues after them (job_rockstar.pbs) instead of starting over.
+        rs_salvage.py runs in the background on the head/login node of the site where the job ran and reads the
+        node over ssh (pawna node1, 25 Nov 2026: the node's NFS writes hung, so the job's own copies never
+        arrived; the reruns of r4 59-68 and r3 85-96 redid ~8 and ~5 finished snapshots, ~4.8 h). It also removes
+        the node's directory once everything needed is copied. Raises SalvageWait while it runs (the failure is
+        marked auto_retry, so the retry follows by itself); returns when there is nothing to do or it has ended,
+        however it ended (a failed rescue only means the batch reruns from its start). Once per failed job."""
+        if (not int(self.cfg.get('rs_salvage', 1)) or f.get('stage') != 'rockstar' or f.get('first') is None
+                or f.get('rc') == NODE_RC):        # exit 75: the node check refused the node, Rockstar never ran
+            return
+        E = run.E
+        if str(E.get('RS_LOCAL_OUT', '1')) == '0' or int(float(E.get('RS_NODES') or 1)) > 1:
+            return                         # Rockstar wrote to the halo directory itself
+        sv = run.ms.get('rs_salvage') or {}
+        if sv.get('job') == f.get('job'):
+            if sv.get('state') != 'running':
+                return
+            if pid_alive(sv['pid'], 'rs_salvage') and now() - sv['t'] < float(self.cfg.get('rs_salvage_max_h', 6)) * 3600:
+                raise SalvageWait('rescuing the finished snapshots of Rockstar job %s from %s (since %s, log %s); the '
+                                  'batch is resubmitted after it' % (sv['job'], sv['node'],
+                                                                    time.strftime('%H:%M', time.localtime(sv['t'])), sv['log']))
+            self.rs_salvage_done(run, sv)
+            return
+        j = next((x for x in self.derive(run)['jobs'] if x['job'] == f.get('job')), None)
+        host = (j or {}).get('host')
+        if not host:
+            return                         # never started: nothing on a node
+        site = run.stage_site('rockstar')
+        args = ['--job', str(f['job']), '--node', host, '--first', str(f['first']), '--last', str(f['last']), '--delete']
+        if site == LOCAL:
+            cmd = [self.cfg.get('local_python') or sys.executable,
+                   os.path.join(E['SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'rs_salvage.py'), run.conf] + args
+        else:
+            S = self.cfg['sites'][site]
+            conf = E['POST_CONF'] if site != run.site else E['REMOTE_CONF']
+            line = ' '.join(shlex.quote(x) for x in [S['python'], os.path.join(S['sandbox'], 'scripts', 'pkdgrav3_pipeline',
+                                                                               'rs_salvage.py'), conf] + args)
+            cmd = ['ssh'] + SSH_OPTS + ['-o', 'ControlPath=none', S['login'], line]
+        d = os.path.join(HOME, 'salvage')
+        os.makedirs(d, exist_ok=True)
+        lg = os.path.join(d, '%s_%s.log' % (re.sub(r'[^A-Za-z0-9]+', '_', run.name), f['job']))
+        with open(lg, 'a') as out:
+            p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+
+        def reap():
+            """Wait for the rescue to end, then wake the main loop (its retry follows)."""
+            p.wait()
+            self.q.put(('wake',))
+        threading.Thread(target=reap, daemon=True).start()
+        run.ms['rs_salvage'] = dict(job=f['job'], pid=p.pid, t=now(), log=lg, state='running', node=host, site=site,
+                                    first=f['first'], last=f['last'])
+        run.ms['failed'] = dict(f, auto_retry=True)
+        run.note('Rockstar job %s failed on %s: rescuing its finished snapshots from the node\'s local disk before the '
+                 'batch %s-%s is resubmitted (log %s)' % (f['job'], host, f['first'], f['last'], lg))
+        run.save()
+        raise SalvageWait('rescuing the finished snapshots of Rockstar job %s from %s (log %s); the batch is resubmitted '
+                          'after it' % (f['job'], host, lg))
+
+    def rs_salvage_done(self, run, sv):
+        """Read the rescue's result (the last JSON line of its log) into ``sv`` and note it on the run."""
+        res = {}
+        try:
+            for line in reversed(open(sv['log'], errors='replace').read().splitlines()):
+                if line.startswith('{'):
+                    res = json.loads(line)
+                    break
+        except (OSError, ValueError):
+            pass
+        if pid_alive(sv['pid'], 'rs_salvage'):       # over rs_salvage_max_h
+            try:
+                os.killpg(sv['pid'], signal.SIGTERM)
+            except OSError:
+                pass
+            res = dict(ok=False, error='still running after %s h: stopped' % self.cfg.get('rs_salvage_max_h', 6))
+        sv.update(state='done' if res.get('ok') else 'failed', result=res, t_end=now())
+        if res.get('ok') and res.get('m') is not None:
+            run.note('Rockstar job %s: rescued from %s %d file(s), %.1f GB (%d already there); snapshots %s-%s were finished, '
+                     'the rerun continues at %s%s' % (sv['job'], sv['node'], res.get('files', 0), res.get('bytes', 0) / 1e9,
+                                                      res.get('todo', 0) - res.get('files', 0), sv['first'], res['m'],
+                                                      res['continue_at'], '; node directory removed' if res.get('deleted') else ''))
+        elif res.get('ok'):
+            run.note('Rockstar job %s: nothing to rescue from %s (%s); the batch reruns from %s%s' % (
+                sv['job'], sv['node'], res.get('why', ''), sv['first'], '; node directory removed' if res.get('deleted') else ''))
+        else:
+            run.note('Rockstar job %s: rescue from %s failed (%s; log %s); the batch reruns from where the halo directory '
+                     'allows' % (sv['job'], sv['node'], res.get('error') or 'no result', sv['log']))
+        run.save()
+
     def maint_retry(self, run):
         """Resubmit a job killed by a maintenance shutdown (the retry action) once its window is over; on a refusal
         (e.g. another window) the failure stays marked for the next pass."""
         f = dict(run.ms['failed'])
         try:
-            msg = self.action(dict(action='retry', run=run.name))
+            msg = self.action(dict(action='retry', run=run.name, auto=True))
             run.note('%s: %s' % ('automatic retry' if f.get('auto_retry') else 'after the maintenance', msg))
         except MaintWait as e:      # (also NodeWait: no healthy node with room yet)
             run.ms['failed'] = f
@@ -3196,6 +3309,12 @@ class Manager:
             f = run.ms.get('failed')
             if not f:
                 raise ValueError('nothing failed')
+            try:
+                self.rs_salvage(run, f)     # a Rockstar batch: rescue its finished snapshots first
+            except SalvageWait as e:
+                if a.get('auto'):
+                    raise
+                return str(e)               # from the page: the retry follows by itself when the rescue is done
             run.ms.setdefault('acked', [])
             if f.get('job'):
                 run.ms['acked'].append(f['job'])

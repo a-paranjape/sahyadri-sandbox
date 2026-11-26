@@ -91,12 +91,14 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
 - [`read_queues`](#read_queues) - queues.txt -&gt; ({(site, queue): dict(state, max\_running, max\_waiting, lineno)}, [errors]). Columns: site queue state [max\_running|-] [max\_waiting|-] [# comment]. A queue not listed is open, without limits of its own.
 - [`set_queue_state`](#set_queue_state) - Rewrite the state column of site/queue in queues.txt (appends a line when the queue is not listed).
 - [`class MaintWait`](#class-maintwait) - A submission refused because of a maintenance window of the site (the message says which and why).
+- [`class SalvageWait`](#class-salvagewait) - A Rockstar retry waits for the rescue of the failed batch's finished snapshots (Manager.rs\_salvage).
 - [`class NodeWait`](#class-nodewait) - A submission held back: bad nodes are usable in PBS and no healthy node has room for the job now.
 - [`parse_when`](#parse_when) - `YYYY-MM-DDTHH:MM` (or with a space or `_` instead of `T`; local time) -&gt; epoch seconds.
 - [`read_maint`](#read_maint) - maintenance.txt -&gt; ({site: [dict(start, end, note, lineno)] sorted by start}, [errors]).
 - [`set_maint`](#set_maint) - Add a window `site start end` to maintenance.txt, or (`start` None) remove all lines of `site`.
 - [`hms`](#hms) - Seconds -&gt; a PBS walltime `HH:MM:SS` (rounded down to whole minutes).
 - [`run_queue`](#run_queue) - The PBS queue of a run: `PBS_QUEUE` from its run.conf, else the site's default queue.
+- [`pid_alive`](#pid_alive) - Is process `pid` running (and, with `word`, is it in its command line: a reused pid is not)?
 - [`site_cfg`](#site_cfg) - Limits of a site: the top-level ones for this host (pawna), sites.&lt;name&gt; for the others.
 - [`mirror_conf`](#mirror_conf) - Fetch a remote run.conf and write its mirror config here; returns the mirror config's path.
 - [`refresh_mirror_conf`](#refresh_mirror_conf) - The local part of a mirror config (after the '# ---- mirror' line): SANDBOX and CODES of this manager's install, so archive pulls run the code the manager runs (configs written by an older install pointed elsewhere).
@@ -474,6 +476,14 @@ class MaintWait(Exception)
 
 A submission refused because of a maintenance window of the site (the message says which and why).
 
+## class SalvageWait
+
+```python
+class SalvageWait(MaintWait)
+```
+
+A Rockstar retry waits for the rescue of the failed batch's finished snapshots (Manager.rs\_salvage).
+
 ## class NodeWait
 
 ```python
@@ -525,6 +535,14 @@ run_queue(run)
 ```
 
 The PBS queue of a run: `PBS_QUEUE` from its run.conf, else the site's default queue.
+
+## pid_alive
+
+```python
+pid_alive(pid, word=None)
+```
+
+Is process `pid` running (and, with `word`, is it in its command line: a reused pid is not)?
 
 ## site_cfg
 
@@ -1232,6 +1250,29 @@ maint_lost(self, run, j, D)
 A job killed by a maintenance shutdown: a simulation is scheduled to restart after the window; any other
 stage is marked failed with `maint` set and resubmitted automatically once the window is over
 (`maint_retry`). Returns True if the run's automation now waits for that.
+
+### Manager.rs_salvage
+
+```python
+rs_salvage(self, run, f)
+```
+
+Before a failed Rockstar batch is resubmitted: copy its finished snapshots from the node's local disk to
+the halo directory, so the rerun continues after them (job\_rockstar.pbs) instead of starting over.
+rs\_salvage.py runs in the background on the head/login node of the site where the job ran and reads the
+node over ssh (pawna node1, 25 Nov 2026: the node's NFS writes hung, so the job's own copies never
+arrived; the reruns of r4 59-68 and r3 85-96 redid ~8 and ~5 finished snapshots, ~4.8 h). It also removes
+the node's directory once everything needed is copied. Raises SalvageWait while it runs (the failure is
+marked auto\_retry, so the retry follows by itself); returns when there is nothing to do or it has ended,
+however it ended (a failed rescue only means the batch reruns from its start). Once per failed job.
+
+### Manager.rs_salvage_done
+
+```python
+rs_salvage_done(self, run, sv)
+```
+
+Read the rescue's result (the last JSON line of its log) into `sv` and note it on the run.
 
 ### Manager.maint_retry
 

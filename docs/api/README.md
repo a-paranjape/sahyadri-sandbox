@@ -28,6 +28,7 @@ Generated from the docstrings of the Python modules and the header comments of t
 | [`make_pkdgrav3_par.py`](scripts/pkdgrav3_pipeline/make_pkdgrav3_par.md) | Write the pkdgrav3 parameter file of a pipeline run from the variables of its config (environment). |
 | [`pk_check.py`](scripts/pkdgrav3_pipeline/pk_check.md) | P(k) checks of a run (verify\_run.py) and the summary plot &lt;halo dir&gt;/pk/pk\_summary.png. |
 | [`retention.py`](scripts/pkdgrav3_pipeline/retention.md) | What of a run is kept long term, and where it goes (standard library only: used by the jobs and by tools/sahyadri\_manager on the head node). |
+| [`rs_salvage.py`](scripts/pkdgrav3_pipeline/rs_salvage.md) | Rescue the finished part of a failed Rockstar batch from its node's local disk, so a rerun continues instead of starting over. |
 | [`scratch_ops.py`](scripts/pkdgrav3_pipeline/scratch_ops.md) | Scratch operations on the site where a run is computed, for the run manager on another host (it calls this over ssh, e.g. pawna -&gt; pegasus). Prints one JSON object. |
 | [`verify_run.py`](scripts/pkdgrav3_pipeline/verify_run.md) | Check that everything of a run was computed and is consistent, before anything is archived or deleted (stage `verify`, job\_verify.pbs). Writes &lt;state dir&gt;/verify.json; exit 0 only if every check passed. |
 

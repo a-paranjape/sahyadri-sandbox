@@ -287,7 +287,7 @@ maintenance gate's estimate of a Rockstar batch uses the jobs of that site, else
 | Rockstar covers every snapshot | `ctrees → vahc → fits → verify` (one afterok chain) |
 | verify passed | `archive` |
 | archive passed | waits: *Move scratch data to the trash* (button) |
-| a job fails or vanishes | automation of that run stops (red); *Retry* resubmits that stage (a Rockstar batch continues after its newest finished snapshot), *Acknowledge* clears it without resubmitting. A failed Rockstar batch is first resubmitted by itself `rs_auto_retry` times (1; counted per batch start, page: Simulation queue); only a further failure stops the run |
+| a job fails or vanishes | automation of that run stops (red); *Retry* resubmits that stage (a Rockstar batch continues after its newest finished snapshot), *Acknowledge* clears it without resubmitting. A failed Rockstar batch is first resubmitted by itself `rs_auto_retry` times (1; counted per batch start, page: Simulation queue); only a further failure stops the run. Before any Rockstar retry the manager first rescues the batch's finished snapshots from the node's local disk (`rs_salvage`, 1; `scripts/pkdgrav3_pipeline/rs_salvage.py` on the site's head or login node, reading the node over ssh, so a node whose NFS writes hang does not matter): the catalogues, the newest complete halo set, `rockstar.cfg` and `restart.cfg` go to the halo directory, the node's directory is removed, and the rerun continues after them. The run's card says what was rescued. A failed rescue (node down, nothing finished) only means the batch reruns from its start. It is stopped after `rs_salvage_max_h` (6) |
 
 ## What is kept
 
