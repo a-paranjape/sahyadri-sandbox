@@ -1266,15 +1266,24 @@ time `YYYY-MM-DDTHH:MM`). The full behaviour is in `tools/sahyadri_manager/READM
 | during the window (until 30 min after the end; with end `-` until the line is changed) | nothing submitted to the site |
 | after it | simulations restart from their checkpoint (not counted in `max_sim_restarts`); jobs killed by the shutdown (started before the window, ended at most 1 h before its start or vanished) are resubmitted instead of stopping the automation |
 
-pawna is the manager's host: when pawna is down the manager is down too. After the reboot start it again
-(`tools/sahyadri_manager/start_manager.sh start`) once `/user` and `/storage` answer. It then works through the jobs
+pawna is the manager's host: when pawna is down the manager is down too. The `@reboot` line in shadab's crontab on
+pawna starts it again (`tools/sahyadri_manager/start_manager.sh start`; tested 26 Nov in cron's environment, not yet at a
+real boot). After the reboot check `start_manager.sh status` once `/user` and `/storage` answer, and start it by hand if
+it is not running. It then works through the jobs
 killed by the shutdown.
 
 ### 17.1 Shutdown of pawna, swarm, leap and pride, Fri 27 Nov 2026 08:00-20:00 IST
 
 Announced: all four TIFR clusters down at 08:00 with an expected downtime of about 12 h. They were entered as
 `<site> 2026-11-27T08:00 2026-11-27T20:00`. The manager submits again from 20:30 (`maint_settle_min`). pawna's
-manager has to be started again after the reboot. If the work runs late, move the end
+manager should start by itself after the reboot (crontab `@reboot`); check `start_manager.sh status`.
+
+Added 26 Nov: `Sahyadri_L200N1024/default1024/r1` (stopped 13 Nov at step 1497; newest checkpoint 1250) got the current
+production post-processing settings (`setup_production.py --N 1024` written to a scratch directory, the RS/CT/PP/FITS/
+PQ/VF/PARQUET/KEEP lines copied; simulation lines, paths and rockstar_input.cfg unchanged; backup
+`run.conf.bak_20261126_post`). `/user/shadab/r5_rescue/n1024_after_r3rs.py` submits its restart (96 cores, 200 GB)
+when r3's last Rockstar batch (97-100) ends, pausing the automation of r4, r5 and L1000 r1 meanwhile so that no other
+Rockstar takes node3's memory first. The STOP before the window stops it like the other simulations. If the work runs late, move the end
 (`manager.py maint <site> clear`, then add the window again with the new end). Before the queues reopen, check node1's
 NFS client (section 16, admin message of 25 Nov). workq stays in `drain` until then.
 
@@ -1369,3 +1378,11 @@ Two fixes came out of it. (1) Lustre file times are the writing node's clock, an
 "catalogues newer than their FITS tables" and archive_run.py's "kept files changed after verify" now allow 900 s
 (`VF_CLOCK_SLACK_S`, `AR_CLOCK_SLACK_S`); the manager's Rockstar redo margin is 15 min. (2) job_verify.pbs no longer
 writes the KEPT_FILES.json checksums when the run has no ARCHIVE. Run phase: "verified (no archive)".
+
+**Production (25-26 Nov 2026):** swarm r6, r7 and leap r100 (L200N2048) have `run.post_pride.conf` (run.conf backups
+`run.conf.bak_20261125_post`) and `post_site=pride` on their cards. r6's Rockstar 764505 (snapshots 0-19) and r7's
+764506 (0-9; its swarm job 1787341 was deleted and retried on pride) run on 3 pride nodes x 20 cores each. pride limit:
+`max_rockstar=2` (page, pride row). The maintenance gate estimates a pride Rockstar batch from the jobs that ran on
+pride (`expected_s` compares only jobs of the site where the stage runs) and, before the first one, from
+`sites.pride.rs_snap_s = {"2048": 3432}` s per snapshot (pride timing test of 23 Nov) x the batch size x 1.25, instead of
+the 72 h wall time. New swarm/leap runs: run `post_site_conf.py` before `manager.py add`.

@@ -32,8 +32,13 @@ python setup_production.py --cosmo 'var_*' --real 1 --schedule 5                
 
 `--cosmo` takes a name, a comma list, shell patterns or `all` (files `cosmologies/<name>.cosmo`).
 
-To start it again after a reboot, add this line with `crontab -e`:
-`@reboot <repo>/tools/sahyadri_manager/start_manager.sh`.
+It starts by itself after a reboot of pawna: the crontab of shadab on pawna has
+`@reboot /user/shadab/sahyadri_prod/sahyadri-sandbox/tools/sahyadri_manager/start_manager.sh start` (installed 20 Nov
+2026; cron is enabled on pawna, Ubuntu 22.04). It has not yet run at a real boot; on 26 Nov the same command started the
+manager in cron's environment (`env -i HOME=... PATH=/usr/bin:/bin`, no terminal, `setsid`). Optional, safer at boot
+(NFS and PBS up first, output kept; cron's mail goes nowhere on pawna):
+`@reboot sleep 120; <same path>/start_manager.sh start >> /user/shadab/.sahyadri_mgr/cron_start.log 2>&1`.
+After a reboot check `start_manager.sh status`.
 
 On the Mac:
 
@@ -128,8 +133,8 @@ node running them):
   failures: a simulation is scheduled to restart from its newest checkpoint, other stages are resubmitted
   automatically (the "retry"), archive batches are simply done again by the next batch.
 
-When pawna itself is down the manager stops with it; start it again after the reboot
-(`start_manager.sh start`), it then catches up as described.
+When pawna itself is down the manager stops with it; the crontab's `@reboot` line starts it again (see Start;
+`start_manager.sh status` to check, `start_manager.sh start` if it is not running); it then catches up as described.
 
 ## Node health (pawna compute nodes)
 
@@ -242,7 +247,10 @@ A swarm or leap run can have its halo stages (rockstar ... verify) on pride, whi
 with that file and pride's install; the simulation and the archive stay with the run's site. Because the post
 configuration keeps the run's SCRATCH, the pride jobs write their products, logs and events into the run's own
 directories, and everything downstream (mirror, deletion checks, archive) works unchanged. Limits (`max_rockstar`,
-`max_pbs_queued`), queue states and maintenance windows are those of the site where the stage runs. Guide section 19.
+`max_pbs_queued`), queue states and maintenance windows are those of the site where the stage runs. The
+maintenance gate's estimate of a Rockstar batch uses the jobs of that site, else `sites.<name>.rs_snap_s`
+({NPART: s per snapshot}; pride `{"2048": 3432}`). In production since 25-26 Nov: swarm r6, r7, leap r100 (pride
+`max_rockstar` 2). Guide section 19.
 
 ## What it does
 
