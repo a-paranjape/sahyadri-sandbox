@@ -49,7 +49,8 @@ manager.json written here; nothing is lost when the manager stops, it catches up
     start and it needs maint_min_sim_h to compute); maint_stop_h before the start each running simulation of the site
     gets a STOP file (checkpoint, clean exit) and waiting simulation jobs are taken out (qdel); after the window
     (+ maint_settle_min) the simulations restart (not counted in max_sim_restarts) and jobs killed by the shutdown
-    are resubmitted instead of stopping the automation
+    are resubmitted instead of stopping the automation. A site back earlier ends its window then: shut down (its
+    login node booted after the start, or no answer twice), then up with PBS and compute nodes for maint_settle_min
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to
     <SCRATCH>/.trash/ (instant, can be undone), then purge; both re-check the archive manifest first
 
@@ -1096,6 +1097,27 @@ maint_next(self, site)
 ```
 
 The window of `site` that matters now: the first not yet over (end + maint\_settle\_min), or None.
+
+### Manager.maint_probe
+
+```python
+maint_probe(self, site)
+```
+
+The site's state for maint\_watch: dict(ok, boot, pbs, nodes) - its login node's boot time, whether its
+PBS server answers (qstat -B) and how many of its compute nodes PBS has up (free or busy); ok False when
+the login node does not answer at all.
+
+### Manager.maint_watch
+
+```python
+maint_watch(self)
+```
+
+Thread: during a window, check its site every maint\_check\_min (default 5) minutes. A site that was
+shut down - its login node booted after the window's start, or it did not answer (or its PBS was down)
+at two checks in a row - and has since answered with PBS up and compute nodes up for maint\_settle\_min,
+is back: the window is over then, even before the end given (maintenance.txt is not changed).
 
 ### Manager.maint_now
 

@@ -141,6 +141,14 @@ node running them):
   scheduled again. All of them restart after the window, not counted in `max_sim_restarts`.
 * **During the window** (until `maint_settle_min` (30) after its end; without an end until the line is changed):
   nothing is submitted to the site.
+* **Back early:** every `maint_check_min` (5) minutes during a window the manager looks at the site: its login
+  node's boot time (`/proc/stat`), whether PBS answers (`qstat -B`) and how many compute nodes PBS has up
+  (`pbsnodes -a`: free or busy). A site that was shut down (booted after the window's start, or no answer, or
+  PBS down, at two checks in a row) and then stays up with PBS and at least one compute node for
+  `maint_settle_min` is back: its window is over then, and qstat is read again before the next scheduling pass.
+  maintenance.txt is not changed; the page shows "over (back <time>)". A site that never goes down (the work was
+  done without a shutdown) keeps the window until its end. The state is in memory: a manager restarted during
+  the window looks again (one more `maint_settle_min`).
 * **After it:** jobs that were running or waiting when the window started and failed or vanished are not
   failures: a simulation is scheduled to restart from its newest checkpoint, other stages are resubmitted
   automatically (the "retry"), archive batches are simply done again by the next batch.

@@ -43,7 +43,8 @@ manager.json written here; nothing is lost when the manager stops, it catches up
     start and it needs maint_min_sim_h to compute); maint_stop_h before the start each running simulation of the site
     gets a STOP file (checkpoint, clean exit) and waiting simulation jobs are taken out (qdel); after the window
     (+ maint_settle_min) the simulations restart (not counted in max_sim_restarts) and jobs killed by the shutdown
-    are resubmitted instead of stopping the automation
+    are resubmitted instead of stopping the automation. A site back earlier ends its window then: shut down (its
+    login node booted after the start, or no answer twice), then up with PBS and compute nodes for maint_settle_min
   * deletion of the run's scratch data only after you approve it in the page, in two steps: move to
     <SCRATCH>/.trash/ (instant, can be undone), then purge; both re-check the archive manifest first
 
@@ -118,7 +119,7 @@ DEFAULT_CFG = dict(runs=[], heartbeat_s=1800, max_rockstar=1, lost_grace_s=180, 
                    # clean exit) and restarts after the window, maint_settle_min after its end; jobs killed by the
                    # shutdown are resubmitted then instead of stopping the run's automation
                    maintenance_file=os.path.join(HOME, 'maintenance.txt'), maint_guard_min=30, maint_min_sim_h=4,
-                   maint_stop_h=6, maint_settle_min=30,
+                   maint_stop_h=6, maint_settle_min=30, maint_check_min=5,
                    # node health (this site's compute nodes; scripts/pkdgrav3_pipeline/node_check.sh): probed over ssh
                    # every node_probe_min minutes (0 = off; page: Nodes); a node that fails (probe or a job's own check,
                    # exit 75) is avoided for node_bad_h hours or until a probe passes: jobs are pinned to a healthy node
@@ -1380,6 +1381,7 @@ class Manager:
                 log('%s: copied the template %s' % (p, t))
         self.queues, self.queue_errors, self.queues_mtime = {}, [], None
         self.maint_windows, self.maint_errors, self.maint_mtime = {}, [], None
+        self.maint_back = {}       # (site, window start) -> the site's state seen during the window (maint_watch)
         self.nodes = {}            # this site's compute nodes: host -> newest node_check.sh result (+ pbs state)
         self.node_flags = {}       # host -> dict(t, reasons, job, run): a job's node check failed there (exit 75)
         self.pbsn, self.pbsn_t = {}, 0.0     # pbsnodes: host -> dict(state, ncpus_free, mem_free_gb)
@@ -2308,9 +2310,88 @@ class Manager:
         """The window of ``site`` that matters now: the first not yet over (end + maint_settle_min), or None."""
         settle = float(self.cfg.get('maint_settle_min', 30)) * 60
         for w in self.maint_windows.get(site, []):
+            if self.maint_back.get((site, w['start']), {}).get('ended'):
+                continue                 # the site came back before the end given (maint_watch)
             if w['end'] is None or now() < w['end'] + settle:
                 return w
         return None
+
+    def maint_probe(self, site):
+        """The site's state for maint_watch: dict(ok, boot, pbs, nodes) - its login node's boot time, whether its
+        PBS server answers (qstat -B) and how many of its compute nodes PBS has up (free or busy); ok False when
+        the login node does not answer at all."""
+        cmd = ("awk '/^btime/{print \"BOOT\", $2}' /proc/stat; %s/qstat -B > /dev/null 2>&1 && echo PBS_OK; "
+               "echo NODES $(%s/pbsnodes -a 2>/dev/null | grep -cE '^ *state = (free|job-busy|job-exclusive|resv-exclusive)')"
+               % (PBS, PBS))
+        try:
+            if site == LOCAL:
+                r = subprocess.run(['bash', '-c', cmd], capture_output=True, text=True, timeout=90)
+            else:
+                r = ssh(self.cfg['sites'][site]['login'], cmd, timeout=90)
+        except Exception as e:  # noqa: BLE001  (timeout: the site does not answer)
+            return dict(ok=False, why=str(e)[:200])
+        out = dict(ok=False, boot=None, pbs=False, nodes=0)
+        for line in r.stdout.splitlines():
+            k = line.split()
+            if k[:1] == ['BOOT'] and len(k) > 1:
+                out['boot'], out['ok'] = float(k[1]), True
+            elif k[:1] == ['PBS_OK']:
+                out['pbs'] = True
+            elif k[:1] == ['NODES'] and len(k) > 1 and k[1].isdigit():
+                out['nodes'] = int(k[1])
+        if not out['ok']:
+            out['why'] = (r.stderr or r.stdout or 'no answer').strip()[-200:]
+        return out
+
+    def maint_watch(self):
+        """Thread: during a window, check its site every maint_check_min (default 5) minutes. A site that was
+        shut down - its login node booted after the window's start, or it did not answer (or its PBS was down)
+        at two checks in a row - and has since answered with PBS up and compute nodes up for maint_settle_min,
+        is back: the window is over then, even before the end given (maintenance.txt is not changed)."""
+        time.sleep(30)
+        while True:
+            t = now()
+            settle = float(self.cfg.get('maint_settle_min', 30)) * 60
+            for site, ws in list(self.maint_windows.items()):
+                for w in ws:
+                    key = (site, w['start'])
+                    b = self.maint_back.setdefault(key, dict(down_n=0, seen_down=False, up_since=None, ended=None))
+                    if b['ended'] or t < w['start'] or (w['end'] and t >= w['end'] + settle):
+                        continue
+                    try:
+                        p = self.maint_probe(site)
+                    except Exception as e:  # noqa: BLE001  (never stops the manager)
+                        log('maintenance check %s: %s' % (site, e))
+                        continue
+                    b['last'] = dict(p, t=t)
+                    lab = self.maint_label(site, w)
+                    up = p['ok'] and p['pbs'] and p['nodes'] > 0
+                    if not up:
+                        b['down_n'] += 1
+                        if b['down_n'] >= 2 and not b['seen_down']:
+                            b['seen_down'] = True
+                            log('%s: %s is down (%s)' % (lab, site, p.get('why') or 'PBS %s, %d compute nodes up' % (
+                                'answers' if p['pbs'] else 'does not answer', p['nodes'])))
+                        if b['up_since']:
+                            log('%s: %s down again; it counts as back after %d min up' % (lab, site, settle / 60))
+                        b['up_since'] = None
+                        continue
+                    b['down_n'] = 0
+                    rebooted = bool(p['boot'] and p['boot'] > w['start'])
+                    if not (rebooted or b['seen_down']):
+                        continue                 # not shut down yet (or not at all): the window holds as given
+                    if not b['up_since']:
+                        b['up_since'] = t
+                        log('%s: %s answers again (%s, PBS up, %d compute nodes up); it counts as back if it stays up '
+                            '%d min' % (lab, site, 'booted %s' % time.strftime('%a %H:%M', time.localtime(p['boot']))
+                                        if rebooted else 'was down', p['nodes'], settle / 60))
+                    elif t - b['up_since'] >= settle:
+                        b['ended'] = t
+                        log('%s: %s is back (up since %s, %d compute nodes): the window is over, submissions go on' % (
+                            lab, site, time.strftime('%H:%M', time.localtime(b['up_since'])), p['nodes']))
+                        self.recheck_at = now()      # qstat of every site, then the scheduling pass
+                        self.q.put(('wake',))
+            time.sleep(max(60, float(self.cfg.get('maint_check_min', 5)) * 60))
 
     def maint_now(self, site):
         """The window of ``site`` in progress (started, not over including the settle time), or None."""
@@ -2372,8 +2453,10 @@ class Manager:
                 continue
             lab = self.maint_label(site, w)
             if t >= w['start']:
-                raise MaintWait('%s in progress: nothing is submitted until %s' % (
-                    lab, '%d min after its end' % self.cfg.get('maint_settle_min', 30) if w['end'] else 'the window is given an end or removed'))
+                raise MaintWait('%s in progress: nothing is submitted until %s, or until %s is back (up with PBS for %d min '
+                                'after the shutdown)' % (
+                    lab, '%d min after its end' % self.cfg.get('maint_settle_min', 30) if w['end'] else 'the window is given an end or removed',
+                    site, self.cfg.get('maint_settle_min', 30)))
             left = w['start'] - float(self.cfg.get('maint_guard_min', 30)) * 60 - t
             st = stages.split(',')
             if st == ['sim']:
@@ -2538,8 +2621,13 @@ class Manager:
         for site, ws in sorted(self.maint_windows.items()):
             for w in ws:
                 cur = self.maint_next(site)
-                if w['end'] and t >= w['end'] + float(self.cfg.get('maint_settle_min', 30)) * 60:
+                b = self.maint_back.get((site, w['start']), {})
+                if b.get('ended'):
+                    state = 'over (back %s)' % time.strftime('%a %H:%M', time.localtime(b['up_since'] or b['ended']))
+                elif w['end'] and t >= w['end'] + float(self.cfg.get('maint_settle_min', 30)) * 60:
                     state = 'over'
+                elif t >= w['start'] and b.get('up_since'):
+                    state = 'in progress (back since %s?)' % time.strftime('%H:%M', time.localtime(b['up_since']))
                 elif t >= w['start']:
                     state = 'in progress'
                 elif cur is w and t >= w['start'] - self.maint_stop_h(site) * 3600:
@@ -3673,6 +3761,7 @@ class Manager:
         threading.Thread(target=self.plan_loop, daemon=True).start()
         threading.Thread(target=self.probe_loop, daemon=True).start()
         threading.Thread(target=self.budget_loop, daemon=True).start()
+        threading.Thread(target=self.maint_watch, daemon=True).start()
         log('manager on %s, page on %s, %d runs' % (socket.gethostname(), SOCK, len(self.runs)))
         signal.signal(signal.SIGTERM, _sigterm)
         derived = {}
