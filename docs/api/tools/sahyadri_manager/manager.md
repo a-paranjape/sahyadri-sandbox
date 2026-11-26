@@ -1445,7 +1445,8 @@ archive_pending(self, run, D)
 ```
 
 (estimate, bytes still to come) of the run's archive: the estimate minus the particle batches archived
-already (archive\_partial.json); nothing once archived, in the trash or purged.
+already (archive\_partial.json); nothing once archived, in the trash or purged, and nothing for a run that has
+not started (no job, no event: scheduled or planned runs do not count against the archive disk).
 
 ### Manager.build_snapshot
 

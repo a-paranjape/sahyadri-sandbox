@@ -1610,6 +1610,7 @@ class Manager:
         path = self.cfg.get('plan_file')
         entries = read_plan(path) if path else []
         view = []
+        self.plan_forget_removed(path, entries, view)    # first, so lines refused because of a forgotten run go now
         for P in entries:
             if 'error' in P:
                 view.append(dict(line=P['line'], lineno=P['lineno'], state='error', msg=P['error']))
@@ -1656,7 +1657,6 @@ class Manager:
                     except Exception as e:  # noqa: BLE001
                         log('plan: priority of %s: %s' % (run.name, e))
             view.append(v)
-        self.plan_forget_removed(path, entries, view)
         self.plan_view = view
 
     def plan_marked(self):
@@ -3438,9 +3438,11 @@ class Manager:
     # ------------------------------------------------------------------ state for the page
     def archive_pending(self, run, D):
         """(estimate, bytes still to come) of the run's archive: the estimate minus the particle batches archived
-        already (archive_partial.json); nothing once archived, in the trash or purged."""
+        already (archive_partial.json); nothing once archived, in the trash or purged, and nothing for a run that has
+        not started (no job, no event: scheduled or planned runs do not count against the archive disk)."""
         est = archive_estimate(run.E, run.plan) if run.E.get('ARCHIVE') else None
-        if est is None or (D['archive'] and int(D['archive'].get('ok', 0))) or run.ms.get('trash') or run.ms.get('purged'):
+        if (est is None or not (D['jobs'] or run.ev) or (D['archive'] and int(D['archive'].get('ok', 0)))
+                or run.ms.get('trash') or run.ms.get('purged')):
             return est, 0
         done = 0
         f = os.path.join(run.P['state'], 'archive_partial.json')

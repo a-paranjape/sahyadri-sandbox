@@ -326,7 +326,7 @@ function diskTable(){
       <td class="num muted">${e.storage?'—':hum(e.reserve)}</td>
       <td><div class="bar" style="width:160px" title="used ${pct(used)}; with the running simulations ${pct(fill)}"><div style="width:${pct(Math.min(1,used))};float:left;background:${used>0.9?'var(--bad)':'var(--run)'}"></div><div style="width:${pct(Math.max(0,Math.min(1,fill)-used))};float:left;background:var(--wait,#e0a800);opacity:.7"></div></div></td></tr>`;
   }).join('');
-  return `<div class="row"><b>Disk space</b><span class="muted small">"still to write": what the running simulations add until they finish (their estimate minus what they use now) and, on storage, the archives of the runs not archived yet, from every site (estimate from the retention plan minus particle batches already archived); hover a row for the paths and the runs</span></div>
+  return `<div class="row"><b>Disk space</b><span class="muted small">"still to write": what the running simulations add until they finish (their estimate minus what they use now) and, on storage, the archives of the started runs not archived yet, from every site (scheduled and planned runs do not count) (estimate from the retention plan minus particle batches already archived); hover a row for the paths and the runs</span></div>
     <table style="margin-top:6px"><tr><th>file system</th><th class="num">size</th><th class="num">used</th><th class="num">free now</th>
     <th class="num">still to write</th><th class="num">free afterwards</th><th class="num">reserve</th><th></th></tr>${rows}</table>`;
 }
