@@ -1599,11 +1599,16 @@ class Manager:
         if not S:
             raise RuntimeError('post_site=%s: unknown site' % ps)
         script = os.path.join(S['sandbox'], 'scripts', 'pkdgrav3_pipeline', 'production', 'post_site_conf.py')
-        r = ssh(S['login'], ' '.join(shlex.quote(x) for x in [S['python'], script, conf, '--site', ps]), timeout=600)
+        post = os.path.join(os.path.dirname(conf), 'run.post_%s.conf' % ps)
+        # already switched (an earlier pass marked the run.conf): post_site_conf.py would refuse the marked run.conf
+        cmd = 'grep -q %s %s && [ -f %s ] && echo MARKED || %s' % (
+            shlex.quote('^POST_SITE=%s' % ps), shlex.quote(conf), shlex.quote(post),
+            ' '.join(shlex.quote(x) for x in [S['python'], script, conf, '--site', ps]))
+        r = ssh(S['login'], cmd, timeout=600)
         if r.returncode != 0:
             raise RuntimeError('post_site_conf.py on %s failed (rc %d): %s'
                                % (ps, r.returncode, (r.stdout + r.stderr).strip()[-400:]))
-        return 'halo stages on %s' % ps
+        return 'halo stages on %s%s' % (ps, ' (already set)' if 'MARKED' in r.stdout.split() else '')
 
     def plan_sync(self):
         """Set up, register and schedule what the plan file lists and the manager does not know yet."""
