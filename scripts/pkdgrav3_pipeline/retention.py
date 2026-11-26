@@ -212,7 +212,10 @@ def kept_files(E, pl=None):
     for n in ('verify.json',):
         add('meta', None, os.path.join(P['state'], n))
     if pl['checkpoint']:
-        chk = sorted(glob.glob(os.path.join(glob.escape(P['sim']), 'checkpoints', '*.chk')))
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import chk_complete
+        chk = [c for c in sorted(glob.glob(os.path.join(glob.escape(P['sim']), 'checkpoints', '*.chk')))
+               if chk_complete.check(c)[0]]      # the newest complete one (a newer incomplete one is skipped)
         if chk:
             base = chk[-1]
             for f in sorted(glob.glob(glob.escape(base) + '*')):

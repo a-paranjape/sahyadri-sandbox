@@ -191,9 +191,12 @@ there. A leftover can be deleted with its button. You type the directory name to
 not in use and runs `rm -rf` on the node. A stage set aside after a killed job (`*.left.<job>`) may hold outputs
 that were never drained; look before deleting it.
 
-Restarts take the newest *complete* checkpoint (`job_sim.pbs`): the restart file `.chk`, its `.pkl`, and as many
-non-empty data files `.chk.<i>` as `.chk.<i>.dec` files. An incomplete one is skipped (event `chk_skipped`) and the
-one before it is used. The `sim_rewind` that follows handles the outputs after it.
+Restarts take the newest *complete* checkpoint (`job_sim.pbs`, `scripts/pkdgrav3_pipeline/chk_complete.py`):
+the restart file `.chk`, its `.pkl`, the data files `.chk.0` .. `.chk.<n-1>` all there and non-empty (as many
+`.chk.<i>.dec`), and their total size an exact multiple of the particle count stored in the `.pkl` (48 bytes per
+particle on pawna, 36 with integer positions). The last test catches missing pieces that matching counts miss:
+r4's step 1000 had 166 of 191 of each. An incomplete one is skipped (event `chk_skipped`, with the reason) and
+the one before it is used. The `sim_rewind` that follows handles the outputs after it.
 
 ## Core-hour budgets (pegasus)
 

@@ -28,19 +28,17 @@ CHK=
 if [ -n "${RESTART:-}" ]; then
   CHK=$RESTART
   if [ "$CHK" = latest ]; then
-    # newest complete checkpoint: the restart file (.chk), its .pkl, as many data files .chk.<i> (non-empty) as
-    # .chk.<i>.dec files. The drain copies the restart file last, but a hard kill, a rescue copy or a run without
-    # staging can leave an incomplete one: then the one before it is taken (event chk_skipped)
+    # newest complete checkpoint (chk_complete.py): restart file, .pkl, data pieces .chk.0..n-1 all non-empty
+    # (as many .dec), and their total size an exact multiple of the particle count in the .pkl, so a missing
+    # piece is noticed (counting data files against .dec files is not enough: pawna r4 step 1000 had 166 of 191
+    # of each). The drain copies the restart file last, but a hard kill, a rescue copy, a switch to NFS in the
+    # middle of a checkpoint or a run without staging can leave an incomplete one: then the one before it is taken
+    # (event chk_skipped)
     CHK=
     for c in $(ls "$SIM_DIR"/checkpoints/*.chk 2>/dev/null | sort -r); do
-      nd=0; ne=0; nx=0
-      for f in "$c".[0-9]*; do
-        [ -e "$f" ] || continue
-        case $f in *.dec) nx=$((nx + 1)) ;; *) nd=$((nd + 1)); [ -s "$f" ] || ne=$((ne + 1)) ;; esac
-      done
-      if [ -s "$c" ] && [ -e "$c.pkl" ] && [ $nd -gt 0 ] && [ $nd = $nx ] && [ $ne = 0 ]; then CHK=$c; break; fi
-      stamp "checkpoint $c incomplete ($nd data files, $nx .dec, $ne empty, pkl $([ -e "$c.pkl" ] && echo yes || echo no)): not used"
-      event chk_skipped chk="$c" ndata="$nd" ndec="$nx" nempty="$ne"
+      why=$(python3 "$PIPE/chk_complete.py" "$c") && { CHK=$c; stamp "$why"; break; }
+      stamp "checkpoint not used: $why"
+      event chk_skipped chk="$c" why="${why#*: }"
     done
   fi
   [ -n "$CHK" ] && [ -f "$CHK" ] || { stamp "RESTART=$RESTART: no checkpoint found (checkpoints/*.chk)"; exit 1; }
