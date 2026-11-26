@@ -1091,6 +1091,17 @@ archive copies and pulls also of this host) is in progress or the job would not 
 would run past the start, else None. A simulation needs `maint_min_sim_h` of computing before its STOP
 (`maint_stop_h` before the start); it stops cleanly there and restarts after the window.
 
+### Manager.jobs_view
+
+```python
+jobs_view(self, run, D)
+```
+
+The run's newest 40 jobs for the page. A simulation job that stopped cleanly before the last output
+(pkdgrav3 iWallRunTime, or the maintenance STOP file) has status 'failed' (job\_sim.pbs exits 1 so that a
+chain stops), which the scheduler relies on; for display only it gets `shown` = 'stopped (wall time)' or
+'stopped (maintenance)'.
+
 ### Manager.maint_stopped
 
 ```python

@@ -118,10 +118,10 @@ function stageInfo(run, st){
   }
   const j = js[js.length-1];
   if(!j) return {cls:'', txt:'<span class="muted">—</span>'};
-  const cls = {done:'st-ok', failed:'st-bad', running:'st-run', queued:'st-run', submitted:'st-run', held:'st-run', gone:'st-bad'}[j.status]||'';
+  const cls = j.shown ? '' : ({done:'st-ok', failed:'st-bad', running:'st-run', queued:'st-run', submitted:'st-run', held:'st-run', gone:'st-bad'}[j.status]||'');
   let extra='';
   if(st==='sim' && run.sim) extra = `<br>z=${run.sim.z.toFixed(2)}`;
-  return {cls, txt: `${h(j.status)} <span class="muted">${h(j.job)}</span>${extra}`};
+  return {cls, txt: `${h(j.shown||j.status)} <span class="muted">${h(j.job)}</span>${extra}`};   // shown: a clean wall-time / maintenance stop (display only)
 }
 // start order: S.queue is the scheduler's list, per site in submission order (priority, lower first; then the time
 // it was scheduled). queuePos(name) -> {pos, n, site, x} with pos counted within the site, or null.

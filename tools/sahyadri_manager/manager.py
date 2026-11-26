@@ -2248,6 +2248,19 @@ class Manager:
                 cap = hms(left)
         return cap
 
+    def jobs_view(self, run, D):
+        """The run's newest 40 jobs for the page. A simulation job that stopped cleanly before the last output
+        (pkdgrav3 iWallRunTime, or the maintenance STOP file) has status 'failed' (job_sim.pbs exits 1 so that a
+        chain stops), which the scheduler relies on; for display only it gets ``shown`` = 'stopped (wall time)' or
+        'stopped (maintenance)'."""
+        ms = self.maint_stopped(run)
+        out = []
+        for j in D['jobs'][-40:]:
+            if j['stage'] == 'sim' and j['status'] == 'failed' and j['job'] in D['sim_clean_stop']:
+                j = dict(j, shown='stopped (maintenance)' if j['job'] in ms else 'stopped (wall time)')
+            out.append(j)
+        return out
+
     def maint_stopped(self, run):
         """Simulation jobs of ``run`` that got a maintenance STOP file."""
         return {k.split('@')[0] for k in run.ms.get('maint_done', []) if k.endswith('@stop')}
@@ -3359,7 +3372,7 @@ class Manager:
             runs.append(dict(
                 name=run.name, conf=run.conf, site=run.site, remote_conf=run.E.get('REMOTE_CONF'), phase=run.phase(D), paused=run.ms.get('paused'), failed=run.ms.get('failed'), busy=run.busy,
                 err=run.err, n_out=D['n_out'], ready=D['ready'], rs_done=D['rs_done'], archived_upto=D['archb'], sim_done=D['sim_done'],
-                sim=D['sim_info'], jobs=D['jobs'][-40:], active=D['active'],
+                sim=D['sim_info'], jobs=self.jobs_view(run, D), active=D['active'],
                 verify=self.verify_summary(run, D), archive=D['archive'], fits=D['fits'],
                 trash=run.ms.get('trash'), purged=run.ms.get('purged'), scheduled=run.ms.get('scheduled'),
                 restarts=run.ms.get('restarts', 0), actions=run.ms.get('actions', [])[-30:],
