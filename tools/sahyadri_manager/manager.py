@@ -2880,8 +2880,6 @@ class Manager:
         name, act = a.get('run'), a.get('action')
         if act == 'add_run':
             return self.add_run(a['conf'], a.get('paused', True), plan=a.get('plan', False))
-        if act == 'plan_forget':
-            return self.plan_forget(run)
         if act == 'unretire':
             if not (self.cfg.get('plan_retired') or {}).pop(a.get('name'), None):
                 raise ValueError('%s is not retired' % a.get('name'))
@@ -2969,6 +2967,8 @@ class Manager:
             if a.get('confirm') != run.name:
                 raise ValueError('not deleted: type the run name (%s) to confirm' % run.name)
             return self.delete_run(run)
+        if act == 'plan_forget':
+            return self.plan_forget(run)
         if act == 'remove_run':
             self.cfg['runs'] = [r for r in self.cfg['runs'] if r['conf'] != run.conf]
             self.retire(run.name, 'removed from the manager')
