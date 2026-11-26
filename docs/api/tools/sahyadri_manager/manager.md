@@ -98,6 +98,7 @@ Runs on another site (cfg sites.<name>: pegasus, swarm; run.conf written there b
 - [`set_maint`](#set_maint) - Add a window `site start end` to maintenance.txt, or (`start` None) remove all lines of `site`.
 - [`hms`](#hms) - Seconds -&gt; a PBS walltime `HH:MM:SS` (rounded down to whole minutes).
 - [`run_queue`](#run_queue) - The PBS queue of a run: `PBS_QUEUE` from its run.conf, else the site's default queue.
+- [`later_rs_jobs`](#later_rs_jobs) - Rockstar jobs in `D` (derive) with a higher PBS id than `job` that have started: they wrote the halo directory after it. PBS ids only grow, so no clock is compared (node clocks differ: pawna 2-10 s, pride up to ~8 min).
 - [`pid_alive`](#pid_alive) - Is process `pid` running (and, with `word`, is it in its command line: a reused pid is not)?
 - [`site_cfg`](#site_cfg) - Limits of a site: the top-level ones for this host (pawna), sites.&lt;name&gt; for the others.
 - [`mirror_conf`](#mirror_conf) - Fetch a remote run.conf and write its mirror config here; returns the mirror config's path.
@@ -535,6 +536,16 @@ run_queue(run)
 ```
 
 The PBS queue of a run: `PBS_QUEUE` from its run.conf, else the site's default queue.
+
+## later_rs_jobs
+
+```python
+later_rs_jobs(D, job)
+```
+
+Rockstar jobs in `D` (derive) with a higher PBS id than `job` that have started: they wrote the halo
+directory after it. PBS ids only grow, so no clock is compared (node clocks differ: pawna 2-10 s, pride
+up to ~8 min).
 
 ## pid_alive
 

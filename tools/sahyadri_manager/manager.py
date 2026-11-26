@@ -825,6 +825,23 @@ def run_queue(run):
     return run.E.get('PBS_QUEUE') or DEFAULT_QUEUE.get(run.site, 'workq')
 
 
+def later_rs_jobs(D, job):
+    """Rockstar jobs in ``D`` (derive) with a higher PBS id than ``job`` that have started: they wrote the halo
+    directory after it. PBS ids only grow, so no clock is compared (node clocks differ: pawna 2-10 s, pride
+    up to ~8 min)."""
+    def num(x):
+        """The job id as an int (None for ids that are not numbers, e.g. head-node processes)."""
+        try:
+            return int(str(x).split('.')[0])
+        except ValueError:
+            return None
+    k = num(job)
+    if k is None:
+        return []
+    return [x['job'] for x in D['jobs'] if x['stage'] == 'rockstar' and num(x['job']) is not None and num(x['job']) > k
+            and (x.get('start') or x['status'] in ('running', 'exiting', 'done', 'failed'))]
+
+
 def pid_alive(pid, word=None):
     """Is process ``pid`` running (and, with ``word``, is it in its command line: a reused pid is not)?"""
     try:
@@ -2305,8 +2322,11 @@ class Manager:
             sv = run.ms.get('rs_salvage') or {}
             if sv.get('job') == job and sv.get('state') == 'running':
                 return dict(do='keep', why='already being rescued by the retry of %s (log %s)' % (run.name, sv.get('log')))
+            later = later_rs_jobs(D, job)
             return dict(do='salvage', run=run.name, conf=run.conf, job=job, first=int(j['first']), last=int(j['last']),
-                        sandbox=run.E['SANDBOX'], why='Rockstar batch %s-%s of %s' % (j['first'], j['last'], run.name))
+                        sandbox=run.E['SANDBOX'], no_copy=bool(later),
+                        why='Rockstar batch %s-%s of %s%s' % (j['first'], j['last'], run.name,
+                                                             ' (later job(s) %s: nothing copied)' % ', '.join(later) if later else ''))
         m = re.match(r'^[\w.-]+?_stage_(.+?)(\.left\.(\d+))?$', base)
         if m:
             for run in self.runs.values():
@@ -2353,7 +2373,8 @@ class Manager:
                         os.makedirs(os.path.dirname(lg), exist_ok=True)
                         cmd = [self.cfg.get('local_python') or sys.executable,
                                os.path.join(pl['sandbox'], 'scripts', 'pkdgrav3_pipeline', 'rs_salvage.py'), pl['conf'],
-                               '--job', pl['job'], '--node', host, '--first', str(pl['first']), '--last', str(pl['last']), '--delete']
+                               '--job', pl['job'], '--node', host, '--first', str(pl['first']), '--last', str(pl['last']),
+                               '--delete'] + (['--no-copy'] if pl.get('no_copy') else [])
                         with open(lg, 'a') as out:
                             subprocess.run(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                            timeout=float(self.cfg.get('rs_salvage_max_h', 6)) * 3600)
@@ -2800,6 +2821,8 @@ class Manager:
             return                         # never started: nothing on a node
         site = run.stage_site('rockstar')
         args = ['--job', str(f['job']), '--node', host, '--first', str(f['first']), '--last', str(f['last']), '--delete']
+        if later_rs_jobs(self.derive(run), f['job']):
+            args.append('--no-copy')        # a later Rockstar job of the run wrote the halo directory
         if site == LOCAL:
             cmd = [self.cfg.get('local_python') or sys.executable,
                    os.path.join(E['SANDBOX'], 'scripts', 'pkdgrav3_pipeline', 'rs_salvage.py'), run.conf] + args

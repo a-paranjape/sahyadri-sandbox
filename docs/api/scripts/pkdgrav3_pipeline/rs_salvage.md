@@ -20,8 +20,15 @@ What a rerun of the batch needs to continue after snapshot m (job\_rockstar.pbs)
 the complete halos\_&lt;name of m&gt;.\*.bin set (NUM\_WRITERS files, none empty), rockstar.cfg (NUM\_WRITERS) and a
 restart.cfg whose RESTART\_SNAP is above m. m is the newest snapshot of the batch below the node's RESTART\_SNAP
 (Rockstar had finished it) for which all of these are on the node, and m &lt; b unless out\_&lt;b&gt;.list is there too.
-The files are copied as .&lt;name&gt;.part and renamed once their size matches. They are skipped when the same size is
-already in $HALO\_DIR. restart.cfg is written last (OUTBASE = $HALO\_DIR, RESTART\_SNAP = m+1), so an
+The files are copied as .&lt;name&gt;.part and renamed once their size matches. A file is skipped only when $HALO\_DIR
+already has this job's own copy of it: same size and same modification time (the job's copies use cp -p, which
+keeps the node's time stamp, so this needs no agreement between clocks). Every other file is replaced: all
+the files come from this one job, because catalogues of two Rockstar runs have different halo IDs, and mixing
+them would break the descendant links between snapshots. No time stamp is compared across machines. Clocks differ:
+pawna nodes were 2-10 s behind the head node on 27 Nov 2026, and pride nodes up to ~8 min on 25 Nov.
+A later job of the run is recognised without clocks: the RESTART\_SNAP in $HALO\_DIR's restart.cfg is further than
+the node's (then nothing is copied), or the caller says so with --no-copy (the manager passes it when a
+Rockstar job of the run with a higher PBS id has started). restart.cfg is written last (OUTBASE = $HALO\_DIR, RESTART\_SNAP = m+1), so an
 interrupted rescue never looks complete.
 --delete: afterwards remove the node's directory (what a successful job does itself at its end); only after a
 rescue that verified every copied file, or when there was nothing to rescue and the directory holds no catalogue
@@ -33,7 +40,7 @@ Prints progress, then one JSON line: {"ok": true, "m": .., "continue\_at": .., "
 
 - [`say`](#say) - 
 - [`node_run`](#node_run) - 
-- [`fetch`](#fetch) - Copy `src` on the node to `dst` here (ssh cat), through .&lt;name&gt;.part; checks the size.
+- [`fetch`](#fetch) - Copy `src` on the node to `dst` here (ssh cat), through .&lt;name&gt;.part; checks the size and gives the copy the node file's modification time (as cp -p does), so a later pass recognises it.
 - [`choose`](#choose) - The snapshot m to continue after, or None (see the module docstring).
 - [`main`](#main) - 
 
@@ -56,10 +63,11 @@ _No docstring._
 ## fetch
 
 ```python
-fetch(node, src, dst, size)
+fetch(node, src, dst, size, mtime)
 ```
 
-Copy `src` on the node to `dst` here (ssh cat), through .&lt;name&gt;.part; checks the size.
+Copy `src` on the node to `dst` here (ssh cat), through .&lt;name&gt;.part; checks the size and gives the copy
+the node file's modification time (as cp -p does), so a later pass recognises it.
 
 ## choose
 

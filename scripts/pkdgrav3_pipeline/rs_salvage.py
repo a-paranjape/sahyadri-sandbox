@@ -15,8 +15,15 @@ What a rerun of the batch needs to continue after snapshot m (job_rockstar.pbs):
 the complete halos_<name of m>.*.bin set (NUM_WRITERS files, none empty), rockstar.cfg (NUM_WRITERS) and a
 restart.cfg whose RESTART_SNAP is above m. m is the newest snapshot of the batch below the node's RESTART_SNAP
 (Rockstar had finished it) for which all of these are on the node, and m < b unless out_<b>.list is there too.
-The files are copied as .<name>.part and renamed once their size matches. They are skipped when the same size is
-already in $HALO_DIR. restart.cfg is written last (OUTBASE = $HALO_DIR, RESTART_SNAP = m+1), so an
+The files are copied as .<name>.part and renamed once their size matches. A file is skipped only when $HALO_DIR
+already has this job's own copy of it: same size and same modification time (the job's copies use cp -p, which
+keeps the node's time stamp, so this needs no agreement between clocks). Every other file is replaced: all
+the files come from this one job, because catalogues of two Rockstar runs have different halo IDs, and mixing
+them would break the descendant links between snapshots. No time stamp is compared across machines. Clocks differ:
+pawna nodes were 2-10 s behind the head node on 27 Nov 2026, and pride nodes up to ~8 min on 25 Nov.
+A later job of the run is recognised without clocks: the RESTART_SNAP in $HALO_DIR's restart.cfg is further than
+the node's (then nothing is copied), or the caller says so with --no-copy (the manager passes it when a
+Rockstar job of the run with a higher PBS id has started). restart.cfg is written last (OUTBASE = $HALO_DIR, RESTART_SNAP = m+1), so an
 interrupted rescue never looks complete.
 --delete: afterwards remove the node's directory (what a successful job does itself at its end); only after a
 rescue that verified every copied file, or when there was nothing to rescue and the directory holds no catalogue
@@ -68,8 +75,9 @@ def node_run(node, cmd, timeout=600):
     return subprocess.run(SSH + [node, cmd], capture_output=True, text=True, timeout=timeout)
 
 
-def fetch(node, src, dst, size):
-    """Copy ``src`` on the node to ``dst`` here (ssh cat), through .<name>.part; checks the size."""
+def fetch(node, src, dst, size, mtime):
+    """Copy ``src`` on the node to ``dst`` here (ssh cat), through .<name>.part; checks the size and gives the copy
+    the node file's modification time (as cp -p does), so a later pass recognises it."""
     part = os.path.join(os.path.dirname(dst), '.%s.part' % os.path.basename(dst))
     t0 = time.time()
     with open(part, 'wb') as f:
@@ -80,6 +88,7 @@ def fetch(node, src, dst, size):
         os.remove(part)
         raise IOError('copy of %s:%s failed (rc %d, %d of %d bytes): %s' % (
             node, src, r.returncode, got, size, r.stderr.decode(errors='replace')[-200:]))
+    os.utime(part, (mtime, mtime))
     os.replace(part, dst)
     dt = time.time() - t0
     say('copied %s (%.2f GB, %.0f s, %.0f MB/s)' % (os.path.basename(dst), size / 1e9, dt, size / 1e6 / max(dt, 1e-3)))
@@ -116,6 +125,8 @@ def main():
     ap.add_argument('--first', type=int, required=True)
     ap.add_argument('--last', type=int, required=True)
     ap.add_argument('--delete', action='store_true')
+    ap.add_argument('--no-copy', action='store_true', help='a later job wrote the halo directory: copy nothing (with '
+                    '--delete: only remove the node directory if every catalogue in it is in the halo directory)')
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args()
     E = retention.load_conf(a.conf)
@@ -142,6 +153,9 @@ def main():
         if m is not None and hm and int(hm.group(1)) > L['restart_snap']:
             m, why = None, 'the halo directory is further on (RESTART_SNAP %s there, %s on the node): a later job wrote it' % (
                 hm.group(1), L['restart_snap'])
+        if m is not None and a.no_copy:
+            m, why = None, 'a later Rockstar job of the run wrote the halo directory (--no-copy)'
+
         res.update(m=m, continue_at=(m + 1) if m is not None else a.first)
         todo = []
         if m is not None:
@@ -157,15 +171,18 @@ def main():
             res['why'] = why
         nbytes = nfiles = 0
         if not a.dry_run:
-            for n in todo:
+            def own_copy(n):
+                """$HALO_DIR has this job's own copy of n (cp -p by sync_out, or an earlier rescue)."""
                 d = os.path.join(halo, n)
-                if os.path.isfile(d) and (os.path.getsize(d) == L['files'][n] or os.path.getmtime(d) > L['mtimes'][n] + 60):
-                    continue          # already there, or a newer copy from a later job
-                nbytes += fetch(a.node, os.path.join(src, n), d, L['files'][n])
+                return (os.path.isfile(d) and os.path.getsize(d) == L['files'][n]
+                        and abs(os.path.getmtime(d) - L['mtimes'][n]) <= 2)
+            for n in todo:
+                if own_copy(n):
+                    continue
+                d = os.path.join(halo, n)
+                nbytes += fetch(a.node, os.path.join(src, n), d, L['files'][n], L['mtimes'][n])
                 nfiles += 1
-            bad = [n for n in todo if not (os.path.isfile(os.path.join(halo, n))
-                                            and (os.path.getsize(os.path.join(halo, n)) == L['files'][n]
-                                                 or os.path.getmtime(os.path.join(halo, n)) > L['mtimes'][n] + 60))]
+            bad = [n for n in todo if not own_copy(n)]
             if bad:
                 raise RuntimeError('after the copy %d file(s) differ in size: %s' % (len(bad), ' '.join(bad[:5])))
             if m is not None:
