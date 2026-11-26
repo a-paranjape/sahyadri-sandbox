@@ -857,6 +857,16 @@ plan_setup(self, P)
 Set up the run of plan entry P on its site (setup\_production.py), unless its run.conf exists; returns the conf
 path (on that site).
 
+### Manager.plan_post_site
+
+```python
+plan_post_site(self, P, conf)
+```
+
+Plan option `post_site=<site>`: run post\_site\_conf.py with that site's install on the run's run.conf, so the
+halo stages run there (POST\_SITE/POST\_CONF) from the start. Done before the run is registered; re-running it is
+harmless (it rewrites the same post configuration, and refuses a different one without --force).
+
 ### Manager.plan_sync
 
 ```python

@@ -1553,6 +1553,8 @@ class Manager:
         """Set up the run of plan entry P on its site (setup_production.py), unless its run.conf exists; returns the conf
         path (on that site)."""
         o = P['opts']
+        if o.get('post_site') and P['site'] not in ('swarm', 'leap'):
+            raise RuntimeError('post_site= needs a swarm or leap run (the clusters sharing /user1 with pride)')
         remote = P['site'] != LOCAL
         S = self.cfg['sites'][P['site']] if remote else self.cfg
         root = o.get('root') or S['scratch_root']
@@ -1577,11 +1579,31 @@ class Manager:
             setup = os.path.join(REPO, 'scripts', 'pkdgrav3_pipeline', 'production', 'setup_production.py')
             r = subprocess.run([self.cfg['local_python'], setup] + args, capture_output=True, text=True, timeout=1800)
             out, rc = r.stdout + r.stderr, r.returncode
-        if 'EXISTS' in out.split():
-            return conf, 'exists'
-        if rc != 0:
+        how = 'exists' if 'EXISTS' in out.split() else 'set up'
+        if how == 'set up' and rc != 0:
             raise RuntimeError('setup_production.py on %s failed (rc %d): %s' % (P['site'], rc, out.strip()[-400:]))
-        return conf, 'set up'
+        if o.get('post_site'):
+            how += '; ' + self.plan_post_site(P, conf)
+        return conf, how
+
+    def plan_post_site(self, P, conf):
+        """Plan option ``post_site=<site>``: run post_site_conf.py with that site's install on the run's run.conf, so the
+        halo stages run there (POST_SITE/POST_CONF) from the start. Done before the run is registered; re-running it is
+        harmless (it rewrites the same post configuration, and refuses a different one without --force)."""
+        ps, sim = str(P['opts']['post_site']), P['site']
+        shared = ('swarm', 'leap', 'pride')
+        if sim not in shared or ps not in shared or ps == sim:
+            raise RuntimeError('post_site=%s: the run must be on swarm or leap and the post site another of %s'
+                               % (ps, ', '.join(shared)))
+        S = (self.cfg.get('sites') or {}).get(ps)
+        if not S:
+            raise RuntimeError('post_site=%s: unknown site' % ps)
+        script = os.path.join(S['sandbox'], 'scripts', 'pkdgrav3_pipeline', 'production', 'post_site_conf.py')
+        r = ssh(S['login'], ' '.join(shlex.quote(x) for x in [S['python'], script, conf, '--site', ps]), timeout=600)
+        if r.returncode != 0:
+            raise RuntimeError('post_site_conf.py on %s failed (rc %d): %s'
+                               % (ps, r.returncode, (r.stdout + r.stderr).strip()[-400:]))
+        return 'halo stages on %s' % ps
 
     def plan_sync(self):
         """Set up, register and schedule what the plan file lists and the manager does not know yet."""
@@ -1623,6 +1645,10 @@ class Manager:
                     v.update(state='error', msg=str(e))
             else:
                 v.update(state='registered')
+                want = P['opts'].get('post_site')
+                if want and getattr(run, 'post_site', None) != want:
+                    v['msg'] = ('post_site=%s is not applied: the run was registered before (run post_site_conf.py on %s, '
+                                'then manager.py reload-conf %s)' % (want, want, run.name))
                 sc = run.ms.get('scheduled')
                 if sc and int(sc.get('priority', 0)) != P['priority']:
                     try:

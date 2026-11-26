@@ -243,7 +243,9 @@ guide section 13.5.
 
 A swarm or leap run can have its halo stages (rockstar ... verify) on pride, which shares `/user1`:
 `post_site_conf.py <run.conf> --site pride` (run on pride) writes `run.post_pride.conf` and marks the run.conf with
-`POST_SITE`/`POST_CONF`; then `manager.py reload-conf swarm:<stem>/r<R>`. The manager submits those stages on pride
+`POST_SITE`/`POST_CONF`; then `manager.py reload-conf swarm:<stem>/r<R>`. For a new run, the plan option `post_site=pride`
+(swarm or leap lines) does both: the manager runs `post_site_conf.py` on pride after `setup_production.py` and
+before it registers the run, e.g. `leap workq default 2048 200 101 0 post_site=pride`. The manager submits those stages on pride
 with that file and pride's install; the simulation and the archive stay with the run's site. Because the post
 configuration keeps the run's SCRATCH, the pride jobs write their products, logs and events into the run's own
 directories, and everything downstream (mirror, deletion checks, archive) works unchanged. Limits (`max_rockstar`,

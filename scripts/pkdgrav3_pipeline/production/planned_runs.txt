@@ -7,9 +7,9 @@
 # still waiting; removing a line does not touch a run that was set up (unschedule or remove it in the page).
 #
 # columns:  site     queue    cosmology  N     L      realisations  priority  [options]
-#   site      pawna | pegasus | swarm
+#   site      pawna | pegasus | swarm | leap
 #   queue     pawna: workq;  pegasus: project (project budget hpc2502016, 96 h jobs) | regular (user budget, 48 h)
-#             | debug (tests, 4 h);  swarm: workq (72 h, shared nodes)
+#             | debug (tests, 4 h);  swarm: workq (72 h, shared nodes);  leap: workq (72 h; 2048^3 on 6 fabric nodes)
 #   cosmology a name in cosmologies/ (default, var_As_m, var_Om_p, ...)
 #   realisations  1 | 1,3 | 1-5
 #   options   hold                 set up and register, paused (start from the page)
@@ -18,6 +18,12 @@
 #             rs_nodes=2 (pegasus: Rockstar nodes; default the fewest for its memory at <= 360 GB each, 2 at 2048^3)
 #             gpu=1 (pegasus: simulation on the GPU nodes with the CUDA build; nodes default 3 from 2048^3, else 1;
 #                    queue regular or project, not debug: the debug queue has no GPU nodes)
+#             post_site=pride (swarm, leap: halo stages rockstar ... verify on pride, which shares /user1; the
+#                    manager runs post_site_conf.py on pride before registering the run. Needed on leap, which
+#                    has no Rockstar. Only for a run set up from this line; an older run: see the README)
+#   examples
+#   leap     workq    default    2048  200  101    0         post_site=pride keep_pct=9
+#   swarm    workq    default    2048  200  102    0         post_site=pride keep_pct=9
 # Runs above 512^3 need approval: add them here only once approved.
 #
 # site     queue    cosmology  N     L    reals  priority  options
