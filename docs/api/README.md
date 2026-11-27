@@ -25,6 +25,7 @@ Generated from the docstrings of the Python modules and the header comments of t
 | [`archive_run.py`](scripts/pkdgrav3_pipeline/archive_run.md) | Copy the kept part of a run (retention.py) from SCRATCH to ARCHIVE, check the copy, then make it read-only (stage `archive`, job\_archive.pbs). Nothing in SCRATCH is changed or deleted. |
 | [`chk_complete.py`](scripts/pkdgrav3_pipeline/chk_complete.md) | Is a pkdgrav3 checkpoint complete?  chk\_complete.py &lt;dir&gt;/&lt;name&gt;.&lt;step&gt;.chk [...] |
 | [`class_pk.py`](scripts/pkdgrav3_pipeline/class_pk.md) | CLASS matter power spectra at every planned output redshift of a run, for the P(k) checks (stage vahc). |
+| [`drain_left.py`](scripts/pkdgrav3_pipeline/drain_left.md) | Is what a staged simulation's drain left on the node's disk safe to leave there? drain\_left.py &lt;stage dir&gt; &lt;snapshot dir on NFS&gt; &lt;checkpoint dir on NFS&gt; |
 | [`make_pkdgrav3_par.py`](scripts/pkdgrav3_pipeline/make_pkdgrav3_par.md) | Write the pkdgrav3 parameter file of a pipeline run from the variables of its config (environment). |
 | [`pk_check.py`](scripts/pkdgrav3_pipeline/pk_check.md) | P(k) checks of a run (verify\_run.py) and the summary plot &lt;halo dir&gt;/pk/pk\_summary.png. |
 | [`retention.py`](scripts/pkdgrav3_pipeline/retention.md) | What of a run is kept long term, and where it goes (standard library only: used by the jobs and by tools/sahyadri\_manager on the head node). |

@@ -174,7 +174,17 @@ if [ "${SIM_STAGING:-0}" = 1 ]; then
       PKD_IO_ROOT="$PKD_IO_ROOT" bash "$PKD_IO_ROOT/pkdgrav3/tools/staging/run_staged.pbs"
   rc=$?
   if grep -q "data left in" staged.$J.log; then
-    stamp "drain did not finish: data left on $(hostname):$STAGE_DIR (see staged.$J.log for the recover command)"; rc=3
+    # a clean stop (pkdgrav3 rc 0) stays clean when the restart needs nothing that was left: all snapshot files on
+    # NFS, only pieces of checkpoints older than the newest complete one on NFS (drain_left.py). The files stay.
+    why=$(python3 "$PIPE/drain_left.py" "$STAGE_DIR" "$PKC_DIR" "$SIM_DIR/checkpoints" 2>&1)
+    if [ $rc -eq 0 ] && [ "${why%%:*}" = safe ]; then
+      stamp "drain did not finish, but nothing left is needed: ${why#safe: } (kept on $(hostname); see staged.$J.log)"
+      event drain_left node="$(hostname)" dir="$STAGE_DIR" needed=0 why="${why#safe: }"
+    else
+      stamp "drain did not finish: data left on $(hostname):$STAGE_DIR (see staged.$J.log for the recover command): $why"
+      event drain_left node="$(hostname)" dir="$STAGE_DIR" needed=1 why="$why"
+      rc=3
+    fi
   fi
 else
   if [ -n "$CHK" ]; then

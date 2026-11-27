@@ -234,6 +234,7 @@ until it ends and comes back. Limits in `config.json`:
 | `drain_direct` | the drain points pkdgrav3 straight at NFS (node disk below `--min-free-gb`) | — |
 | `swap` | the node is swapping: more swap in use than `swap_alert_gb` and pages moving in or out of swap at `swap_alert_mb_s` or more between two `node_mem` events (`job_sim.pbs`, every 30 min; jobs started before 24 Nov 2026 lack the counters), or less memory available than `swap_alert_avail_gb`. Swap merely in use is no alert: a 2048³ run keeps ~120 GB of idle pages in swap with no swap traffic | `swap_alert_gb` 16, `swap_alert_mb_s` 1, `swap_alert_avail_gb` 2 |
 | `stage_leftover` | a new simulation job found a stage of an earlier job on its node and set it aside (`<stage>.left.<job>`) | — |
+| `drain_left` | a simulation job stopped cleanly (pkdgrav3 rc 0) but its drain left files on the node's disk that the restart does not need (`drain_left.py`: every snapshot file on NFS with the same size, only pieces of checkpoints older than the newest complete one on NFS). The job counts as a clean stop and is restarted; the files stay on the node until deleted. When anything left is needed, the job fails as before (exit 3, automation stopped) | — |
 | `rs_redo` | Rockstar output of snapshots that a restart rewrote; Rockstar runs on them again | — |
 
 Why (20–22 Nov 2026, pawna 2048³ r3, r4, r5): the nodes ran with 2–8 GB of memory available and ~125 GB swapped;

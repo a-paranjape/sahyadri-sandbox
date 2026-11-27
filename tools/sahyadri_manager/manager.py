@@ -1938,6 +1938,12 @@ class Manager:
                     'a stage left by an earlier job is on %s:%s (%.0f GB; set aside by job %s, not drained): copy what '
                     'is needed from it, then delete it' % (e.get('node'), e.get('dir'), int(e.get('size') or 0) / 1e9,
                                                            e['job']))
+            # a clean stop whose drain left files the restart does not need (job_sim.pbs, drain_left.py): not a
+            # failure, but the files stay on the node (the node probe may not see them: $restrict_user)
+            for e in [e for e in run.ev if e['ev'] == 'drain_left' and str(e.get('needed')) == '0'][-3:]:
+                found['drain_left:%s:%s' % (e['job'], e.get('dir'))] = (
+                    'job %s stopped cleanly, but its drain left files on %s:%s that the restart does not need (%s): '
+                    'delete them when convenient' % (e['job'], e.get('node'), e.get('dir'), e.get('why', '')))
             if D.get('rs_redo'):
                 found['rs_redo'] = ('Rockstar output of snapshot(s) %s was made before a restart rewrote them: '
                                     'it is run again when they are ready' % ', '.join(str(i) for i in D['rs_redo']))
