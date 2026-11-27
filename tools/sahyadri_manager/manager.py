@@ -2087,7 +2087,12 @@ class Manager:
             self.budget_ev.clear()
 
     def probe_one(self, host, args):
-        """node_check.sh on ``host`` over ssh (script on stdin); its JSON result, or a 'bad' result if no answer."""
+        """node_check.sh on ``host`` over ssh (script on stdin); its JSON result, or a 'bad' result if no answer.
+
+        'unknown' instead of 'bad' when the session was cut without an ssh error (rc 255, nothing on stderr) and a
+        bare ``ssh host true`` then works: the node ends a user's processes that belong to no job of it (PBS MoM
+        ``$restrict_user on``, seen on pawna's nodes after the 27 Nov 2026 maintenance), so the check cannot run
+        there; that says nothing about the node's health. An unknown node is not avoided."""
         cmd = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host,
                'bash -s -- ' + ' '.join(shlex.quote(x) for x in args)]
         try:
@@ -2097,6 +2102,13 @@ class Manager:
             if line:
                 return json.loads(line[-1][len('NODECHECK '):])
             why = 'node check gave no result (rc %d): %s' % (r.returncode, (r.stderr or '').strip()[-200:])
+            if r.returncode == 255 and not (r.stderr or '').strip():
+                t = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host, 'true'],
+                                   capture_output=True, text=True, timeout=60)
+                if t.returncode == 0:
+                    return dict(host=host, t=now(), status='unknown', bad=[], dirs=[], warn=[
+                        'node check cut off by the node (rc 255, no ssh error; login works): processes of a user '
+                        'with no job there are ended (PBS $restrict_user?); health not known, node not avoided'])
         except subprocess.TimeoutExpired:
             why = 'node check did not answer within 180 s (ssh or the node hangs)'
         except Exception as e:  # noqa: BLE001

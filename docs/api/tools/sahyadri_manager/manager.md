@@ -1008,6 +1008,11 @@ probe_one(self, host, args)
 
 node\_check.sh on `host` over ssh (script on stdin); its JSON result, or a 'bad' result if no answer.
 
+'unknown' instead of 'bad' when the session was cut without an ssh error (rc 255, nothing on stderr) and a
+bare `ssh host true` then works: the node ends a user's processes that belong to no job of it (PBS MoM
+`$restrict_user on`, seen on pawna's nodes after the 27 Nov 2026 maintenance), so the check cannot run
+there; that says nothing about the node's health. An unknown node is not avoided.
+
 ### Manager.probe_nodes
 
 ```python

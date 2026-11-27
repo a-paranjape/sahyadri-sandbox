@@ -263,7 +263,7 @@ function setProbe(){ const v=document.getElementById('probemin').value.trim(); i
 function delLeftover(host,dir){ const b=dir.split('/').pop(); const t=prompt('Delete '+host+':'+dir+' ?\nThis cannot be undone. Type the directory name to confirm:\n'+b, ''); if(t!==null) act({action:'delete_leftover', host:host, dir:dir, confirm:t.trim()}); }
 function nodesCard(){
   const N=S.nodes||[];
-  const badge=st=>`<span class="badge ${st==='ok'?'b-ok':st==='warn'||st==='not probed'?'b-wait':'b-bad'}">${h(st)}</span>`;
+  const badge=st=>`<span class="badge ${st==='ok'?'b-ok':st==='warn'||st==='not probed'||st==='unknown'?'b-wait':'b-bad'}">${h(st)}</span>`;
   const rows=N.map(n=>{ const p=n.pbs||{}; const wb=n.writeback_kb||[];
     return `<tr><td><b>${h(n.host)}</b></td><td>${badge(n.status||'?')}${n.avoided?' <span class="badge b-bad" title="'+h(n.avoided)+'">avoided</span>':''}</td>
       <td class="small">${h(p.state||n.pbs_state||'')}${p.ncpus_free!=null?' · '+p.ncpus_free+' cores, '+Math.round(p.mem_free_gb)+' GB free':''}</td>

@@ -179,7 +179,10 @@ It is used in three places:
   automation.
 * **The manager probes every node** that PBS lists over ssh every `node_probe_min` minutes (default 30, 0 = off).
   Set this in the Summary tab's Nodes card ("probe every ... min", Save), which also has "Probe now". A node whose
-  newest probe is bad is avoided.
+  newest probe is bad is avoided. A probe the node cut off without an ssh error (rc 255, nothing on stderr) while a
+  bare `ssh <node> true` works is "unknown", not bad, and the node is not avoided: with PBS MoM `$restrict_user on`
+  (pawna's nodes since the 27 Nov 2026 maintenance) a node ends any process of a user who has no job there, so the
+  check cannot run; each job's own node check still runs inside PBS.
 * **Avoiding a node:** while a bad node is usable in PBS, the manager pins each new single-node job
   (`submit_pipeline.sh --host`) to the healthy node with the most free cores that has the job's cores and memory
   free. If none has, the job waits with the reason on the run's card. A node that is down or offline in PBS needs no
