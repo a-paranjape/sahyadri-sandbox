@@ -1122,7 +1122,9 @@ maint_watch(self)
 Thread: during a window, check its site every maint\_check\_min (default 5) minutes. A site that was
 shut down - its login node booted after the window's start, or it did not answer (or its PBS was down)
 at two checks in a row - and has since answered with PBS up and compute nodes up for maint\_settle\_min,
-is back: the window is over then, even before the end given (maintenance.txt is not changed).
+is back: the window is over then, even before the end given (maintenance.txt is not changed). For a site
+that rebooted, the time up counts from its boot (or from this manager's last check that found it down,
+if later), so a manager (re)started after the site came back need not wait maint\_settle\_min again.
 
 ### Manager.maint_now
 

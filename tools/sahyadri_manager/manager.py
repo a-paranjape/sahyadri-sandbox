@@ -2359,7 +2359,9 @@ class Manager:
         """Thread: during a window, check its site every maint_check_min (default 5) minutes. A site that was
         shut down - its login node booted after the window's start, or it did not answer (or its PBS was down)
         at two checks in a row - and has since answered with PBS up and compute nodes up for maint_settle_min,
-        is back: the window is over then, even before the end given (maintenance.txt is not changed)."""
+        is back: the window is over then, even before the end given (maintenance.txt is not changed). For a site
+        that rebooted, the time up counts from its boot (or from this manager's last check that found it down,
+        if later), so a manager (re)started after the site came back need not wait maint_settle_min again."""
         time.sleep(30)
         while True:
             t = now()
@@ -2379,6 +2381,7 @@ class Manager:
                     lab = self.maint_label(site, w)
                     up = p['ok'] and p['pbs'] and p['nodes'] > 0
                     if not up:
+                        b['down_t'] = t
                         b['down_n'] += 1
                         if b['down_n'] >= 2 and not b['seen_down']:
                             b['seen_down'] = True
@@ -2393,11 +2396,15 @@ class Manager:
                     if not (rebooted or b['seen_down']):
                         continue                 # not shut down yet (or not at all): the window holds as given
                     if not b['up_since']:
-                        b['up_since'] = t
-                        log('%s: %s answers again (%s, PBS up, %d compute nodes up); it counts as back if it stays up '
-                            '%d min' % (lab, site, 'booted %s' % time.strftime('%a %H:%M', time.localtime(p['boot']))
-                                        if rebooted else 'was down', p['nodes'], settle / 60))
-                    elif t - b['up_since'] >= settle:
+                        # Up since its boot when it rebooted (so a manager started after the site came back does not
+                        # wait maint_settle_min again), unless this manager saw it down after that boot; the boot
+                        # time is the site's own clock, clamped to ours (sites differ by seconds to minutes).
+                        b['up_since'] = min(t, max(p['boot'], b.get('down_t') or 0)) if rebooted else t
+                        log('%s: %s answers again (%s, PBS up, %d compute nodes up); it counts as back once up %d min, '
+                            'counted from %s' % (lab, site, 'booted %s' % time.strftime('%a %H:%M', time.localtime(p['boot']))
+                                                 if rebooted else 'was down', p['nodes'], settle / 60,
+                                                 time.strftime('%H:%M', time.localtime(b['up_since']))))
+                    if t - b['up_since'] >= settle:
                         b['ended'] = t
                         log('%s: %s is back (up since %s, %d compute nodes): the window is over, submissions go on' % (
                             lab, site, time.strftime('%H:%M', time.localtime(b['up_since'])), p['nodes']))

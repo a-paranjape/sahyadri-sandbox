@@ -147,8 +147,10 @@ node running them):
   PBS down, at two checks in a row) and then stays up with PBS and at least one compute node for
   `maint_settle_min` is back: its window is over then, and qstat is read again before the next scheduling pass.
   maintenance.txt is not changed; the page shows "over (back <time>)". A site that never goes down (the work was
-  done without a shutdown) keeps the window until its end. The state is in memory: a manager restarted during
-  the window looks again (one more `maint_settle_min`).
+  done without a shutdown) keeps the window until its end. For a site that rebooted, the time up counts from its
+  boot (the site's clock), or from the manager's last check that found it down if that is later; so a manager
+  started after the site came back (a reboot of pawna itself) does not wait another `maint_settle_min`. A site
+  that went down without rebooting counts from the first check that finds it up. The state is in memory.
 * **After it:** jobs that were running or waiting when the window started and failed or vanished are not
   failures: a simulation is scheduled to restart from its newest checkpoint, other stages are resubmitted
   automatically (the "retry"), archive batches are simply done again by the next batch.
